@@ -4,8 +4,17 @@ import type { Cell } from './state'
 
 // ---- Settings -------------------------------------------------------------
 
-// The widest picture, in terminal columns.
-export const MAX_COLUMNS = 120
+// `/md-preview width`: the most columns a picture takes (in this range), or
+// `full`, the default: the terminal width less the bullet, as Claude Code's
+// own text. An Image is at most IMAGE_MAX_COLUMNS wide, so no width goes
+// past it.
+export type Width = number | 'full'
+export const DEFAULT_WIDTH: Width = 'full'
+export const MIN_WIDTH = 40
+export const MAX_WIDTH = 400
+export const IMAGE_MAX_COLUMNS = 255
+// The width setting as words: "160 columns", or "full (the terminal width)".
+export const widthText = (width: Width) => (width === 'full' ? 'full (the terminal width)' : `${width} columns`)
 // The bullet column to the left of an answer.
 export const GUTTER = 2
 // Claude Code's own reply bullet: ⏺ on macOS, ● elsewhere.

@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   alignFirstLine, DEFAULT_METRICS, DEFAULT_SIZE, firstLineOf, fontFit, ghosttyFontOf, itermFontOf, parseCommand, parseFontSpec, typstCall,
-  blocksOf, canDrawIn, cellOf, columnsFor, DEFAULT_CELL, hashOf, imagePathOf, isSet, localImages, MAX_COLUMNS,
+  blocksOf, canDrawIn, cellOf, columnsFor, DEFAULT_CELL, hashOf, imagePathOf, isSet, localImages, DEFAULT_WIDTH, IMAGE_MAX_COLUMNS,
   parseOd, plainOf, pngSize, rowsFor, shouldRetrySafe, sizing, splitSegments, themeOf, TYPST_PROMPT,
   escapeControls, luminanceOf, modeOfLuminance, OSC11_PL, parseOsc11, pickProfile, itermAppearanceOf, itermModeOf,
   GHOSTTY_DEFAULT_BG, ghosttyBackgroundOf, ghosttyThemePaths, ghosttyThemesOf, ghosttyValueOf, hexColorOf,
@@ -116,9 +116,8 @@ test('the body font is matched to the terminal font by x-height and width', () =
 })
 
 test('size math: the PNG is exactly as wide as the box', () => {
-  expect(columnsFor(100)).toBe(98)
-  expect(columnsFor(300)).toBe(MAX_COLUMNS)
-  expect(columnsFor(undefined)).toBe(78)
+  expect(columnsFor(100, 'full')).toBe(98)
+  expect(columnsFor(undefined, 'full')).toBe(78)
   const s = sizing(100, { width: 16, height: 32 }, 6.6)
   expect(s.widthPt).toBe(660)
   expect(s.widthPx).toBe(1600)
@@ -128,6 +127,39 @@ test('size math: the PNG is exactly as wide as the box', () => {
   expect(Math.round((odd.widthPt / 72) * odd.ppi)).toBe(odd.widthPx)
   // Example: 120 columns of a 17 x 34 px cell.
   expect(sizing(120, { width: 17, height: 34 }, 5.82).widthPx).toBe(2040)
+})
+
+test('the width: full by default (the viewport less the bullet), a cap when set, 20 to 255 columns', () => {
+  expect(DEFAULT_WIDTH).toBe('full')
+  expect(columnsFor(200, DEFAULT_WIDTH)).toBe(198)
+  expect(columnsFor(200, 120)).toBe(120)
+  expect(columnsFor(100, 120)).toBe(98)
+  expect(columnsFor(200, 40)).toBe(40)
+  // An Image is 255 columns at most, also for a larger cap.
+  expect(columnsFor(400, 'full')).toBe(IMAGE_MAX_COLUMNS)
+  expect(columnsFor(400, 400)).toBe(IMAGE_MAX_COLUMNS)
+  // A narrow terminal still gets 20 columns.
+  expect(columnsFor(10, 'full')).toBe(20)
+  expect(columnsFor(10, 40)).toBe(20)
+  // Over ssh a page is 4096 px wide at most: 256 columns of 16 px, 204 of 20 px.
+  expect(columnsFor(400, 'full', { width: 16, height: 32 })).toBe(IMAGE_MAX_COLUMNS)
+  expect(columnsFor(400, 'full', { width: 20, height: 40 })).toBe(204)
+  expect(columnsFor(150, 'full', { width: 20, height: 40 })).toBe(148)
+  expect(columnsFor(400, 'full', null)).toBe(IMAGE_MAX_COLUMNS)
+})
+
+test('the width command: a value of 40 to 400, full, or nothing to show it', () => {
+  expect(parseCommand('width')).toEqual({ kind: 'width' })
+  expect(parseCommand('width full')).toEqual({ kind: 'width', width: 'full' })
+  expect(parseCommand('WIDTH Full')).toEqual({ kind: 'width', width: 'full' })
+  expect(parseCommand('width 40')).toEqual({ kind: 'width', width: 40 })
+  expect(parseCommand('width 160')).toEqual({ kind: 'width', width: 160 })
+  expect(parseCommand('width 400')).toEqual({ kind: 'width', width: 400 })
+  expect(parseCommand('width 39')).toEqual({ kind: 'bad' })
+  expect(parseCommand('width 401')).toEqual({ kind: 'bad' })
+  expect(parseCommand('width 12.5')).toEqual({ kind: 'bad' })
+  expect(parseCommand('width wide')).toEqual({ kind: 'bad' })
+  expect(parseCommand('width 120 full')).toEqual({ kind: 'bad' })
 })
 
 test('the size command takes 80 to 200 percent', () => {

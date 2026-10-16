@@ -69,10 +69,13 @@ To try it from a clone without installing: `claude --plugin-dir /path/to/claude-
 
 | Command | What it does |
 |---|---|
-| `/md-preview` | Shows the state, the text size and the terminal font that the mod found |
+| `/md-preview` | Shows the state, the text size, the width and the terminal font that the mod found |
 | `/md-preview on` / `off` | Turns the pictures on or off (kept for later sessions) |
 | `/md-preview setup` / `setup remove` | iTerm2: adds or removes the shell line that turns pictures on (then close the tab and open a new one) |
 | `/md-preview size <80–200>` | Text size in percent. 100 is the same visual size as your terminal text. |
+| `/md-preview width` | Shows the width: the most columns that a picture can use |
+| `/md-preview width <40–400>` | Sets the most columns that a picture can use (kept for later sessions) |
+| `/md-preview width full` | Pictures use the full width of the terminal, the same as the text of Claude Code (kept for later sessions). This is the default. A picture is never wider than 255 columns. |
 | `/md-preview theme` | Lists the themes, shows which one is in use, and shows the folder for your own themes |
 | `/md-preview theme <name>` | Changes to that theme (kept for later sessions) |
 

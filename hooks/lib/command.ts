@@ -2,13 +2,15 @@
 // its registration.
 import type { EngineInterface } from 'claude-code'
 
-import { DEFAULT_SIZE, MAX_SIZE, MIN_SIZE } from './settings'
+import { DEFAULT_SIZE, DEFAULT_WIDTH, IMAGE_MAX_COLUMNS, MAX_SIZE, MAX_WIDTH, MIN_SIZE, MIN_WIDTH, type Width } from './settings'
 import { isThemeName, type ThemeInfo } from './themes'
 
-// `/md-preview` arguments: on, off, size <80-200>, or nothing (show state).
+// `/md-preview` arguments: on, off, size <80-200>, width [40-400|full], or
+// nothing (show state). A `width` with no value shows the width.
 export type Command =
   | { kind: 'on' | 'off' | 'show' | 'probe' }
   | { kind: 'size'; percent: number }
+  | { kind: 'width'; width?: Width }
   | { kind: 'theme'; name?: string }
   | { kind: 'setup'; remove: boolean }
   | { kind: 'bad' }
@@ -28,27 +30,36 @@ export function parseCommand(args: string): Command {
     const percent = Number.parseInt(words[1]!, 10)
     if (percent >= MIN_SIZE && percent <= MAX_SIZE) return { kind: 'size', percent }
   }
+  if (words[0] === 'width' && words.length === 1) return { kind: 'width' }
+  if (words[0] === 'width' && words.length === 2 && words[1] === 'full') return { kind: 'width', width: 'full' }
+  if (words[0] === 'width' && words.length === 2 && /^\d+$/.test(words[1]!)) {
+    const width = Number.parseInt(words[1]!, 10)
+    if (width >= MIN_WIDTH && width <= MAX_WIDTH) return { kind: 'width', width }
+  }
   return { kind: 'bad' }
 }
 
-// The /md-preview arguments, and the sizes the typeahead offers.
+// The /md-preview arguments, and the sizes and widths the typeahead offers.
 const SUBCOMMANDS = [
   { name: 'on', description: 'draw answers as pictures' },
   { name: 'off', description: 'show answers as text' },
   { name: 'size', description: `text size, ${MIN_SIZE}-${MAX_SIZE}%` },
+  { name: 'width', description: `the most columns a picture takes, ${MIN_WIDTH}-${MAX_WIDTH} or full` },
   { name: 'theme', description: 'list the themes, or switch to one' },
   { name: 'setup', description: 'iTerm2: add the shell line that turns pictures on' },
 ] as const
 const SIZES = [80, 90, 100, 110, 120, 125, 150, 175, 200]
+const WIDTHS: readonly Width[] = [80, 100, 120, 160, 200, 'full']
 
 // Typeahead rows for `/md-preview` arguments: the word at the cursor (`token`,
-// starting at `start` in `text`) completed as a subcommand, a theme name or a
-// size. Right after `theme` or `size`, rows hold the word and its argument,
-// since the typeahead asks only while a word is at the cursor.
+// starting at `start` in `text`) completed as a subcommand, a theme name, a
+// size or a width. Right after `theme`, `size` or `width`, rows hold the word
+// and its argument, since the typeahead asks only while a word is at the
+// cursor.
 export type Suggestion = { text: string; label?: string; description?: string }
 export function commandSuggestions(
   text: string, token: string, start: number,
-  o: { themes: readonly ThemeInfo[]; active: string; size: number },
+  o: { themes: readonly ThemeInfo[]; active: string; size: number; width?: Width },
 ): Suggestion[] {
   const head = /^\s*\/md-preview\s+/.exec(text)
   if (!head || start < head[0].length) return []
@@ -65,13 +76,23 @@ export function commandSuggestions(
   const sizeRows = (prefix: string, lead: string) => SIZES
     .filter(n => String(n).startsWith(prefix))
     .map(n => ({ text: `${lead}${n}`, label: `${n}%`, description: n === o.size ? 'current' : n === DEFAULT_SIZE ? 'the terminal text size' : undefined }))
+  const width = o.width ?? DEFAULT_WIDTH
+  const widthRows = (prefix: string, lead: string) => WIDTHS
+    .filter(w => String(w).startsWith(prefix))
+    .map(w => ({
+      text: `${lead}${w}`,
+      label: w === 'full' ? 'full' : `${w} columns`,
+      description: w === width ? 'current' : w === DEFAULT_WIDTH ? 'the default' : w === 'full' ? `the terminal width (${IMAGE_MAX_COLUMNS} at most)` : undefined,
+    }))
   if (before.length === 0) {
     if (word === 'theme') return themeRows('', 'theme ')
     if (word === 'size') return sizeRows('', 'size ')
+    if (word === 'width') return widthRows('', 'width ')
     return SUBCOMMANDS.filter(c => c.name.startsWith(word)).map(c => ({ text: c.name, description: c.description }))
   }
   if (before.length === 1 && before[0] === 'theme') return themeRows(word, '')
   if (before.length === 1 && before[0] === 'size') return sizeRows(word.replace(/%$/, ''), '')
+  if (before.length === 1 && before[0] === 'width') return widthRows(word, '')
   return []
 }
 
@@ -80,7 +101,7 @@ export function commandSuggestions(
 export async function registerCommand($: EngineInterface) {
   await $.command.register({
     name: 'md-preview',
-    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), theme [name] (list or switch themes)",
-    argumentHint: '[on|off|size <percent>|theme [name]]',
+    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), theme [name] (list or switch themes)",
+    argumentHint: '[on|off|size <percent>|width [columns|full]|theme [name]]',
   }).catch(() => undefined)
 }

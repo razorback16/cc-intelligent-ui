@@ -18,7 +18,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderViewport } from 'claude-code'
 
-import { DEFAULT_THEME, MAX_SIZE, MIN_SIZE, TYPST_PROMPT } from './lib/settings'
+import { DEFAULT_CELL, DEFAULT_THEME, IMAGE_MAX_COLUMNS, MAX_SIZE, MAX_WIDTH, MIN_SIZE, MIN_WIDTH, TYPST_PROMPT, widthText } from './lib/settings'
 import { editedPlans, refresh, S, subagentPlans, writesLive, type Env } from './lib/state'
 import { columnsFor } from './lib/terminal'
 import { escapeControls, luminanceOf, modeLine, modeOfLuminance, parseOsc11, settingOf } from './lib/mode'
@@ -40,7 +40,8 @@ import {
 
 // The names this module exported before the split (the tests import them).
 export {
-  BASE_THEME, DEFAULT_CELL, DEFAULT_SIZE, DEFAULT_THEME, MAX_COLUMNS, MAX_SIZE, MIN_SIZE, PICTURE_MAX_ROWS, SEGMENT_ROWS, TYPST_PROMPT,
+  BASE_THEME, DEFAULT_CELL, DEFAULT_SIZE, DEFAULT_THEME, DEFAULT_WIDTH, IMAGE_MAX_COLUMNS, MAX_SIZE, MAX_WIDTH, MIN_SIZE, MIN_WIDTH,
+  PICTURE_MAX_ROWS, SEGMENT_ROWS, TYPST_PROMPT, widthText, type Width,
 } from './lib/settings'
 export { DEFAULT_METRICS, type Cell, type FontMetrics, type Look, type Metrics } from './lib/state'
 export {
@@ -121,7 +122,7 @@ export const register: Register = on => {
     const got = await next(e)
     if (!/^\s*\/md-preview\s/.test(e.text)) return got
     if (!S.themeChoices.length) await setUp($).catch(() => null)
-    const mine = commandSuggestions(e.text, e.token, e.start, { themes: S.themeChoices, active: S.look?.name ?? DEFAULT_THEME, size: S.size })
+    const mine = commandSuggestions(e.text, e.token, e.start, { themes: S.themeChoices, active: S.look?.name ?? DEFAULT_THEME, size: S.size, width: S.width })
     return mine.length ? { suggestions: [...got.suggestions, ...mine] } : got
   })
 
@@ -137,6 +138,17 @@ export const register: Register = on => {
       await $.store.set('size', S.size)
       refresh($)
       return { text: `md-preview draws text at ${S.size}% of the terminal's text size (100% matches it).` }
+    }
+    if (asked.kind === 'width') {
+      if (asked.width === undefined) await setUp($).catch(() => null)
+      else {
+        S.width = asked.width
+        await $.store.set('width', S.width)
+        refresh($)
+      }
+      const most = typeof S.width === 'number' && S.width > IMAGE_MAX_COLUMNS ? ` (a picture is ${IMAGE_MAX_COLUMNS} columns at most)` : ''
+      const head = asked.width === undefined ? 'The most columns a picture takes' : 'md-preview pictures now take at most'
+      return { text: `${head}: ${widthText(S.width)}${most}. Use /md-preview width <${MIN_WIDTH}-${MAX_WIDTH}> for a cap, or /md-preview width full (the default) for no cap.` }
     }
     if (asked.kind === 'setup') {
       await setUp($).catch(() => null)
@@ -181,9 +193,9 @@ export const register: Register = on => {
       ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
       : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+ and Rio 0.5.27+ with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
     const tried = S.setupNeeded ? ' In iTerm2, run /md-preview setup once to show pictures.' : ''
-    const usage = `Use /md-preview on, /md-preview off, /md-preview size <${MIN_SIZE}-${MAX_SIZE}>, or /md-preview theme [name].`
+    const usage = `Use /md-preview on, /md-preview off, /md-preview size <${MIN_SIZE}-${MAX_SIZE}>, /md-preview width <${MIN_WIDTH}-${MAX_WIDTH}|full>, or /md-preview theme [name].`
     const bad = asked.kind === 'bad' ? `Not understood: "${e.args.trim()}". ` : ''
-    return { text: `${bad}md-preview is ${state}, theme ${S.look?.name ?? DEFAULT_THEME}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, ${font}. ${typst}; ${terminal}.${tried} ${usage}` }
+    return { text: `${bad}md-preview is ${state}, theme ${S.look?.name ?? DEFAULT_THEME}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, ${font}. ${typst}; ${terminal}.${tried} ${usage}` }
   })
 
   on('config.set', { key: 'theme' }, async ($, e, next) => {
@@ -264,7 +276,7 @@ export const register: Register = on => {
     if (e.surface !== 'terminal' || e.props.isSummary || !e.props.text.trim()) return next(e)
     const ready = await answerEnv($, e)
     if (!ready) return next(e)
-    const columns = columnsFor(e.viewport?.columns)
+    const columns = columnsFor(e.viewport?.columns, S.width, ready.inline ? (S.cell ?? DEFAULT_CELL) : null)
     const drawing = await pagesOf($, { id: e.requestId, text: e.props.text, columns, env: ready, canStream: true })
     if (drawing.kind === 'pages') return drawPages($, e, drawing.result, columns, drawing.px, drawing.bytes, { bullet: !!e.props.isFirstOfReply })
     if (drawing.kind === 'text') return next(e)
@@ -339,7 +351,7 @@ export const register: Register = on => {
       const plan = planShownOf(editedPlans.get(e.props.tool_use_id), e.props.output, e.props.input)
       const ready = plan ? await answerEnv($, e) : null
       if (!ready) return row
-      const columns = columnsFor(e.viewport?.columns)
+      const columns = columnsFor(e.viewport?.columns, S.width, ready.inline ? (S.cell ?? DEFAULT_CELL) : null)
       const drawing = await pagesOf($, { id: `plan:${e.props.tool_use_id}`, text: plan, columns, env: ready, canStream: false })
       return drawPlanUse($, e, row, drawing, columns)
     } catch {
@@ -357,7 +369,7 @@ export const register: Register = on => {
     try {
       const plan = planOf(e.props.output) ? planShownOf(editedPlans.get(e.props.tool_use_id), e.props.output, undefined) : ''
       const ready = plan ? await answerEnv($, e) : null
-      const columns = columnsFor(e.viewport?.columns)
+      const columns = columnsFor(e.viewport?.columns, S.width, ready?.inline ? (S.cell ?? DEFAULT_CELL) : null)
       const drawing = ready ? await pagesOf($, { id: `plan:${e.props.tool_use_id}`, text: plan, columns, env: ready, canStream: false }) : null
       const filePath = (e.props.output as { filePath?: unknown }).filePath
       if (drawing && drawing.kind !== 'text') drawn = drawPlanResult($, e, typeof filePath === 'string' ? filePath : undefined)

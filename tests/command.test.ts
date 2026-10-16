@@ -13,6 +13,7 @@ const at = (text: string) => {
 
 test('the first word completes as a subcommand', () => {
   expect(at('/md-preview t').map(r => r.text)).toEqual(['theme'])
+  expect(at('/md-preview w').map(r => r.text)).toEqual(['width'])
   expect(at('/md-preview o').map(r => r.text)).toEqual(['on', 'off'])
   expect(at('/md-preview S').map(r => r.text)).toEqual(['size', 'setup'])
   expect(at('/md-preview x')).toEqual([])
@@ -26,6 +27,10 @@ test('right after theme or size, rows hold the word and its argument', () => {
   expect(rows[3]!.description).toBe('built-in, active: default look')
   expect(rows[1]!.description).toBe('user: my nord')
   expect(at('/md-preview size').map(r => r.text)).toContain('size 150')
+  const widths = at('/md-preview width')
+  expect(widths.map(r => r.text)).toEqual(['width 80', 'width 100', 'width 120', 'width 160', 'width 200', 'width full'])
+  // full is the default; with no width given, it is current.
+  expect(widths.at(-1)!.description).toBe('current')
 })
 
 test('a theme name or size completes after its word', () => {
@@ -34,6 +39,11 @@ test('a theme name or size completes after its word', () => {
   expect(at('/md-preview size 1').map(r => r.text)).toEqual(['100', '110', '120', '125', '150', '175'])
   expect(at('/md-preview size 10')[0]!.description).toBe('current')
   expect(at('/md-preview theme nord extra')).toEqual([])
+  expect(at('/md-preview width 1').map(r => r.text)).toEqual(['100', '120', '160'])
+  expect(at('/md-preview width f').map(r => r.label)).toEqual(['full'])
+  const set = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, width: 160 })
+  expect(set('/md-preview width 16')[0]!.description).toBe('current')
+  expect(set('/md-preview width f')[0]!.description).toBe('the default')
 })
 
 test('other prompts and the command name itself get no rows', () => {

@@ -7,7 +7,7 @@ import type { MdPreviewTheme } from '../../types'
 import type { ThemeInfo } from './themes'
 import type { HostMode, ThemeSetting } from './mode'
 import type { PlanVerdict } from './plan'
-import { DEFAULT_SIZE } from './settings'
+import { DEFAULT_SIZE, DEFAULT_WIDTH, type Width } from './settings'
 
 // The `done` atom (see types/index.d.ts) for refresh. The state scan of
 // `claude plugin validate` reads an atom only from a const in the file that
@@ -73,6 +73,8 @@ export const S = {
   cell: null as Cell | null,
   theme: 'dark' as MdPreviewTheme,
   size: DEFAULT_SIZE,
+  // `/md-preview width`: the most columns a picture takes, or full.
+  width: DEFAULT_WIDTH as Width,
   look: null as Look | null,
   // The usable themes the last scan found, for the typeahead.
   themeChoices: [] as ThemeInfo[],

@@ -74,7 +74,7 @@ export async function shownOf($: EngineInterface, e: RowInput, ready: Env, files
 export async function shownOne($: EngineInterface, e: RowInput, ready: Env, file: string, alt = nameOf(file)): Promise<Shown | null> {
   const p = await pictureOf($, file)
   if (!p) return null
-  const fit = pictureCells(p, columnsFor(e.viewport?.columns), pictureRowsFor(e.viewport?.rows), S.cell ?? DEFAULT_CELL)
+  const fit = pictureCells(p, columnsFor(e.viewport?.columns, S.width), pictureRowsFor(e.viewport?.rows), S.cell ?? DEFAULT_CELL)
   if (ready.inline) {
     const png = await pictureBytes($, p)
     return png ? { source: { png }, ...fit, alt } : null
@@ -172,7 +172,8 @@ export async function sentTextOf($: EngineInterface, file: string): Promise<stri
 export async function sentOf(
   $: EngineInterface, e: RowInput, o: { ready: Env; markdown: Env | null; files: readonly SentFile[]; id: string },
 ): Promise<Under[]> {
-  const columns = columnsFor(e.viewport?.columns)
+  // Over ssh a Markdown file's page must stay INLINE_MAX_SIDE pixels wide at most.
+  const columns = columnsFor(e.viewport?.columns, S.width, o.ready.inline ? (S.cell ?? DEFAULT_CELL) : null)
   // The space a picture takes (as in shownOne), which a JPEG or WebP is made to fit.
   const box = convertBox(columns, pictureRowsFor(e.viewport?.rows), S.cell ?? DEFAULT_CELL)
   const under: Under[] = []

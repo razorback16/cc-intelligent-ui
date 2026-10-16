@@ -1,11 +1,15 @@
 // What the terminal can draw: its columns and cell size, whether the engine
 // draws pictures there, and how large a picture sent as bytes (over ssh) can be.
 import type { Cell } from './state'
-import { GUTTER, MAX_COLUMNS, SEGMENT_ROWS } from './settings'
+import { GUTTER, IMAGE_MAX_COLUMNS, SEGMENT_ROWS, type Width } from './settings'
 
-// The columns a picture takes: the viewport less the bullet, MAX_COLUMNS at most.
-export function columnsFor(viewportColumns: number | undefined): number {
-  return Math.max(20, Math.min(MAX_COLUMNS, (viewportColumns ?? 80) - GUTTER))
+// The columns a picture takes: the viewport less the bullet, at most `width`
+// (`/md-preview width`; full: no cap) and IMAGE_MAX_COLUMNS, at least 20.
+// `inlineCell`: over ssh, the cell, so a page stays INLINE_MAX_SIDE pixels
+// wide at most (a wider page can not go as bytes).
+export function columnsFor(viewportColumns: number | undefined, width: Width, inlineCell?: Cell | null): number {
+  const caps = [IMAGE_MAX_COLUMNS, ...(width === 'full' ? [] : [width]), ...(inlineCell ? [Math.floor(INLINE_MAX_SIDE / inlineCell.width)] : [])]
+  return Math.max(20, Math.min(...caps, (viewportColumns ?? 80) - GUTTER))
 }
 
 // The cell in device pixels from `rows cols xpixel ypixel` (TIOCGWINSZ).
