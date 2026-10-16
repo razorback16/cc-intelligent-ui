@@ -5,9 +5,9 @@
 import type { EngineInterface, ImageSource, RenderElement, RenderInput } from 'claude-code'
 
 import { COMPILE_TIMEOUT_MS, DEFAULT_CELL, GUTTER, PICTURES_KEPT, SENT_TEXT_MAX_BYTES } from './settings'
-import { converted, converting, INLINE_KEPT, inlined, pasteDirs, pictures, S, sentTexts, type Env } from './state'
+import { converted, converting, INLINE_KEPT, inlined, lastConverted, pasteDirs, pictures, refresh, S, sentTexts, type Env } from './state'
 import { columnsFor, fitsInline, INLINE_MAX_BYTES } from './terminal'
-import { convertedPath, folderOf, pasteDirOf, pictureCells, pictureRowsFor, type SentFile } from './images'
+import { convertBox, convertedPath, folderOf, pasteDirOf, pictureCells, pictureRowsFor, type PixelBox, type SentFile } from './images'
 import { imagePathOf } from './markdown'
 import { drawPages, hashOf } from './draw'
 import { convertCall, logDebug, parseOd, pngSize } from './typst'
@@ -86,27 +86,34 @@ export async function shownOne($: EngineInterface, e: RowInput, ready: Env, file
 const nameOf = (file: string) => file.split('/').pop() || 'image'
 
 // A JPEG or WebP as a PNG that Typst makes (render/convert.typ) in the
-// cache: once per stat stamp, and one run at a time per file. Null with no
-// Typst, or when it fails (the row stays as is).
-export async function convertedOf($: EngineInterface, ready: Env, file: string): Promise<string | null> {
+// cache, to fit `box`: once per stat stamp and box, one run at a time per
+// key. The first PNG of a file is waited for; for a new box, the last PNG
+// of the file draws at once while the new one is made, then a refresh
+// draws it. Null with no Typst, or when it fails (the row stays as is).
+export async function convertedOf($: EngineInterface, ready: Env, file: string, box: PixelBox): Promise<string | null> {
   if (!ready.typst) return null
   const st = await $.fs.stat(file).catch(() => null)
   if (!st || st.kind !== 'file') return null
   const stamp = `${st.mtimeMs}:${st.size}`
-  const kept = converted.get(file)
-  if (kept?.stamp === stamp) return kept.png
-  const key = `${file}@${stamp}`
+  const last = lastConverted.get(file)
+  const before = last?.stamp === stamp ? last.png : null
+  const key = `${file}@${stamp}@${box.width}x${box.height}`
+  if (converted.has(key)) return converted.get(key) ?? before
   let run = converting.get(key)
   if (!run) {
-    run = convertOnce($, ready, file, stamp).finally(() => converting.delete(key))
+    // A new box while another box of this file is made: wait for that run
+    // (its refresh draws the row again, with the box of that time).
+    if (before && [...converting.keys()].some(k => k.startsWith(`${file}@${stamp}@`))) return before
+    run = convertOnce($, ready, file, stamp, box, key).finally(() => converting.delete(key))
     converting.set(key, run)
+    if (before) void run.then(() => refresh($), () => undefined)
   }
-  return run
+  return before ?? run
 }
 
-async function convertOnce($: EngineInterface, ready: Env, file: string, stamp: string): Promise<string | null> {
-  const out = convertedPath(ready.cache, file, stamp)
-  // Made before (an earlier load): the same file at the same stamp.
+async function convertOnce($: EngineInterface, ready: Env, file: string, stamp: string, box: PixelBox, key: string): Promise<string | null> {
+  const out = convertedPath(ready.cache, file, stamp, box)
+  // Made before (an earlier load): the same file, stamp and box.
   const made = await $.fs.stat(out).catch(() => null)
   let png: string | null = out
   if (made?.kind !== 'file' || !made.size) {
@@ -117,7 +124,7 @@ async function convertOnce($: EngineInterface, ready: Env, file: string, stamp: 
     // Typst writes a part file, moved to image.png only once it is whole, so
     // a run that is killed or fails leaves no image.png for a later load.
     const part = `${dir}/image.part.png`
-    const { argv, env } = convertCall({ typst: ready.typst!, root: ready.root, cache: ready.cache, file, out: part })
+    const { argv, env } = convertCall({ typst: ready.typst!, root: ready.root, cache: ready.cache, file, box, out: part })
     const failed = (err: unknown) => ({ exitCode: 1, stdout: '', stderr: `did not run: ${String(err)}` })
     const ran = await $.process.run(argv, { timeoutMs: COMPILE_TIMEOUT_MS, env }).catch(failed)
     const moved = ran.exitCode === 0 ? await $.process.run(['mv', '-f', part, out]).catch(failed) : null
@@ -129,13 +136,19 @@ async function convertOnce($: EngineInterface, ready: Env, file: string, stamp: 
       png = null
     }
   }
-  converted.delete(file)
-  converted.set(file, { stamp, png })
-  for (const old of converted.keys()) {
-    if (converted.size <= PICTURES_KEPT) break
-    converted.delete(old)
-  }
+  keep(converted, key, png)
+  if (png) keep(lastConverted, file, { stamp, png })
   return png
+}
+
+// Sets a cache entry as the newest; the oldest go past PICTURES_KEPT.
+function keep<T>(cache: Map<string, T>, key: string, value: T) {
+  cache.delete(key)
+  cache.set(key, value)
+  for (const old of cache.keys()) {
+    if (cache.size <= PICTURES_KEPT) break
+    cache.delete(old)
+  }
 }
 
 // A Markdown file's text, read again only when its stat changes; null when
@@ -148,12 +161,7 @@ export async function sentTextOf($: EngineInterface, file: string): Promise<stri
   if (kept?.stamp === stamp) return kept.text
   const got = st.size <= SENT_TEXT_MAX_BYTES ? await $.fs.read(file).catch(() => null) : null
   const text = got?.trim() ? got : null
-  sentTexts.delete(file)
-  sentTexts.set(file, { stamp, text })
-  for (const old of sentTexts.keys()) {
-    if (sentTexts.size <= PICTURES_KEPT) break
-    sentTexts.delete(old)
-  }
+  keep(sentTexts, file, { stamp, text })
   return text
 }
 
@@ -165,6 +173,8 @@ export async function sentOf(
   $: EngineInterface, e: RowInput, o: { ready: Env; markdown: Env | null; files: readonly SentFile[]; id: string },
 ): Promise<Under[]> {
   const columns = columnsFor(e.viewport?.columns)
+  // The space a picture takes (as in shownOne), which a JPEG or WebP is made to fit.
+  const box = convertBox(columns, pictureRowsFor(e.viewport?.rows), S.cell ?? DEFAULT_CELL)
   const under: Under[] = []
   for (const f of o.files) {
     const full = imagePathOf(f.path, o.ready.cwd)
@@ -175,7 +185,7 @@ export async function sentOf(
       if (drawing.kind !== 'text') under.push({ drawing, columns })
       continue
     }
-    const png = f.kind === 'png' ? full : await convertedOf($, o.ready, full)
+    const png = f.kind === 'png' ? full : await convertedOf($, o.ready, full, box)
     const shown = png ? await shownOne($, e, o.ready, png, nameOf(full)) : null
     if (shown) under.push(shown)
   }

@@ -65,8 +65,8 @@ export const PICTURES_KEPT = 64
 // A Markdown file Claude sends (SendUserFile) draws when it is at most this
 // many bytes.
 export const SENT_TEXT_MAX_BYTES = 256 * 1024
-// The PNG Typst makes of a JPEG or WebP: its long side at most this many
-// pixels (never made larger).
+// The PNG Typst makes of a JPEG or WebP fits the space of the picture, and
+// each side is at most this many pixels (never made larger).
 export const CONVERT_MAX_SIDE = 4096
 
 // What Claude is told while the mod draws its answers (a system prompt

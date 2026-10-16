@@ -2,7 +2,7 @@
 // answer's segments to PNG pages (with a retry in safe mode).
 import type { EngineInterface } from 'claude-code'
 
-import { COMPILE_TIMEOUT_MS, CONVERT_MAX_SIDE, NO_NETWORK, SEGMENT_ROWS, TYPST_FALLBACKS } from './settings'
+import { COMPILE_TIMEOUT_MS, NO_NETWORK, SEGMENT_ROWS, TYPST_FALLBACKS } from './settings'
 import { DEFAULT_METRICS, type FontMetrics, type Job, type Metrics, type Result } from './state'
 import { firstLine, imagePathOf, localImages, plainOf, splitSegments } from './markdown'
 import { inlineBudget } from './terminal'
@@ -34,9 +34,16 @@ export function typstCall(o: {
 }
 
 // The typst command that makes a PNG of a JPEG or WebP (render/convert.typ)
-// at its own pixel size, its long side at most CONVERT_MAX_SIDE: at 72 ppi,
-// 1 pt is 1 pixel.
-export function convertCall(o: { typst: string; root: string; cache: string; file: string; out: string }): { argv: string[]; env: Record<string, string> } {
+// that fits `box` (in pixels), never larger than its own pixel size: at 72
+// ppi, 1 pt is 1 pixel.
+export function convertCall(o: {
+  typst: string
+  root: string
+  cache: string
+  file: string
+  box: { width: number; height: number }
+  out: string
+}): { argv: string[]; env: Record<string, string> } {
   const argv = [
     o.typst, 'compile',
     '--root', '/',
@@ -44,7 +51,8 @@ export function convertCall(o: { typst: string; root: string; cache: string; fil
     '--diagnostic-format', 'short',
     '--ppi', '72',
     '--input', `f=${o.file}`,
-    '--input', `max=${CONVERT_MAX_SIDE}`,
+    '--input', `maxw=${o.box.width}`,
+    '--input', `maxh=${o.box.height}`,
     `${o.root}/render/convert.typ`,
     o.out,
   ]

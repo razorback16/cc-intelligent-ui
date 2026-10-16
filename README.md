@@ -20,7 +20,7 @@ Only the drawing changes. The saved answer stays Markdown.
 
   A `theme` dictionary (`theme.fg`, `theme.muted`, `theme.blue`, `theme.palette`, `theme.width`, …) is in scope, so drawings match the terminal's colours. The mod tells Claude about this in a short part of the system prompt.
 - Files that Claude sends to you (the SendUserFile tool). The mod draws each file under the row that shows the files, in the same order:
-  - PNG, JPEG and WebP images. Typst changes a JPEG or WebP image into a PNG image in the cache folder. It does this one time for each version of the file. The long side of that PNG image is 4096 pixels or less.
+  - PNG, JPEG and WebP images. Typst changes a JPEG or WebP image into a PNG image in the cache folder. The PNG image is the size of the space for the picture in the transcript, or smaller. Typst does this one time for each version of the file and each size of the space. When the space changes, the mod shows the old PNG image until Typst makes the new one.
   - Markdown files (`.md` or `.markdown`, 256 KiB or less). The mod draws the file as rendered pictures, the same as an answer. A relative image path in the file starts from the folder of the file.
 
   Other files stay as the normal row. JPEG images, WebP images and Markdown files need Typst.

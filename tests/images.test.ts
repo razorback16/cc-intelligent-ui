@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import {
-  claudeTmpOf, convertCall, convertedPath, DEFAULT_CELL, folderOf, imageKindOf, isMarkdownPath, pasteDirOf, pastedImagePath, pastedNumbers,
+  claudeTmpOf, convertBox, convertCall, convertedPath, DEFAULT_CELL, folderOf, imageKindOf, isMarkdownPath, pasteDirOf, pastedImagePath, pastedNumbers,
   PICTURE_MAX_ROWS, pictureCells, pictureRowsFor, projectSlug, renderKey, sentFiles, sentImages,
 } from '../hooks/register'
 
@@ -91,19 +91,31 @@ test('the folder of a file, for the relative images of a Markdown file', () => {
   expect(folderOf('/t//notes.md')).toBe('/t')
 })
 
-test('a converted PNG is named by the file and its stat stamp, in a key folder of the cache', () => {
-  const one = convertedPath('/c', '/t/a.jpg', '1:1000')
-  expect(one).toMatch(/^\/c\/[0-9a-f]{16}\/image\.png$/)
-  expect(convertedPath('/c', '/t/a.jpg', '1:1000')).toBe(one)
-  expect(convertedPath('/c', '/t/a.jpg', '2:1000')).not.toBe(one)
-  expect(convertedPath('/c', '/t/b.jpg', '1:1000')).not.toBe(one)
+// The box of a 100 x 40 viewport at 16 x 32 px cells: 98 columns, 20 rows.
+const BOX = { width: 1568, height: 640 }
+
+test('a JPEG or WebP is made to fit the space of the picture, each side at most 4096 px', () => {
+  expect(convertBox(98, 20, DEFAULT_CELL)).toEqual(BOX)
+  expect(convertBox(58, 24, { width: 8, height: 17 })).toEqual({ width: 464, height: 408 })
+  expect(convertBox(120, 24, { width: 40, height: 200 })).toEqual({ width: 4096, height: 4096 })
+  expect(convertBox(0, 0, DEFAULT_CELL)).toEqual({ width: 1, height: 1 })
 })
 
-test('the conversion call: render/convert.typ at 72 ppi, the file and the 4096 px cap as inputs, no network', () => {
-  const { argv, env } = convertCall({ typst: '/usr/bin/typst', root: '/r', cache: '/c', file: '/t/a b.webp', out: '/c/k/image.png' })
+test('a converted PNG is named by the file, its stat stamp and the box, in a key folder of the cache', () => {
+  const one = convertedPath('/c', '/t/a.jpg', '1:1000', BOX)
+  expect(one).toMatch(/^\/c\/[0-9a-f]{16}\/image\.png$/)
+  expect(convertedPath('/c', '/t/a.jpg', '1:1000', { ...BOX })).toBe(one)
+  expect(convertedPath('/c', '/t/a.jpg', '2:1000', BOX)).not.toBe(one)
+  expect(convertedPath('/c', '/t/b.jpg', '1:1000', BOX)).not.toBe(one)
+  expect(convertedPath('/c', '/t/a.jpg', '1:1000', { width: 928, height: 640 })).not.toBe(one)
+  expect(convertedPath('/c', '/t/a.jpg', '1:1000', { width: 1568, height: 768 })).not.toBe(one)
+})
+
+test('the conversion call: render/convert.typ at 72 ppi, the file and the box as inputs, no network', () => {
+  const { argv, env } = convertCall({ typst: '/usr/bin/typst', root: '/r', cache: '/c', file: '/t/a b.webp', box: BOX, out: '/c/k/image.png' })
   expect(argv).toEqual([
     '/usr/bin/typst', 'compile', '--root', '/', '--format', 'png', '--diagnostic-format', 'short', '--ppi', '72',
-    '--input', 'f=/t/a b.webp', '--input', 'max=4096', '/r/render/convert.typ', '/c/k/image.png',
+    '--input', 'f=/t/a b.webp', '--input', 'maxw=1568', '--input', 'maxh=640', '/r/render/convert.typ', '/c/k/image.png',
   ])
   expect(env.TYPST_PACKAGE_CACHE_PATH).toBe('/c/pkg-cache')
   expect(env.HTTPS_PROXY).toBe('http://127.0.0.1:9')
@@ -152,10 +164,12 @@ const PASTED = '/private/tmp/claude-501/-w-app/sid-1/images'
 // are the files that exist, by path: their first bytes as od prints them.
 // `texts` are text files (a Markdown file Claude sends), `mtimes` the files'
 // mtimes (1 when not set). `typst`: Typst is found; it makes a PNG of a JPEG
-// or WebP (unless `failConvert`; `mv` moves it, unless `failMove`), and
+// or WebP (unless `failConvert`, or from run number `failConvertFrom`; `mv`
+// moves it, unless `failMove`), and
 // compiles Markdown to one page.
 // `holdConvert`: a conversion ends only once its file had that many stats
-// (other rows reached it while it runs). `holdCompile`: a Markdown compile
+// (other rows reached it while it runs). `holdRun`: conversion number `at`
+// (from 1) ends only when `until` settles. `holdCompile`: a Markdown compile
 // ends only when this settles.
 function world(on: any, o: {
   vars?: Record<string, string>
@@ -166,8 +180,10 @@ function world(on: any, o: {
   projects?: string[]
   typst?: boolean
   failConvert?: boolean
+  failConvertFrom?: number
   failMove?: boolean
   holdConvert?: number
+  holdRun?: { at: number; until: Promise<void> }
   holdCompile?: Promise<void>
 } = {}) {
   mock.store(on)
@@ -211,7 +227,8 @@ function world(on: any, o: {
       converts.push(argv)
       const file = argv.find(a => a.startsWith('f='))!.slice(2)
       if ((stats.get(file) ?? 0) < (o.holdConvert ?? 0)) await new Promise<void>(done => waits.push({ path: file, done }))
-      if (o.failConvert) return ok('', 1)
+      if (o.holdRun?.at === converts.length) await o.holdRun.until
+      if (o.failConvert || converts.length >= (o.failConvertFrom ?? Infinity)) return ok('', 1)
       files[argv.at(-1)!] = HEAD
       return ok('')
     }
@@ -334,6 +351,9 @@ test('a JPEG and a WebP Claude sends are made PNGs by Typst once, and draw under
   expect(shown[0].props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/image\.png$/)
   expect(shown[0].props.source.file).not.toBe(shown[1].props.source.file)
   expect(converts.map(argv => argv.find(a => a.startsWith('f=')))).toEqual(['f=/t/photo.jpg', 'f=/t/shot.webp'])
+  // Made to fit the space of the picture: 98 x 20 cells of 16 x 32 px.
+  expect(converts[0]).toContain('maxw=1568')
+  expect(converts[0]).toContain('maxh=640')
   // Typst writes a part file; only a whole one is moved to image.png.
   const out = shown[0].props.source.file
   expect(converts[0]!.at(-1)).toBe(out.replace(/image\.png$/, 'image.part.png'))
@@ -357,6 +377,47 @@ test('a JPEG by its name; two rows at once convert it once; a changed file conve
   const three = await $.ui.mount(sent(attachAll('/t/a.JPG'), false, 'tu-3'))
   expect(images(await three.drawn())[0].props.source.file).not.toBe(first)
   expect(converts.length).toBe(2)
+})
+
+test('a new box: the last PNG draws at once, a run for the box starts, and its refresh draws the new PNG', async ($, on) => {
+  let release = () => {}
+  const until = new Promise<void>(done => (release = done))
+  const { clock, converts } = world(on, { typst: true, holdRun: { at: 2, until }, files: { '/t/photo.jpg': JPEG } })
+  await ready($)
+  const wide = await $.ui.mount(sent(attachAll('/t/photo.jpg'), false, 'tu-1'))
+  const first = images(await wide.drawn())[0].props.source.file
+  // The same file in a narrower row: 58 columns, so another box.
+  const narrow = await $.ui.mount({ ...sent(attachAll('/t/photo.jpg'), false, 'tu-2'), viewport: { columns: 60, rows: 40 } })
+  expect(images(await narrow.drawn())[0].props.source.file).toBe(first)
+  expect(converts.length).toBe(2)
+  expect(converts[1]).toContain('maxw=928')
+  // While it runs, the narrow row and a third box do not wait or run again.
+  await narrow.redraw(sent(attachAll('/t/photo.jpg'), false, 'tu-2').props)
+  const other = await $.ui.mount({ ...sent(attachAll('/t/photo.jpg'), false, 'tu-3'), viewport: { columns: 80, rows: 40 } })
+  expect(images(await other.drawn())[0].props.source.file).toBe(first)
+  expect(converts.length).toBe(2)
+  release()
+  await clock.settle()
+  // The refresh drew the rows again: the narrow row has its own PNG now.
+  const now = images(await narrow.drawn())[0].props.source.file
+  expect(now).not.toBe(first)
+  expect(now).toBe(convertedPath('/c', '/t/photo.jpg', '1:1000', { width: 928, height: 640 }))
+  expect(images(await wide.drawn())[0].props.source.file).toBe(first)
+})
+
+test('a failed run for a new box keeps the last PNG', async ($, on) => {
+  // The second run (the new box) fails.
+  const { clock, converts, logs } = world(on, { typst: true, failConvertFrom: 2, files: { '/t/photo.jpg': JPEG } })
+  await ready($)
+  const wide = await $.ui.mount(sent(attachAll('/t/photo.jpg'), false, 'tu-1'))
+  const first = images(await wide.drawn())[0].props.source.file
+  const narrow = await $.ui.mount({ ...sent(attachAll('/t/photo.jpg'), false, 'tu-2'), viewport: { columns: 60, rows: 40 } })
+  expect(images(await narrow.drawn())[0].props.source.file).toBe(first)
+  await clock.settle()
+  await narrow.redraw(sent(attachAll('/t/photo.jpg'), false, 'tu-2').props)
+  expect(images(await narrow.drawn())[0].props.source.file).toBe(first)
+  expect(converts.length).toBe(2)
+  expect(logs.join('')).toContain('convert /t/photo.jpg failed')
 })
 
 test('over ssh, a converted JPEG goes as bytes', async ($, on) => {
@@ -392,9 +453,9 @@ test('a part file that can not be moved draws no picture; an image.png made befo
   expect(logs.join('')).toContain('convert /t/photo.jpg: could not move')
   expect(Object.keys(files).filter(f => f.endsWith('/image.png'))).toEqual([])
   // An earlier load made the PNG of old.jpg (same stamp): no run, it draws.
-  files[convertedPath('/c', '/t/old.jpg', '1:1000')] = HEAD
+  files[convertedPath('/c', '/t/old.jpg', '1:1000', BOX)] = HEAD
   const old = await $.ui.mount(sent(attachAll('/t/old.jpg'), false, 'tu-2'))
-  expect(images(await old.drawn())[0].props.source.file).toBe(convertedPath('/c', '/t/old.jpg', '1:1000'))
+  expect(images(await old.drawn())[0].props.source.file).toBe(convertedPath('/c', '/t/old.jpg', '1:1000', BOX))
   expect(converts.length).toBe(1)
 })
 
