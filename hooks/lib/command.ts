@@ -7,7 +7,7 @@ import { isThemeName, type ThemeInfo } from './themes'
 
 // `/md-preview` arguments: on, off, size <80-200>, or nothing (show state).
 export type Command =
-  | { kind: 'on' | 'off' | 'show' | 'probe' }
+  | { kind: 'on' | 'off' | 'show' | 'probe' | 'grab' | 'dump' }
   | { kind: 'size'; percent: number }
   | { kind: 'theme'; name?: string }
   | { kind: 'setup'; remove: boolean }
@@ -21,7 +21,7 @@ export function parseCommand(args: string): Command {
     if (typed.length === 2 && isThemeName(typed[1]!)) return { kind: 'theme', name: typed[1]! }
     return { kind: 'bad' }
   }
-  if (words.length === 1 && (words[0] === 'on' || words[0] === 'off' || words[0] === 'probe')) return { kind: words[0] }
+  if (words.length === 1 && (words[0] === 'on' || words[0] === 'off' || words[0] === 'probe' || words[0] === 'grab' || words[0] === 'dump')) return { kind: words[0] }
   if (words[0] === 'setup' && words.length === 1) return { kind: 'setup', remove: false }
   if (words[0] === 'setup' && words.length === 2 && words[1] === 'remove') return { kind: 'setup', remove: true }
   if (words[0] === 'size' && words.length === 2 && /^\d+%?$/.test(words[1]!)) {
@@ -38,6 +38,8 @@ const SUBCOMMANDS = [
   { name: 'size', description: `text size, ${MIN_SIZE}-${MAX_SIZE}%` },
   { name: 'theme', description: 'list the themes, or switch to one' },
   { name: 'setup', description: 'iTerm2: add the shell line that turns pictures on' },
+  { name: 'grab', description: 'copy the text of the pictures you last selected' },
+  { name: 'dump', description: 'show what the clipboard held and how it was read' },
 ] as const
 const SIZES = [80, 90, 100, 110, 120, 125, 150, 175, 200]
 
@@ -80,7 +82,7 @@ export function commandSuggestions(
 export async function registerCommand($: EngineInterface) {
   await $.command.register({
     name: 'md-preview',
-    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), theme [name] (list or switch themes)",
-    argumentHint: '[on|off|size <percent>|theme [name]]',
+    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), theme [name] (list or switch themes), grab (copy the selected pictures' text), dump (copy diagnostics)",
+    argumentHint: '[on|off|size <percent>|theme [name]|grab|dump]',
   }).catch(() => undefined)
 }

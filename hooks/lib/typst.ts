@@ -8,6 +8,7 @@ import { firstLine, imagePathOf, localImages, plainOf, splitSegments } from './m
 import { inlineBudget } from './terminal'
 import { alignFirstLine, firstLineOf, fontFit, sizing } from './draw'
 import { HEADERS_SH } from './host'
+import { positionsOf, type Mark, type Positions } from './copy'
 
 // The typst command and its environment. Network off (see NO_NETWORK) and a
 // package cache of our own, so only the vendored packages load.
@@ -140,31 +141,73 @@ export async function existingImages($: EngineInterface, segments: readonly stri
   return found
 }
 
-export async function runTypst($: EngineInterface, job: Job, segments: readonly string[], dir: string, tag: string, isSafe: boolean) {
+// The template's inputs for a job (the PNG compile and the probe share them).
+export function typstInputs(job: Job, segments: readonly string[], dir: string, isSafe: boolean) {
   const fit = fontFit(job.env.metrics, job.size)
   const { widthPt, ppi, rowPt } = sizing(job.columns, job.cell, fit.columnPt)
   const { topPt } = alignFirstLine(firstLineOf(segments[0] ?? ''), rowPt)
+  const inputs: Record<string, string | number> = {
+    theme: job.theme,
+    width: widthPt,
+    top: topPt,
+    row: Math.round(rowPt * 10000) / 10000,
+    code: fit.code,
+    ...(job.env.termFont ? { 'term-font': job.env.termFont } : {}),
+    'theme-dir': job.themeDir,
+    doc: `${dir}/doc.json`,
+    ...(isSafe ? { safe: 1 } : {}),
+  }
+  return { inputs, ppi }
+}
+
+export async function runTypst($: EngineInterface, job: Job, segments: readonly string[], dir: string, tag: string, isSafe: boolean) {
+  const { inputs, ppi } = typstInputs(job, segments, dir, isSafe)
   const { argv, env: vars } = typstCall({
     typst: job.env.typst!,
     root: job.env.root,
     cache: job.env.cache,
     ppi,
-    inputs: {
-      theme: job.theme,
-      width: widthPt,
-      top: topPt,
-      row: Math.round(rowPt * 10000) / 10000,
-      code: fit.code,
-      ...(job.env.termFont ? { 'term-font': job.env.termFont } : {}),
-      'theme-dir': job.themeDir,
-      doc: `${dir}/doc.json`,
-      ...(isSafe ? { safe: 1 } : {}),
-    },
+    inputs,
     out: `${dir}/${tag}-{0p}.png`,
   })
   return $.process
     .run(argv, { timeoutMs: COMPILE_TIMEOUT_MS, env: vars })
     .catch((err: unknown) => ({ exitCode: 1, stdout: '', stderr: `typst did not run: ${String(err)}` }))
+}
+
+// ---- The probe: where the words are ---------------------------------------
+
+// `typst query` of the template's <mdpos> marks with probe=1: the PNG
+// compile's own inputs, root, package path and env (no ppi, format or out).
+export function probeCall(o: { typst: string; root: string; cache: string; inputs: Readonly<Record<string, string | number>> }): { argv: string[]; env: Record<string, string> } {
+  const argv = [
+    o.typst, 'query',
+    '--root', '/',
+    '--package-path', `${o.root}/render/packages`,
+    '--diagnostic-format', 'short',
+    ...Object.entries({ ...o.inputs, probe: 1 }).flatMap(([k, v]) => ['--input', `${k}=${v}`]),
+    `${o.root}/render/md.typ`,
+    '<mdpos>',
+    '--field', 'value',
+  ]
+  return { argv, env: noNetworkEnv(o.cache) }
+}
+
+// What a page set's probe needs, kept as probe.json beside pages.json, so
+// positions.json can be made later (a key compiled in an earlier session).
+export type ProbeJob = { argv: string[]; env: Record<string, string>; ppi: number }
+
+// Runs the probe and writes positions.json; the positions, or null.
+export async function runProbe($: EngineInterface, dir: string, probe: ProbeJob): Promise<Positions | null> {
+  const got = await $.process.run(probe.argv, { timeoutMs: COMPILE_TIMEOUT_MS, env: probe.env }).catch(() => null)
+  if (!got || got.exitCode !== 0 || got.isStdoutTruncated) return null
+  try {
+    const positions = positionsOf(JSON.parse(got.stdout) as Mark[], probe.ppi)
+    await $.fs.write(`${dir}/positions.json`, JSON.stringify(positions))
+    return positions
+  } catch {
+    return null
+  }
 }
 
 export async function compile($: EngineInterface, job: Job): Promise<Result | 'failed'> {
@@ -205,6 +248,10 @@ export async function compile($: EngineInterface, job: Job): Promise<Result | 'f
     return 'failed'
   }
   const pages = files.map((file, i) => ({ file, ...sizes[i]!, alt: plainOf(segments[i] ?? job.text) }))
+  // The probe after the PNGs, not awaited: the pictures never wait for it.
+  const { inputs, ppi } = typstInputs(job, segments, dir, tag === 'b')
+  const probe: ProbeJob = { ...probeCall({ typst: job.env.typst!, root: job.env.root, cache: job.env.cache, inputs }), ppi }
+  void $.fs.write(`${dir}/probe.json`, JSON.stringify(probe)).then(() => runProbe($, dir, probe)).catch(() => undefined)
   const { rowPt } = sizing(job.columns, job.cell, fontFit(job.env.metrics, job.size).columnPt)
   const { bulletRow } = alignFirstLine(firstLineOf(segments[0] ?? ''), rowPt)
   const result: Result = { pages, columns: job.columns, bulletRow, ...(note ? { note } : {}) }

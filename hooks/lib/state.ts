@@ -7,6 +7,7 @@ import type { MdPreviewTheme } from '../../types'
 import type { ThemeInfo } from './themes'
 import type { HostMode, ThemeSetting } from './mode'
 import type { PlanVerdict } from './plan'
+import type { Drawn, Positions } from './copy'
 import { DEFAULT_SIZE } from './settings'
 
 // The `done` atom (see types/index.d.ts) for refresh. The state scan of
@@ -155,4 +156,24 @@ export const writesLive = new Map<string, number>()
 // Redraws every reader of `done`; an invalidate where the write is refused.
 export function refresh($: EngineInterface) {
   void update($, done, n => n + 1).catch(() => $.ui.invalidate('ui.render'))
+}
+
+// Copy: the answers drawn this session by their requestId (a plan by
+// `plan:<tool_use_id>`; oldest first, at most DRAWN_KEPT), each answer
+// folder's word positions once read, and the clipboard watcher's state: its
+// timer and when it last ran, the clipboard text last seen and last written
+// (so a write is never read back as new), the last text with placeholders
+// and how it was read (for dump).
+export const drawnAnswers = new Map<string, Drawn>()
+export const DRAWN_KEPT = 64
+export const positionsByDir = new Map<string, Positions>()
+export const clip = {
+  watch: null as { cancel: () => void } | null,
+  ticked: 0,
+  busy: false,
+  seen: '',
+  wrote: '',
+  raw: '',
+  seq: 0,
+  last: null as unknown,
 }

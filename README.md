@@ -75,6 +75,14 @@ To try it from a clone without installing: `claude --plugin-dir /path/to/claude-
 | `/md-preview size <80–200>` | Text size in percent. 100 is the same visual size as your terminal text. |
 | `/md-preview theme` | Lists the themes, shows which one is in use, and shows the folder for your own themes |
 | `/md-preview theme <name>` | Changes to that theme (kept for later sessions) |
+| `/md-preview grab` | Copies the text under your last mouse selection of pictures |
+| `/md-preview dump` | Shows the last clipboard text with picture cells and how the mod read it (for a bug report) |
+
+### Copy text from a picture
+
+Select the text in a picture (an answer or a plan) with the mouse, as you do with normal text. The selection puts picture cells on the clipboard. On macOS, the mod reads the clipboard every 0.3 s. When the clipboard has picture cells, the mod replaces them with the text under your selection, and a toast shows the number of characters. Wait approximately 0.3 s after you select, then paste. The mod does not change a clipboard that has no picture cells.
+
+If the clipboard did not change, use `/md-preview grab`. It reads Claude Code's last mouse selection (fullscreen mode only) and copies its text. If the copied text is not correct, `/md-preview dump` shows the cells that the mod found and the page that it used. It also writes all of this to `copy-debug.json` in the cache folder.
 
 ### Plan approval
 
@@ -141,6 +149,7 @@ The `vscode` and `vscode-modern` values come from VS Code (MIT licence, Copyrigh
 5. If a compile fails (a bad Typst block or an unknown LaTeX command), the mod compiles once more in safe mode: Typst blocks and math show as code. A dim line under the picture names the error. If that also fails, the normal text shows.
 6. Pictures are kept in `${TMPDIR}/md-preview-<uid>/`. Folders older than 2 days are deleted at start.
 7. The plan: a `ui.render` hook on the ExitPlanMode `ToolUse` row draws the plan through the same steps. Claude Code shows that row above the approval question. The approved result row then shows only its header, so the plan does not show two times. A `tool.call` hook on ExitPlanMode asks the mod's question (`$.ui.ask`) before Claude Code asks for permission. Then a `classic.PermissionRequest` hook gives the answer to Claude Code at once, so the Claude Code dialog does not show. For an approval, the hook sends the plan (`updatedInput`) and the new permission mode (`setMode`). For the person's text, the `tool.call` hook refuses the call with that text.
+8. Copy: after the PNGs, the mod runs `typst query` with `probe=1` on the same template. The probe gives the position of each word and each code line, and the mod keeps these positions in `positions.json` beside the pages. The PNGs do not change. On macOS, a timer reads the clipboard with `pbpaste`. A picture cell holds its row and its column (kitty placeholder U+10EEEE plus two combining marks). The mod finds the drawn page that has these rows, takes the words in the selected cells, and writes the text with `$.ui.copy`.
 
 ### How `auto` is resolved
 
@@ -161,7 +170,12 @@ md-preview checks every 3 s. After a change, each mode's pictures compile once. 
 
 ## Limitations
 
-- **Copying text from a picture does not work.** A picture fills its cells with kitty placeholder characters (U+10EEEE plus combining marks). Claude Code's mouse selection copies those cells directly to the clipboard, and no mod hook runs before that copy. So a paste gives strange characters, not the text. Use Claude Code's `/copy` to copy the last answer as Markdown (`/copy 2` for the one before it; it shows a picker for the full answer or one code block, unless "Skip the /copy picker" is on in `/config`), or turn the mod off (`/md-preview off`) to select text. To stop the clipboard write on select, set `copyOnSelect` to `false` in `/config`.
+- **Copying text from a picture** (see [Copy text from a picture](#copy-text-from-a-picture)) has these limits:
+  - The automatic copy works only on macOS, and not over ssh (`pbpaste` reads the clipboard of the computer that runs Claude Code). On other systems, the clipboard keeps the picture cells. Use `/md-preview grab`, Claude Code's `/copy` (the last answer as Markdown, `/copy 2` for the one before it), or turn the mod off (`/md-preview off`) to select text.
+  - The mod copies whole words. It copies a word when the selection covers the middle of the word. In a code block, it copies each character whose middle is in the selection.
+  - The mod does not copy math or the text in an image.
+  - The cells do not identify the answer. The mod uses the answer of the selected row if it knows it, else the newest answer whose pages fit the selection. A selection in one page of a long answer fits each page that is tall enough, and the mod uses the first one. Thus the text can come from a different page or an older answer of the same width. `/md-preview dump` shows the page that the mod used.
+  - To stop the clipboard write on select, set `copyOnSelect` to `false` in `/config`.
 - **Search does not find text in a picture.**
 - **While Claude writes**, the block is hidden, and Claude Code's spinner shows the progress. When the block is final, its picture shows after the compile (0.15–0.6 s). A long answer shows only when it is done. If the picture is not ready 2 s after the block is final, the normal text shows until the picture is ready. If the compile fails, the normal text stays. An earlier answer that is not in the cache (for example, after a resume) is blank for up to 1 s, then shows as text until its picture is ready.
 - **Short summaries** between tool calls stay as text.
@@ -186,7 +200,7 @@ claude plugin validate .
 
 `.claude-plugin/types/` is not in git. `tsconfig.json` extends the `tsconfig.json` in it, so run Claude Code with the folder once before `tsc`.
 
-The hooks module is `hooks/register.tsx`. It connects the hooks to the modules in `hooks/lib/`. Each module has one topic, for example `markdown.ts` (blocks and segments), `mode.ts` (light or dark), `typst.ts` (compile) `draw.tsx` (the pages of an answer), `answer.ts` (one text through the compile and cache steps) and `plan.tsx` (the plan approval question and the plan rows). The values that change are in one object, `S`, in `state.ts`. The tests import from `hooks/register.tsx`, which exports the names that they use.
+The hooks module is `hooks/register.tsx`. It connects the hooks to the modules in `hooks/lib/`. Each module has one topic, for example `markdown.ts` (blocks and segments), `mode.ts` (light or dark), `typst.ts` (compile) `draw.tsx` (the pages of an answer), `answer.ts` (one text through the compile and cache steps) `plan.tsx` (the plan approval question and the plan rows) and `copy.ts` (the text under a mouse selection of pictures). The values that change are in one object, `S`, in `state.ts`. The tests import from `hooks/register.tsx`, which exports the names that they use.
 
 ## Licence
 

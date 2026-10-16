@@ -1,0 +1,330 @@
+// Copy (pure): the text under a mouse selection of answer pictures.
+//
+// Claude Code draws an Image as kitty Unicode placeholders: each cell is
+// U+10EEEE, then the diacritic of its row, then the diacritic of its column
+// (indices into DIACRITICS; the image id is only in the cell's colour, so it
+// never reaches the clipboard). A mouse copy puts those cells on the
+// clipboard, one line per screen row. decodeSelection reads them back as
+// runs of (row, columns) per picture; positionsOf turns the template's probe
+// marks (render/md.typ, `<mdpos>`) into word boxes in PNG pixels; pickPages
+// says which drawn page each run is; textOfRun reads the words under a run.
+// The clipboard watcher and the commands are in register.tsx.
+
+// kitty's rowcolumn-diacritics.txt: 297 combining marks; mark i means row or
+// column i. (The same table is in Claude Code's binary.)
+export const DIACRITICS: readonly number[] = [
+  0x0305, 0x030d, 0x030e, 0x0310, 0x0312, 0x033d, 0x033e, 0x033f, 0x0346, 0x034a, 0x034b, 0x034c,
+  0x0350, 0x0351, 0x0352, 0x0357, 0x035b, 0x0363, 0x0364, 0x0365, 0x0366, 0x0367, 0x0368, 0x0369,
+  0x036a, 0x036b, 0x036c, 0x036d, 0x036e, 0x036f, 0x0483, 0x0484, 0x0485, 0x0486, 0x0487, 0x0592,
+  0x0593, 0x0594, 0x0595, 0x0597, 0x0598, 0x0599, 0x059c, 0x059d, 0x059e, 0x059f, 0x05a0, 0x05a1,
+  0x05a8, 0x05a9, 0x05ab, 0x05ac, 0x05af, 0x05c4, 0x0610, 0x0611, 0x0612, 0x0613, 0x0614, 0x0615,
+  0x0616, 0x0617, 0x0657, 0x0658, 0x0659, 0x065a, 0x065b, 0x065d, 0x065e, 0x06d6, 0x06d7, 0x06d8,
+  0x06d9, 0x06da, 0x06db, 0x06dc, 0x06df, 0x06e0, 0x06e1, 0x06e2, 0x06e4, 0x06e7, 0x06e8, 0x06eb,
+  0x06ec, 0x0730, 0x0732, 0x0733, 0x0735, 0x0736, 0x073a, 0x073d, 0x073f, 0x0740, 0x0741, 0x0743,
+  0x0745, 0x0747, 0x0749, 0x074a, 0x07eb, 0x07ec, 0x07ed, 0x07ee, 0x07ef, 0x07f0, 0x07f1, 0x07f3,
+  0x0816, 0x0817, 0x0818, 0x0819, 0x081b, 0x081c, 0x081d, 0x081e, 0x081f, 0x0820, 0x0821, 0x0822,
+  0x0823, 0x0825, 0x0826, 0x0827, 0x0829, 0x082a, 0x082b, 0x082c, 0x082d, 0x0951, 0x0953, 0x0954,
+  0x0f82, 0x0f83, 0x0f86, 0x0f87, 0x135d, 0x135e, 0x135f, 0x17dd, 0x193a, 0x1a17, 0x1a75, 0x1a76,
+  0x1a77, 0x1a78, 0x1a79, 0x1a7a, 0x1a7b, 0x1a7c, 0x1b6b, 0x1b6d, 0x1b6e, 0x1b6f, 0x1b70, 0x1b71,
+  0x1b72, 0x1b73, 0x1cd0, 0x1cd1, 0x1cd2, 0x1cda, 0x1cdb, 0x1ce0, 0x1dc0, 0x1dc1, 0x1dc3, 0x1dc4,
+  0x1dc5, 0x1dc6, 0x1dc7, 0x1dc8, 0x1dc9, 0x1dcb, 0x1dcc, 0x1dd1, 0x1dd2, 0x1dd3, 0x1dd4, 0x1dd5,
+  0x1dd6, 0x1dd7, 0x1dd8, 0x1dd9, 0x1dda, 0x1ddb, 0x1ddc, 0x1ddd, 0x1dde, 0x1ddf, 0x1de0, 0x1de1,
+  0x1de2, 0x1de3, 0x1de4, 0x1de5, 0x1de6, 0x1dfe, 0x20d0, 0x20d1, 0x20d4, 0x20d5, 0x20d6, 0x20d7,
+  0x20db, 0x20dc, 0x20e1, 0x20e7, 0x20e9, 0x20f0, 0x2cef, 0x2cf0, 0x2cf1, 0x2de0, 0x2de1, 0x2de2,
+  0x2de3, 0x2de4, 0x2de5, 0x2de6, 0x2de7, 0x2de8, 0x2de9, 0x2dea, 0x2deb, 0x2dec, 0x2ded, 0x2dee,
+  0x2def, 0x2df0, 0x2df1, 0x2df2, 0x2df3, 0x2df4, 0x2df5, 0x2df6, 0x2df7, 0x2df8, 0x2df9, 0x2dfa,
+  0x2dfb, 0x2dfc, 0x2dfd, 0x2dfe, 0x2dff, 0xa66f, 0xa67c, 0xa67d, 0xa6f0, 0xa6f1, 0xa8e0, 0xa8e1,
+  0xa8e2, 0xa8e3, 0xa8e4, 0xa8e5, 0xa8e6, 0xa8e7, 0xa8e8, 0xa8e9, 0xa8ea, 0xa8eb, 0xa8ec, 0xa8ed,
+  0xa8ee, 0xa8ef, 0xa8f0, 0xa8f1, 0xaab0, 0xaab2, 0xaab3, 0xaab7, 0xaab8, 0xaabe, 0xaabf, 0xaac1,
+  0xfe20, 0xfe21, 0xfe22, 0xfe23, 0xfe24, 0xfe25, 0xfe26, 0x10a0f, 0x10a38, 0x1d185, 0x1d186, 0x1d187,
+  0x1d188, 0x1d189, 0x1d1aa, 0x1d1ab, 0x1d1ac, 0x1d1ad, 0x1d242, 0x1d243, 0x1d244,
+]
+export const PLACEHOLDER = 0x10eeee
+const INDEX = new Map(DIACRITICS.map((cp, i) => [cp, i]))
+
+// The cell string Claude Code draws at (row, col): for the tests.
+export const placeholderCell = (row: number, col: number) =>
+  String.fromCodePoint(PLACEHOLDER, DIACRITICS[row]!, DIACRITICS[col]!)
+
+export const hasPlaceholders = (text: string) => text.includes(String.fromCodePoint(PLACEHOLDER))
+
+// One screen row of a picture in the selection: its row in the picture and
+// the first and last picture columns selected (inclusive).
+export type RunLine = { row: number; colStart: number; colEnd: number }
+// The selection in order: plain text lines, and runs of picture rows (one
+// picture's rows, top to bottom).
+export type Segment = { kind: 'text'; text: string } | { kind: 'image'; lines: RunLine[] }
+
+// The reply bullet and the gutter's spaces left of a picture.
+const GUTTER = /^[\s⏺●]*$/
+
+// The selection's text as segments. A run ends where a row does not follow
+// the one above (the next picture, or the next page of the same answer,
+// starts again at row 0) or where a line has no placeholder.
+export function decodeSelection(text: string): Segment[] {
+  const out: Segment[] = []
+  let run: RunLine[] | null = null
+  const addText = (line: string) => {
+    run = null
+    const last = out[out.length - 1]
+    if (last?.kind === 'text') last.text += `\n${line}`
+    else out.push({ kind: 'text', text: line })
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const cps = Array.from(line, c => c.codePointAt(0)!)
+    const cells: { row: number; col: number }[] = []
+    let other = ''
+    for (let i = 0; i < cps.length; i++) {
+      if (cps[i] !== PLACEHOLDER) {
+        other += String.fromCodePoint(cps[i]!)
+        continue
+      }
+      const row = INDEX.get(cps[i + 1] ?? -1)
+      const col = INDEX.get(cps[i + 2] ?? -1)
+      if (row === undefined) continue
+      i += col === undefined ? 1 : 2
+      // No column mark: the cell after the one before (kitty's rule).
+      const prev = cells[cells.length - 1]
+      cells.push({ row, col: col ?? (prev && prev.row === row ? prev.col + 1 : 0) })
+    }
+    if (!cells.length) {
+      addText(line)
+      continue
+    }
+    if (!GUTTER.test(other)) addText(other.trim())
+    const row = cells[0]!.row
+    const cols = cells.filter(c => c.row === row).map(c => c.col)
+    const at: RunLine = { row, colStart: Math.min(...cols), colEnd: Math.max(...cols) }
+    const open = run as RunLine[] | null
+    if (open && open[open.length - 1]!.row < row) open.push(at)
+    else {
+      run = [at]
+      out.push({ kind: 'image', lines: run })
+    }
+  }
+  // A selection's last line break gives an empty last line: not text.
+  const last = out[out.length - 1]
+  if (last?.kind === 'text') {
+    last.text = last.text.replace(/\n+$/, '')
+    if (!last.text) out.pop()
+  }
+  return out
+}
+
+// ---- Where the words are ---------------------------------------------------
+
+// A probe mark as `typst query <mdpos> --field value` gives it (pt).
+export type Mark = {
+  k: 'w' | 'c' | 'b'
+  p: number
+  x: number
+  y: number
+  s?: number
+  t?: string
+  w?: number
+  h?: number
+  n?: number
+  a?: number
+  d?: number
+  kind?: string
+  prefix?: string
+  cx?: number
+}
+// A word, or a whole code line (`adv`: its character advance), in PNG
+// pixels: its box, the block it is in, and its place in the document (`i`).
+export type Item = { i: number; text: string; x0: number; y0: number; x1: number; y1: number; block: number; adv?: number }
+// A block: paragraph, heading, code, quote, cell (`cx` its column), item
+// (`prefix`); `first` its first item.
+export type TextBlock = { kind: string; prefix: string; cx?: number; first: number }
+// positions.json: by page (0-based: PNG page N+1).
+export type Positions = { ppi: number; blocks: TextBlock[]; pages: Item[][] }
+
+const round = (n: number) => Math.round(n * 100) / 100
+
+// The probe's marks (document order) as boxes in pixels at `ppi`. A list's
+// number ("1.") is drawn before its item's mark: it is dropped, the item's
+// prefix says it. A block mark with no word since the last one (an item,
+// then its paragraph) adds to that block.
+export function positionsOf(marks: readonly Mark[], ppi: number): Positions {
+  const k = ppi / 72
+  const blocks: TextBlock[] = []
+  const pages: Item[][] = []
+  let hasItems = false
+  let count = 0
+  marks.forEach((m, j) => {
+    if (m.k === 'b') {
+      const cur = blocks[blocks.length - 1]
+      if (cur && !hasItems) {
+        cur.prefix ||= m.prefix ?? ''
+        if (m.kind === 'cell') Object.assign(cur, { kind: 'cell', cx: m.cx ?? 0 })
+        else if (cur.kind !== 'item' && cur.kind !== 'cell') cur.kind = m.kind ?? cur.kind
+      } else {
+        blocks.push({ kind: m.kind ?? 'par', prefix: m.prefix ?? '', ...(m.kind === 'cell' ? { cx: m.cx ?? 0 } : {}), first: -1 })
+        hasItems = false
+      }
+      return
+    }
+    const next = marks[j + 1]
+    if (m.k === 'w' && next?.k === 'b' && next.kind === 'item' && next.prefix?.trim() === m.t) return
+    if (!blocks.length) blocks.push({ kind: 'par', prefix: '', first: -1 })
+    const block = blocks.length - 1
+    const item: Item =
+      m.k === 'c'
+        ? {
+            i: count, text: m.t ?? '', block, x0: round(m.x * k), x1: round((m.x + (m.w ?? 0)) * k),
+            y0: round((m.y - (m.a ?? 0.8 * (m.s ?? 11))) * k), y1: round((m.y + (m.d ?? 0.25 * (m.s ?? 11))) * k),
+            adv: m.n ? ((m.w ?? 0) * k) / m.n : 0,
+          }
+        : { i: count, text: m.t ?? '', block, x0: round(m.x * k), x1: round((m.x + (m.w ?? 0)) * k), y0: round(m.y * k), y1: round((m.y + (m.h ?? m.s ?? 11)) * k) }
+    if (!item.text) return
+    count++
+    if (!hasItems) blocks[block]!.first = item.i
+    hasItems = true
+    const page = Math.max(0, m.p - 1)
+    while (pages.length <= page) pages.push([])
+    pages[page]!.push(item)
+  })
+  return { ppi, blocks, pages }
+}
+
+// ---- Which page a run is ---------------------------------------------------
+
+// A page drawn this session: its PNG size and the rows its Image takes.
+export type DrawnPage = { file: string; width: number; height: number; rows: number }
+// An answer drawn this session (`seq` grows with each new one).
+export type Drawn = { id: string; seq: number; columns: number; dir: string; pages: DrawnPage[] }
+export type Pick = { id: string; page: number } | null
+
+// For each segment, the drawn page its run is (null: text, or none fits).
+// Runs next to each other (no text between) are one picture after the other,
+// so consecutive pages of one answer: a run that goes on in the next must
+// end on its page's last row, and the next start at row 0. A chain is
+// matched to the answer `requestId` names (the selection's transcript row)
+// when it fits, else to the newest answer it fits. Ambiguous by nature: a
+// run inside one page of a many-page answer fits every page tall enough,
+// and the first such page is taken; an older answer drawn at the same width
+// fits as well as the newest.
+export function pickPages(segments: readonly Segment[], drawn: readonly Drawn[], requestId?: string): Pick[] {
+  const picks: Pick[] = segments.map(() => null)
+  const order = [...drawn].sort((a, b) => (a.id === requestId ? -1 : b.id === requestId ? 1 : b.seq - a.seq))
+  let i = 0
+  while (i < segments.length) {
+    if (segments[i]!.kind !== 'image') {
+      i++
+      continue
+    }
+    let j = i
+    while (j < segments.length && segments[j]!.kind === 'image') j++
+    const runs = segments.slice(i, j) as { kind: 'image'; lines: RunLine[] }[]
+    const fits = (d: Drawn, start: number) =>
+      runs.every((run, n) => {
+        const page = d.pages[start + n]
+        if (!page) return false
+        const rows = run.lines.map(l => l.row)
+        const maxRow = Math.max(...rows)
+        const maxCol = Math.max(...run.lines.map(l => l.colEnd))
+        if (maxRow >= page.rows || maxCol >= d.columns) return false
+        if (n > 0 && Math.min(...rows) !== 0) return false
+        return n === runs.length - 1 || maxRow === page.rows - 1
+      })
+    found: for (const d of order) {
+      for (let start = 0; start + runs.length <= d.pages.length; start++) {
+        if (!fits(d, start)) continue
+        runs.forEach((_, n) => (picks[i + n] = { id: d.id, page: start + n }))
+        break found
+      }
+    }
+    i = j
+  }
+  return picks
+}
+
+// ---- The text under a run --------------------------------------------------
+
+// The words of one page under a run, in reading order. The picture fills
+// `columns` x `rows` cells, so a cell is width / columns by height / rows
+// PNG pixels. A word is under the run when its box's centre is in a selected
+// cell (its row by the vertical centre, its column by the horizontal one):
+// half a word selected copies the word when the selection covers its middle.
+// A code line is cut by characters, each by its own centre.
+export function textOfRun(lines: readonly RunLine[], items: readonly Item[], blocks: readonly TextBlock[], page: { width: number; height: number; rows: number }, columns: number): string {
+  const colW = page.width / columns
+  const rowH = page.height / page.rows
+  const sel = new Map(lines.map(l => [l.row, l]))
+  const picked: { item: Item; text: string }[] = []
+  for (const item of items) {
+    const line = sel.get(Math.floor((item.y0 + item.y1) / 2 / rowH))
+    if (!line) continue
+    const inside = (x: number) => {
+      const col = Math.floor(x / colW)
+      return col >= line.colStart && col <= line.colEnd
+    }
+    if (item.adv) {
+      const chars = Array.from(item.text)
+      const kept = chars.filter((_, c) => inside(item.x0 + (c + 0.5) * item.adv!))
+      if (!kept.length) continue
+      const first = chars.findIndex((_, c) => inside(item.x0 + (c + 0.5) * item.adv!))
+      picked.push({ item, text: chars.slice(first, first + kept.length).join('') })
+    } else if (inside((item.x0 + item.x1) / 2)) picked.push({ item, text: item.text })
+  }
+  return joinItems(picked, blocks)
+}
+
+// Joins picked words: a new line between blocks (a tab between the cells of
+// a table row), a block's prefix when its first word is in, a new line
+// between code lines; inside a block a space between words, none between
+// the pieces of one word (boxes on one line closer than a fifth of the line
+// height: a space is wider, the padding beside inline code narrower), none after a - or /
+// that ends a line.
+export function joinItems(picked: readonly { item: Item; text: string }[], blocks: readonly TextBlock[]): string {
+  let out = ''
+  let prev: { item: Item; text: string } | null = null
+  const prefixOf = (item: Item) => {
+    const b = blocks[item.block]
+    return b?.prefix && b.first === item.i ? b.prefix : ''
+  }
+  for (const p of picked) {
+    if (!prev) out += prefixOf(p.item)
+    else if (p.item.block !== prev.item.block) {
+      const b = blocks[p.item.block]
+      const before = blocks[prev.item.block]
+      out += b?.kind === 'cell' && (b.cx ?? 0) > 0 && before?.kind === 'cell' ? '\t' : '\n'
+      out += prefixOf(p.item)
+    } else if (p.item.adv !== undefined || prev.item.adv !== undefined) out += '\n'
+    else {
+      const height = p.item.y1 - p.item.y0
+      const sameLine = Math.abs((p.item.y0 + p.item.y1) / 2 - (prev.item.y0 + prev.item.y1) / 2) < height / 2
+      if (sameLine) out += p.item.x0 - prev.item.x1 > height * 0.2 ? ' ' : ''
+      else out += /[-/]$/.test(prev.text) ? '' : ' '
+    }
+    out += p.text
+    prev = p
+  }
+  return out
+}
+
+// The copy: text segments as they are, each run as its page's text (a run
+// with no page, or no words, gives nothing), joined by new lines.
+export function joinSegments(segments: readonly Segment[], texts: readonly (string | null)[]): string {
+  return segments
+    .map((s, i) => (s.kind === 'text' ? s.text : texts[i] ?? ''))
+    .filter((t, i) => t !== '' || segments[i]!.kind === 'text')
+    .join('\n')
+}
+
+// For /md-preview dump: the first `max` cells or characters of the
+// text, a placeholder cell as `[r,c]`, other characters as U+XXXX.
+export function codePointsOf(text: string, max = 40): string {
+  const cps = Array.from(text, c => c.codePointAt(0)!)
+  const out: string[] = []
+  for (let i = 0; i < cps.length && out.length < max; i++) {
+    const cp = cps[i]!
+    if (cp === PLACEHOLDER) {
+      const row = INDEX.get(cps[i + 1] ?? -1)
+      const col = INDEX.get(cps[i + 2] ?? -1)
+      out.push(`U+10EEEE[${row ?? '?'},${col ?? '?'}]`)
+      i += (row === undefined ? 0 : 1) + (col === undefined ? 0 : 1)
+    } else out.push(`U+${cp.toString(16).toUpperCase().padStart(4, '0')}`)
+  }
+  return out.join(' ')
+}

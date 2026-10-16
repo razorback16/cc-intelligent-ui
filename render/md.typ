@@ -208,6 +208,75 @@
 // running off the page.
 #show regex("\S{30,}"): it => it.text.clusters().join(sym.zws)
 
+// ---------- probe: where the text lies ----------
+// probe=1 is given only to `typst query <md.typ> "<mdpos>" --field value`
+// (same inputs as the PNG compile), never to the PNG compile itself: the
+// word rule below splits text into separately shaped runs, which moves
+// glyphs by a fraction of a pixel (a PNG with probe=1 differs from one
+// without in anti-aliasing, max 64/255 on a channel, but no word moves and
+// no line breaks elsewhere). Its marks are `metadata` labelled <mdpos>, in
+// document order:
+//   w: a word (a run of non-space characters, cut after - and /), boxed;
+//      x, y the top-left of its box: y is the top of its line box (text
+//      top-edge "ascender"), w its advance width and h its ascender-to-
+//      descender height. Its ink lies inside the box (1-4 px side bearings
+//      at 2.75 px/pt), its centre is y + h/2.
+//   c: a block code line: x its start, y its baseline, a and d the code
+//      font's ascender and descender, w its width, n its characters.
+//   b: a block starts: paragraph, heading, code block, quote, table cell
+//      (column `cx`), list item (`prefix`: "- ", "1. ", "- [x] ").
+// Each mark has its page `p` (1-based, = the PNG's {0p}) and the text size
+// `s`; all lengths in pt from the page's top-left. A bare (unboxed) mark at
+// the start of a wrapped line is placed at the end of the line above, and
+// one at a paragraph's end on the next line; hence the boxes.
+#let probe = inp.at("probe", default: "0") not in ("", "0", "false", "no", "off")
+#let mark(kind, ..extra) = context {
+  let at = here().position()
+  [#metadata((k: kind, p: at.page, x: at.x / 1pt, y: at.y / 1pt, s: text.size.to-absolute() / 1pt, ..extra.named()))<mdpos>]
+}
+// Block code sets this (an unused cost) so the word rule leaves its text to
+// the line marks.
+#let in-code(costs) = costs.runt == 101%
+#let cjk = regex("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]")
+#let probe-rules(body) = {
+  // A word is cut after a hyphen or a slash, where a line may break; a
+  // token of 30+ characters is one word (it breaks anywhere, see above).
+  show regex("\\S{30,}|[^\\s/-]*[/-]+|[^\\s/-]+"): it => context if in-code(text.costs) { it } else {
+    let size = measure(it)
+    let t = it.text
+    if t.clusters().len() >= 30 or t.match(cjk) != none {
+      // A long word (zws break chances, above) or CJK text (breaks
+      // anywhere) keeps its breaks: only a mark where it starts.
+      mark("w", t: t, w: size.width / 1pt, h: size.height / 1pt)
+      it
+    } else {
+      // Boxed, so the mark is where the word is drawn (a bare mark at the
+      // start of a wrapped line stays at the end of the line above).
+      box({ mark("w", t: t, w: size.width / 1pt, h: size.height / 1pt); it })
+    }
+  }
+  // A code line: a zero-size box at its start (its y is the baseline). An
+  // empty line has none: a box would give it a height.
+  show raw.line: it => context if not in-code(text.costs) or it.text == "" { it } else {
+    let asc = measure(text(top-edge: "ascender", bottom-edge: "baseline", "x")).height
+    let desc = measure(text(top-edge: "baseline", bottom-edge: "descender", "x")).height
+    box(mark("c", t: it.text, w: measure(it.body).width / 1pt, n: it.text.clusters().len(), a: asc / 1pt, d: desc / 1pt))
+    it
+  }
+  show raw.where(block: true): it => {
+    mark("b", kind: "code")
+    set text(costs: (runt: 101%))
+    it
+  }
+  show par: it => { mark("b", kind: "par"); it }
+  show heading: it => { mark("b", kind: "heading"); it }
+  show quote.where(block: true): it => { mark("b", kind: "quote"); it }
+  show table.cell: it => { mark("b", kind: "cell", cx: it.x); it }
+  body
+}
+#show: body => if probe { probe-rules(body) } else { body }
+#let item-mark(prefix, body) = if not probe { body } else { mark("b", kind: "item", prefix: prefix); body }
+
 // ---------- helpers ----------
 #let alt-box(alt, why: none) = box(
   stroke: px + C.muted, inset: (x: 4pt, y: 1.5pt), outset: (y: 1pt), radius: 3pt,
@@ -433,7 +502,11 @@
 #let md-list(..args) = {
   let items = args.pos()
   let tasks = items.map(task-split)
-  if tasks.all(t => t == none) { return list(..args) }
+  if probe {
+    items = items.zip(tasks).map(((it, t)) => item-mark(if t == none { "- " } else if t.at(0) { "- [x] " } else { "- [ ] " }, it))
+    tasks = tasks.zip(items).map(((t, it)) => if t == none { none } else { (t.at(0), item-mark(if t.at(0) { "- [x] " } else { "- [ ] " }, t.at(1))) })
+  }
+  if tasks.all(t => t == none) { return list(..args.named(), ..items) }
   if tasks.all(t => t != none) {
     // GitHub-style: no bullet, the checkbox sits where the bullet would.
     let rows = tasks.map(t => (
@@ -453,9 +526,12 @@
 
 // "1. [x] done": keep the number, put the checkbox after it.
 #let md-enum(..args) = {
-  let items = args.pos().map(it => {
+  let start = args.named().at("start", default: 1)
+  let start = if type(start) == int { start } else { 1 }
+  let items = args.pos().enumerate().map(((i, it)) => {
     let t = task-split(it)
-    if t == none { it } else { [#checkbox(t.at(0)) #t.at(1)] }
+    let it = if t == none { it } else { [#checkbox(t.at(0)) #t.at(1)] }
+    item-mark(str(start + i) + ". ", it)
   })
   enum(..args.named(), ..items)
 }

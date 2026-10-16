@@ -51,6 +51,9 @@ export const NO_NETWORK = 'http://127.0.0.1:9'
 // how long one read may take.
 export const HOST_POLL_MS = 3000
 export const HOST_CHECK_MS = 2000
+// How often the clipboard is read (macOS pbpaste) for a mouse copy of
+// answer pictures.
+export const CLIP_POLL_MS = 300
 // The base every theme merges over (its theme.json and syntax files).
 export const BASE_THEME = 'vscode'
 // The theme used when none is chosen, or when the chosen one is not usable.
