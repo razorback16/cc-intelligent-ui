@@ -1,0 +1,111 @@
+{
+  "name": "VS Code",
+  "description": "VS Code's Markdown preview with the default themes, Dark+ and Light+",
+  "source": "microsoft/vscode (MIT, see LICENSE): extensions/markdown-language-features/media/markdown.css (sizes, spacing), media/highlight.css (code colours, in dark.tmTheme and light.tmTheme), src/vs/platform/theme/common/colors/baseColors.ts (textPreformat, textCodeBlock, textBlockQuote, textLink defaults), extensions/theme-defaults/themes/dark_vs.json and light_vs.json (editor and widget colours)",
+  "syntax": { "dark": "dark.tmTheme", "light": "light.tmTheme" },
+  "fonts": {
+    "body": ["SF Pro Text", "Helvetica Neue", "Helvetica", "Arial", "Noto Sans", "DejaVu Sans",
+             "PingFang SC", "Hiragino Sans", "Apple SD Gothic Neo", "Noto Sans CJK SC",
+             "Apple Color Emoji", "Noto Color Emoji"],
+    "code": ["Menlo", "SF Mono", "DejaVu Sans Mono", "Courier New",
+             "PingFang SC", "Apple Color Emoji", "Noto Color Emoji"],
+    "use-terminal-font": true
+  },
+  "dark": {
+    "fg": "#d4d4d4",
+    "muted": "#ccccccb3",
+    "link": "#3794ff",
+    "accent": "#0e639c",
+    "bg": "#1e1e1e",
+    "border": "#ffffff2e",
+    "th-border": "#ffffffb0",
+    "inline-code-fg": "#d7ba7d",
+    "inline-code-bg": "#ffffff1a",
+    "code-fg": "#d4d4d4",
+    "code-bg": "#0a0a0a66",
+    "code-border": "#303031",
+    "quote-bg": "#ffffff05",
+    "quote-border": "#007acc80",
+    "check": "#ffffff",
+    "red": "#f14c4c",
+    "green": "#89d185",
+    "blue": "#3794ff",
+    "yellow": "#cca700",
+    "orange": "#d18616",
+    "purple": "#b180d7"
+  },
+  "light": {
+    "fg": "#000000",
+    "muted": "#717171",
+    "link": "#006ab1",
+    "accent": "#007acc",
+    "bg": "#ffffff",
+    "border": "#0000002e",
+    "th-border": "#000000b0",
+    "inline-code-fg": "#a31515",
+    "inline-code-bg": "#0000001a",
+    "code-fg": "#000000",
+    "code-bg": "#dcdcdc66",
+    "code-border": "#d4d4d4",
+    "quote-bg": "#0000000d",
+    "quote-border": "#007acc80",
+    "check": "#ffffff",
+    "red": "#e51400",
+    "green": "#388a34",
+    "blue": "#1a85ff",
+    "yellow": "#bf8803",
+    "orange": "#d18616",
+    "purple": "#652d90"
+  },
+  "text": {
+    "leading-em": 0.38,
+    "paragraph-em": 1.2
+  },
+  "heading": {
+    "size-em": [2, 1.5, 1.25, 1, 0.875, 0.85],
+    "weight": 600,
+    "leading-em": 0.2,
+    "above-em": [1.4, 1.6, 1.5, 1.5, 1.5, 1.5],
+    "below-em": [1.0, 1.0, 0.9, 0.9, 0.9, 0.9],
+    "rule-levels": 2,
+    "rule-pad-em": 0.3
+  },
+  "list": {
+    "markers": ["disc", "circle", "square"],
+    "indent-em": 1.9,
+    "gap-em": 0.55,
+    "number-indent-em": 1.45,
+    "number-gap-em": 0.5,
+    "item-spacing-em": 0.38
+  },
+  "inline-code": {
+    "size": 1.0,
+    "pad-x-px": 3,
+    "pad-y-px": 1,
+    "radius-px": 4
+  },
+  "code-block": {
+    "size": 1.0,
+    "line-height": 1.357,
+    "pad-px": 16,
+    "radius-px": 3,
+    "border-px": 1
+  },
+  "quote": {
+    "bar-px": 5,
+    "radius-px": 2,
+    "pad-left-px": 10,
+    "pad-right-px": 16,
+    "pad-y-em": 0.55
+  },
+  "table": {
+    "pad-x-px": 10,
+    "pad-y-px": 5,
+    "border-px": 1,
+    "header-weight": 700
+  },
+  "rule": {
+    "border-px": 1,
+    "gap-em": 1.5
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "VS Code Modern",
+  "description": "VS Code's Markdown preview with Dark Modern and Light Modern",
+  "source": "microsoft/vscode (MIT, see LICENSE): extensions/theme-defaults/themes/dark_modern.json and light_modern.json (colours); every other value comes from the vscode theme (markdown.css, highlight.css)",
+  "dark": {
+    "fg": "#cccccc",
+    "muted": "#9d9d9d",
+    "link": "#4daafc",
+    "accent": "#0078d4",
+    "bg": "#1f1f1f",
+    "inline-code-fg": "#d0d0d0",
+    "inline-code-bg": "#ffffff21",
+    "code-fg": "#cccccc",
+    "code-bg": "#ffffff0e",
+    "code-border": "#313131",
+    "quote-bg": "#ffffff0e",
+    "quote-border": "#616161"
+  },
+  "light": {
+    "fg": "#3b3b3b",
+    "muted": "#3b3b3b",
+    "link": "#005fb8",
+    "accent": "#005fb8",
+    "inline-code-fg": "#3b3b3b",
+    "inline-code-bg": "#0000001f",
+    "code-fg": "#3b3b3b",
+    "code-bg": "#00000007",
+    "code-border": "#e5e5e5",
+    "quote-bg": "#00000007",
+    "quote-border": "#e5e5e5"
+  }
+}

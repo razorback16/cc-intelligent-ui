@@ -1,0 +1,8 @@
+{
+  "name": "razorback16",
+  "owner": { "name": "razorback16" },
+  "metadata": {
+    "description": "md-preview: Claude's answers drawn as rendered Markdown in your terminal"
+  },
+  "plugins": [{ "name": "md-preview", "source": "./" }]
+}
