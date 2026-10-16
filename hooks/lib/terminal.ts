@@ -1,0 +1,54 @@
+// What the terminal can draw: its columns and cell size, whether the engine
+// draws pictures there, and how large a picture sent as bytes (over ssh) can be.
+import type { Cell } from './state'
+import { GUTTER, MAX_COLUMNS, SEGMENT_ROWS } from './settings'
+
+// The columns a picture takes: the viewport less the bullet, MAX_COLUMNS at most.
+export function columnsFor(viewportColumns: number | undefined): number {
+  return Math.max(20, Math.min(MAX_COLUMNS, (viewportColumns ?? 80) - GUTTER))
+}
+
+// The cell in device pixels from `rows cols xpixel ypixel` (TIOCGWINSZ).
+// iTerm2 (3.5+), Ghostty, kitty and WezTerm report device pixels already, so
+// there is no backing-scale step. Null where the tty reports no pixels or a
+// cell that can't be right (under 4 or over 64 px wide).
+export function cellOf(stdout: string): Cell | null {
+  const [rows, columns, x, y] = stdout.trim().split(/\s+/).map(Number)
+  if (!rows || !columns || !x || !y) return null
+  const width = x / columns
+  const height = y / rows
+  return width >= 4 && width <= 64 && height >= 4 ? { width, height } : null
+}
+
+// A set flag: anything but empty, 0, false, no or off.
+export const isSet = (value: string | undefined) => !!value && !/^(0|false|no|off)$/i.test(value.trim())
+
+// Whether the engine draws pictures here; elsewhere an Image shows only its
+// alt, so the text is better. Claude Code turns kitty graphics on by itself
+// only for kitty and Ghostty; any other terminal draws only when
+// CLAUDE_CODE_FORCE_TERMINAL_IMAGES is set. A background session never
+// draws. In tmux or screen the engine draws none even when forced (it does
+// not wrap them for passthrough), so only MD_PREVIEW_FORCE tries. Over ssh
+// TERM_PROGRAM and KITTY_WINDOW_ID do not come through, so TERM tells; the
+// pictures then go as bytes (Env.inline), as the terminal can't read our files.
+export function canDrawIn(env: { program: string; term: string; kitty: boolean; tmux: boolean; ssh: boolean; background: boolean; engineForced: boolean; modForced: boolean }): boolean {
+  if (env.background) return false
+  if (env.tmux) return env.modForced
+  if (env.engineForced || env.modForced) return true
+  if (env.ssh) return /ghostty|kitty/i.test(env.term)
+  return /ghostty/i.test(env.program + env.term) || /kitty/i.test(env.term) || env.kitty
+}
+
+// The most an Image's `{ png }` source holds: 2 MiB decoded, 1 to 4096
+// pixels a side (the engine refuses the tree past that).
+export const INLINE_MAX_BYTES = 2 * 1024 * 1024
+export const INLINE_MAX_SIDE = 4096
+// The bytes a standard padded base64 text decodes to.
+export const base64Bytes = (text: string) => Math.floor((text.length * 3) / 4) - (text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0)
+// Whether a page can go as `{ png }` bytes: by its pixels, and by its bytes once read.
+export const fitsInline = (page: { width: number; height: number }, base64?: string) =>
+  page.width >= 1 && page.width <= INLINE_MAX_SIDE && page.height >= 1 && page.height <= INLINE_MAX_SIDE &&
+  (base64 === undefined || base64Bytes(base64) <= INLINE_MAX_BYTES)
+// Over ssh, a segment's budget in rows so that its page stays under
+// INLINE_MAX_SIDE pixels tall (with room for the rough row count).
+export const inlineBudget = (px: Cell) => Math.max(20, Math.min(SEGMENT_ROWS, Math.floor((INLINE_MAX_SIDE / px.height) * 0.75)))

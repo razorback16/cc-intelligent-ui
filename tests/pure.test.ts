@@ -4,6 +4,9 @@ import {
   alignFirstLine, DEFAULT_METRICS, DEFAULT_SIZE, firstLineOf, fontFit, ghosttyFontOf, itermFontOf, parseCommand, parseFontSpec, typstCall,
   blocksOf, canDrawIn, cellOf, columnsFor, DEFAULT_CELL, hashOf, imagePathOf, isSet, localImages, MAX_COLUMNS,
   parseOd, plainOf, pngSize, rowsFor, shouldRetrySafe, sizing, splitSegments, themeOf, TYPST_PROMPT,
+  escapeControls, luminanceOf, modeOfLuminance, OSC11_PL, parseOsc11, pickProfile, itermAppearanceOf, itermModeOf,
+  GHOSTTY_DEFAULT_BG, ghosttyBackgroundOf, ghosttyThemePaths, ghosttyThemesOf, ghosttyValueOf, hexColorOf,
+  modeLine, modeOfColorFgBg, modeOfGnome, modeOfMacAppearance, resolveMode, settingOf,
   BASE_THEME, DEFAULT_THEME, chooseTheme, isSyntaxPath, isThemeName, measureCall, pickThemes, renderKey, themeEntry, themeFiles, themeListing,
 } from '../hooks/register'
 
@@ -139,6 +142,8 @@ test('the size command takes 80 to 200 percent', () => {
   expect(parseCommand('size')).toEqual({ kind: 'bad' })
   expect(parseCommand('size big')).toEqual({ kind: 'bad' })
   expect(parseCommand('bigger')).toEqual({ kind: 'bad' })
+  expect(parseCommand('probe')).toEqual({ kind: 'probe' })
+  expect(parseCommand('probe 3')).toEqual({ kind: 'bad' })
 })
 
 test('the first line of an answer is told by how it starts', () => {
@@ -272,7 +277,7 @@ test('the alt is one short plain line', () => {
 })
 
 test('pictures draw where Claude Code draws them: kitty and Ghostty, or forced', () => {
-  const base = { program: '', term: 'xterm-256color', kitty: false, tmux: false, ssh: false, engineForced: false, modForced: false }
+  const base = { program: '', term: 'xterm-256color', kitty: false, tmux: false, ssh: false, background: false, engineForced: false, modForced: false }
   expect(canDrawIn({ ...base, program: 'ghostty' })).toBe(true)
   expect(canDrawIn({ ...base, term: 'xterm-ghostty' })).toBe(true)
   expect(canDrawIn({ ...base, term: 'xterm-kitty' })).toBe(true)
@@ -284,9 +289,9 @@ test('pictures draw where Claude Code draws them: kitty and Ghostty, or forced',
   expect(canDrawIn({ ...base, program: 'WarpTerminal' })).toBe(false)
   expect(canDrawIn({ ...base, program: 'Apple_Terminal' })).toBe(false)
   expect(canDrawIn({ ...base, program: 'ghostty', tmux: true })).toBe(false)
-  expect(canDrawIn({ ...base, program: 'ghostty', tmux: true, engineForced: true })).toBe(true)
+  expect(canDrawIn({ ...base, program: 'ghostty', tmux: true, engineForced: true })).toBe(false)
   expect(canDrawIn({ ...base, program: 'ghostty', ssh: true })).toBe(false)
-  expect(canDrawIn({ ...base, program: 'iTerm.app', ssh: true, engineForced: true })).toBe(false)
+  expect(canDrawIn({ ...base, program: 'iTerm.app', ssh: true, engineForced: true })).toBe(true)
   expect(canDrawIn({ ...base, ssh: true, modForced: true })).toBe(true)
   expect(canDrawIn({ ...base, modForced: true })).toBe(true)
 })
@@ -417,4 +422,128 @@ test('the font measure reads the active theme, with the root at /', () => {
   expect(argv[argv.indexOf('--root') + 1]).toBe('/')
   expect(argv).toContain('theme-dir=/u/nord')
   expect(argv).toContain('term-font=MesloLGS NF')
+})
+
+test('the Claude Code theme setting is fixed light, fixed dark, or auto', () => {
+  for (const v of ['light', 'light-daltonized', 'light-ansi']) expect(settingOf(v)).toBe('light')
+  for (const v of ['dark', 'dark-daltonized', 'dark-ansi', undefined, '', true]) expect(settingOf(v)).toBe('dark')
+  for (const v of ['auto', 'system', 'something-new']) expect(settingOf(v)).toBe('auto')
+})
+
+test('the OS appearance is read from macOS, GNOME and COLORFGBG', () => {
+  expect(modeOfMacAppearance(0, 'Dark\n')).toBe('dark')
+  expect(modeOfMacAppearance(1, '')).toBe('light')
+  expect(modeOfMacAppearance(0, '')).toBe('light')
+  expect(modeOfGnome("'prefer-dark'\n")).toBe('dark')
+  expect(modeOfGnome("'prefer-light'")).toBe('light')
+  expect(modeOfGnome("'default'")).toBe('light')
+  expect(modeOfGnome('No such key')).toBe(null)
+  expect(modeOfColorFgBg('15;0')).toBe('dark')
+  expect(modeOfColorFgBg('0;15')).toBe('light')
+  expect(modeOfColorFgBg('0;default;7')).toBe('light')
+  expect(modeOfColorFgBg('7;8')).toBe('dark')
+  expect(modeOfColorFgBg('0;11')).toBe(null)
+  expect(modeOfColorFgBg('')).toBe(null)
+  expect(modeOfColorFgBg(undefined)).toBe(null)
+})
+
+test("iTerm2's appearance and its profile's background give the mode", () => {
+  expect(itermAppearanceOf('1\n')).toBe('dark')
+  expect(itermAppearanceOf('3')).toBe('dark')
+  expect(itermAppearanceOf('0')).toBe('light')
+  expect(itermAppearanceOf('2')).toBe('light')
+  for (const v of ['4', '5', '6', '']) expect(itermAppearanceOf(v)).toBe(null)
+  const dark = { 'Red Component': 0.11, 'Green Component': 0.15, 'Blue Component': 0.17 }
+  const white = { 'Red Component': 1, 'Green Component': 1, 'Blue Component': 1 }
+  const marks = JSON.stringify([
+    { Name: 'Default', Guid: 'G1', 'Use Separate Colors for Light and Dark Mode': true, 'Background Color': dark, 'Background Color (Dark)': dark, 'Background Color (Light)': white },
+    { Name: 'Paper', Guid: 'G2', 'Background Color': white },
+  ])
+  // Separate colours: the set for iTerm2's appearance (the OS's, when it follows it).
+  expect(itermModeOf(marks, 'Default', 'G1', 'dark')).toBe('dark')
+  expect(itermModeOf(marks, 'Default', 'G1', 'light')).toBe('light')
+  expect(itermModeOf(marks, 'Default', 'G1', null)).toBe(null)
+  // One set of colours: the appearance does not matter.
+  expect(itermModeOf(marks, 'Paper', 'G1', 'dark')).toBe('light')
+  expect(itermModeOf(marks, undefined, 'G2\n', null)).toBe('light')
+  expect(itermModeOf(marks, 'Gone', 'nope', 'dark')).toBe(null)
+  expect(itermModeOf('not json', 'Default', 'G1', 'dark')).toBe(null)
+})
+
+test("Ghostty's background comes from its config, its theme, or its default", () => {
+  expect(hexColorOf('#282c34')).toEqual({ r: 0x28 / 255, g: 0x2c / 255, b: 0x34 / 255 })
+  expect(hexColorOf('FFFFFF')).toEqual({ r: 1, g: 1, b: 1 })
+  expect(hexColorOf('black')).toBe(null)
+  expect(ghosttyValueOf('background = #111111\nfont-family = "A B"\nbackground = #222222', 'background')).toBe('#222222')
+  expect(ghosttyValueOf('font-family = "A B"', 'font-family')).toBe('A B')
+  expect(ghosttyValueOf('', 'theme')).toBe('')
+  expect(ghosttyThemesOf('light:3024 Day,dark:Rose Pine')).toEqual({ light: '3024 Day', dark: 'Rose Pine' })
+  expect(ghosttyThemesOf(' dark: Rose Pine , light: Rose Pine Dawn ')).toEqual({ light: 'Rose Pine Dawn', dark: 'Rose Pine' })
+  expect(ghosttyThemesOf('Rose Pine')).toBe(null)
+  expect(ghosttyThemesOf('light:Only')).toBe(null)
+  const where = { home: '/h', resources: '/R' }
+  expect(ghosttyThemePaths('Nord', where)).toEqual([
+    '/h/.config/ghostty/themes/Nord', '/h/Library/Application Support/com.mitchellh.ghostty/themes/Nord', '/R/themes/Nord',
+    '/Applications/Ghostty.app/Contents/Resources/ghostty/themes/Nord', '/usr/share/ghostty/themes/Nord',
+  ])
+  expect(ghosttyThemePaths('Nord', { ...where, xdgConfig: '/x' })[0]).toBe('/x/ghostty/themes/Nord')
+  expect(ghosttyThemePaths('/t/Mine', where)).toEqual(['/t/Mine'])
+  expect(ghosttyThemePaths('~/t/Mine', where)).toEqual(['/h/t/Mine'])
+  // No theme, no background: the default. A single theme: show-config merged it in.
+  expect(ghosttyBackgroundOf('font-size = 13', null, {})).toBe(GHOSTTY_DEFAULT_BG)
+  expect(ghosttyBackgroundOf('theme = Rose Pine Dawn\nbackground = #faf4ed', null, {})).toBe('#faf4ed')
+  // light:A,dark:B: the shown background is one theme's; the OS picks the theme.
+  const pair = 'theme = light:3024 Day,dark:Rose Pine\nbackground = #f7f7f7'
+  const bgs = { light: '#f7f7f7', dark: '#191724' }
+  expect(ghosttyBackgroundOf(pair, 'dark', bgs)).toBe('#191724')
+  expect(ghosttyBackgroundOf(pair, 'light', bgs)).toBe('#f7f7f7')
+  expect(ghosttyBackgroundOf(pair, null, bgs)).toBe(null)
+  // A background of the config's own wins over both themes.
+  expect(ghosttyBackgroundOf('theme = light:3024 Day,dark:Rose Pine\nbackground = #112233', 'light', bgs)).toBe('#112233')
+})
+
+test('auto draws as the OS is; a fixed setting ignores the OS', () => {
+  const lightMac = { mode: 'light' as const, source: 'macOS' as const }
+  expect(resolveMode('auto', lightMac)).toBe('light')
+  expect(resolveMode('auto', null)).toBe('dark')
+  expect(resolveMode('dark', lightMac)).toBe('dark')
+  expect(resolveMode('light', null)).toBe('light')
+  expect(modeLine('light', 'auto', 'auto', lightMac)).toBe('mode light (auto, from macOS)')
+  expect(modeLine('dark', 'auto', 'auto', null)).toBe('mode dark (auto, OS appearance not known, dark assumed)')
+  expect(modeLine('dark', 'dark', 'dark-ansi', null)).toBe('mode dark (Claude Code theme dark-ansi)')
+})
+
+test('the iTerm2 profile for the font is the one ITERM_PROFILE names, else the default one', () => {
+  const marks = [{ Name: 'Default', Guid: 'G1' }, { Name: 'tmux', Guid: 'G2' }, 'not a profile']
+  expect(pickProfile(marks, 'tmux', 'G1')?.Guid).toBe('G2')
+  expect(pickProfile(marks, 'gone', 'G1')?.Name).toBe('Default')
+  expect(pickProfile(marks, undefined, ' G2\n')?.Name).toBe('tmux')
+  expect(pickProfile(marks, 'gone', 'G9')).toBe(null)
+})
+
+test("the terminal's OSC 11 answer is read with BEL or ST and 1-4 hex digits", () => {
+  expect(parseOsc11('\x1b]11;rgb:ffff/ffff/ffff\x07')).toEqual({ r: 1, g: 1, b: 1 })
+  expect(parseOsc11('\x1b]11;rgb:28/2c/34\x1b\\')).toEqual({ r: 0x28 / 255, g: 0x2c / 255, b: 0x34 / 255 })
+  expect(parseOsc11('junk\x1b]11;rgb:1d1d/2525/2a2a\x07more')).toEqual({ r: 0x1d1d / 65535, g: 0x2525 / 65535, b: 0x2a2a / 65535 })
+  expect(parseOsc11('\x1b]11;rgb:f/0/8\x07')).toEqual({ r: 1, g: 0, b: 8 / 15 })
+  expect(parseOsc11('\x1b]11;rgba:ffff/ffff/ffff/ffff\x07')).toEqual({ r: 1, g: 1, b: 1 })
+  for (const bad of ['', 'rgb:ffff/ffff/ffff', '\x1b]11;rgb:ffff/ffff\x07', '\x1b]11;rgb:fffff/0/0\x07', '\x1b]11;rgb:ffff/ffff/ffff', '\x1b]10;rgb:ffff/ffff/ffff\x07']) {
+    expect(parseOsc11(bad)).toBe(null)
+  }
+})
+
+test('luminance gives the mode: light above 0.4', () => {
+  const near1 = (a: number, b: number) => expect(Math.abs(a - b)).toBeLessThan(1e-3)
+  near1(luminanceOf({ r: 1, g: 1, b: 1 }), 1)
+  near1(luminanceOf({ r: 0.5, g: 0.5, b: 0.5 }), 0.214)
+  expect(modeOfLuminance(luminanceOf(parseOsc11('\x1b]11;rgb:ffff/ffff/ffff\x07')!))).toBe('light')
+  expect(modeOfLuminance(luminanceOf(parseOsc11('\x1b]11;rgb:1d1d/2525/2a2a\x07')!))).toBe('dark')
+  expect(modeOfLuminance(luminanceOf({ r: 0.75, g: 0.75, b: 0.75 }))).toBe('light')
+})
+
+test('the probe output is shown with its control characters spelled out', () => {
+  expect(escapeControls('\x1b]11;rgb:ffff/ffff/ffff\x07')).toBe('\\e]11;rgb:ffff/ffff/ffff\\a')
+  expect(escapeControls('a\x1b\\\x01')).toBe('a\\e\\\\x01')
+  expect(OSC11_PL).toContain('O_NONBLOCK')
+  expect(OSC11_PL).not.toContain('stty')
 })
