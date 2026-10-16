@@ -1,8 +1,10 @@
-// Pictures under rows (pure): which images a SendUserFile result or a prompt
-// names, where Claude Code keeps pasted images, and the cells a picture takes.
-// The drawing on the host is in pictures.tsx.
+// Pictures under rows (pure): which images and Markdown files a SendUserFile
+// result names, which images a prompt names, where Claude Code keeps pasted
+// images, and the cells a picture takes. The drawing on the host is in
+// pictures.tsx.
 import type { Cell } from './state'
 import { MAX_IMAGE_ROWS, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS } from './settings'
+import { hashOf } from './draw'
 
 // The most rows a picture under a row takes: half the viewport, within
 // PICTURE_MIN_ROWS to PICTURE_MAX_ROWS.
@@ -20,17 +22,54 @@ export function pictureCells(size: { width: number; height: number }, columns: n
   }
 }
 
-// The image paths of a SendUserFile result that can be PNGs (the engine's
-// Image draws PNG only; the header read tells for sure).
-export function sentImages(output: unknown): string[] {
+// The kinds of file a SendUserFile result can draw: an image the engine's
+// Image takes (PNG), an image Typst makes a PNG of (JPEG, WebP), and a
+// Markdown file (drawn as an answer is).
+export type SentKind = 'png' | 'jpeg' | 'webp' | 'markdown'
+export type SentFile = { path: string; kind: SentKind }
+
+// An image's type: by its media type, else by its file name. Null for any
+// other type (GIF, SVG, …). An image with neither is a PNG to try (the
+// header read tells for sure).
+export function imageKindOf(a: { path: string; media_type?: unknown }): 'png' | 'jpeg' | 'webp' | null {
+  if (typeof a.media_type === 'string') {
+    const type = a.media_type.trim().toLowerCase()
+    if (type === 'image/png') return 'png'
+    if (type === 'image/jpeg' || type === 'image/jpg') return 'jpeg'
+    return type === 'image/webp' ? 'webp' : null
+  }
+  if (/\.jpe?g$/i.test(a.path)) return 'jpeg'
+  if (/\.webp$/i.test(a.path)) return 'webp'
+  return 'png'
+}
+
+// A Markdown file, by its name: .md or .markdown.
+export const isMarkdownPath = (path: string) => /\.(md|markdown)$/i.test(path)
+
+// The files of a SendUserFile result that can draw, in its order, each once.
+export function sentFiles(output: unknown): SentFile[] {
   const list = output && typeof output === 'object' ? (output as { attachments?: unknown }).attachments : undefined
   if (!Array.isArray(list)) return []
-  return list
-    .filter((a): a is { path: string; isImage: true; media_type?: unknown } =>
-      !!a && typeof a === 'object' && a.isImage === true && typeof a.path === 'string' && a.path !== '')
-    .filter(a => typeof a.media_type !== 'string' || /^image\/png$/i.test(a.media_type))
-    .map(a => a.path)
+  const found: SentFile[] = []
+  for (const a of list) {
+    if (!a || typeof a !== 'object' || typeof a.path !== 'string' || a.path === '') continue
+    if (found.some(f => f.path === a.path)) continue
+    const kind = a.isImage === true ? imageKindOf(a) : isMarkdownPath(a.path) ? 'markdown' : null
+    if (kind) found.push({ path: a.path, kind })
+  }
+  return found
 }
+
+// The image paths of a SendUserFile result that can draw (PNG, JPEG, WebP).
+export const sentImages = (output: unknown) => sentFiles(output).filter(f => f.kind !== 'markdown').map(f => f.path)
+
+// The folder of a file, for the relative images of a Markdown file.
+export const folderOf = (path: string) => path.replace(/\/+[^/]*$/, '') || '/'
+
+// The PNG Typst makes of a JPEG or WebP: in a key folder of the cache (as a
+// compile's, dropped after 2 days), by the file and its stat stamp, so a
+// changed file is made again.
+export const convertedPath = (cache: string, file: string, stamp: string) => `${cache}/${hashOf(['convert', file, stamp])}/image.png`
 
 // The numbers of the `[Image #N]` marks in a prompt, each once, in order.
 export function pastedNumbers(text: string): number[] {

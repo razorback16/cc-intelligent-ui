@@ -57,6 +57,8 @@ export type Job = {
   size: number
   themeDir: string
   env: Env
+  // The folder relative images start from (a Markdown file's); else env.cwd.
+  base?: string
 }
 // The active theme: its name, folder, and the mtimes of its files and the
 // base theme's, which are part of every key.
@@ -135,6 +137,12 @@ export const INLINE_KEPT = 64
 // PNG), and the pasted-images folder of each session once found.
 export const pictures = new Map<string, { stamp: string; size: { width: number; height: number } | null }>()
 export const pasteDirs = new Map<string, string>()
+// SendUserFile: the PNG Typst made of each JPEG or WebP by its stat stamp
+// (null: it failed), the ones Typst makes now, and the text of each Markdown
+// file by its stat stamp (null: it does not draw).
+export const converted = new Map<string, { stamp: string; png: string | null }>()
+export const converting = new Map<string, Promise<string | null>>()
+export const sentTexts = new Map<string, { stamp: string; text: string | null }>()
 // The plan: the text edited in md-preview's flow, by the call's tool_use_id
 // (its rows draw it), and the ExitPlanMode calls of subagents (drawn as the
 // engine draws them).

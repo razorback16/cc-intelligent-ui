@@ -20,7 +20,6 @@ import type { EngineInterface, Register, RenderElement, RenderViewport } from 'c
 
 import { DEFAULT_THEME, MAX_SIZE, MIN_SIZE, TYPST_PROMPT } from './lib/settings'
 import { editedPlans, refresh, S, subagentPlans, writesLive, type Env } from './lib/state'
-import { imagePathOf } from './lib/markdown'
 import { columnsFor } from './lib/terminal'
 import { escapeControls, luminanceOf, modeLine, modeOfLuminance, parseOsc11, settingOf } from './lib/mode'
 import { applyTheme, themeListing, userThemesOf } from './lib/themes'
@@ -32,8 +31,8 @@ import { drawPages } from './lib/draw'
 import { finalizeAll } from './lib/stream'
 import { pagesOf } from './lib/answer'
 import { noteViewport, setUp } from './lib/env'
-import { pastedImagePath, pastedNumbers, sentImages } from './lib/images'
-import { pasteDir, shownOf, underRow, type Shown } from './lib/pictures'
+import { pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
+import { pasteDir, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
 import {
   currentPlan, decidePlan, decisionOf, drawAskLine, drawPlanResult, drawPlanUse, isPlanQuestion, planFileOf, planInputOf, planOf,
   planShownOf, scheduleClear, type PlanVerdict,
@@ -57,7 +56,7 @@ export {
 export { commandSuggestions, parseCommand, type Command, type Suggestion } from './lib/command'
 export { hasSetup, SETUP_END, SETUP_START, setupBlock, shellRcOf, withoutSetup, withSetup, type ShellRc } from './lib/setup'
 export { OSC11_PL } from './lib/host'
-export { measureCall, noNetworkEnv, parseOd, pngSize, shouldRetrySafe, typstCall } from './lib/typst'
+export { convertCall, measureCall, noNetworkEnv, parseOd, pngSize, shouldRetrySafe, typstCall } from './lib/typst'
 export { alignFirstLine, firstLineOf, fontFit, hashOf, renderKey, rowsFor, sizing, type FirstLine } from './lib/draw'
 export * from './lib/images'
 export {
@@ -273,23 +272,26 @@ export const register: Register = on => {
     return <Box />
   })
 
-  // The PNGs Claude sends with SendUserFile, under the result row that lists
-  // them. Its ToolUse row draws no attachments, and the tool is never in a
-  // ToolGroup, so only ToolResult is hooked and no picture draws twice.
+  // The files Claude sends with SendUserFile, under the result row that lists
+  // them: PNG, JPEG and WebP images, and Markdown files drawn as an answer is
+  // (they need Typst). Its ToolUse row draws no attachments, and the tool is
+  // never in a ToolGroup, so only ToolResult is hooked and no picture draws
+  // twice.
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
     if (e.surface !== 'terminal' || e.props.tool !== 'SendUserFile' || e.props.isErrored) return next(e)
-    let shown: Shown[] = []
+    let under: Under[] = []
     try {
-      const files = sentImages(e.props.output)
+      const files = sentFiles(e.props.output)
       const ready = files.length ? await pictureEnv($, e) : null
-      if (ready) shown = await shownOf($, e, ready, files.map(f => imagePathOf(f, ready.cwd)))
+      const markdown = ready && files.some(f => f.kind === 'markdown') ? await answerEnv($, e) : null
+      if (ready) under = await sentOf($, e, { ready, markdown, files, id: e.props.tool_use_id })
     } catch {
-      shown = []
+      under = []
     }
     const row = await next(e)
-    if (!shown.length) return row
+    if (!under.length) return row
     try {
-      return underRow($, e, row, shown)
+      return underRow($, e, row, under)
     } catch {
       return row
     }

@@ -1,8 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import {
-  claudeTmpOf, DEFAULT_CELL, pasteDirOf, pastedImagePath, pastedNumbers, PICTURE_MAX_ROWS, pictureCells, pictureRowsFor,
-  projectSlug, sentImages,
+  claudeTmpOf, convertCall, convertedPath, DEFAULT_CELL, folderOf, imageKindOf, isMarkdownPath, pasteDirOf, pastedImagePath, pastedNumbers,
+  PICTURE_MAX_ROWS, pictureCells, pictureRowsFor, projectSlug, renderKey, sentFiles, sentImages,
 } from '../hooks/register'
 
 // ---- Pure helpers -----------------------------------------------------------
@@ -26,7 +26,7 @@ test('a picture takes at most half the viewport, within 6 and 24 rows', () => {
   expect(pictureRowsFor(8)).toBe(6)
 })
 
-test('only image attachments that can be PNGs are drawn', () => {
+test('only PNG, JPEG and WebP image attachments are drawn', () => {
   expect(sentImages({
     attachments: [
       { path: '/t/a.png', size: 1, isImage: true, media_type: 'image/png' },
@@ -34,11 +34,89 @@ test('only image attachments that can be PNGs are drawn', () => {
       { path: '/t/c.jpg', size: 1, isImage: true, media_type: 'image/jpeg' },
       { path: '/t/d.pdf', size: 1, isImage: false },
       { size: 1, isImage: true },
+      { path: '/t/e.webp', size: 1, isImage: true, media_type: 'image/webp' },
+      { path: '/t/f.gif', size: 1, isImage: true, media_type: 'image/gif' },
+      { path: '/t/g.svg', size: 1, isImage: true, media_type: 'image/svg+xml' },
     ],
-  })).toEqual(['/t/a.png', '/t/b.png'])
+  })).toEqual(['/t/a.png', '/t/b.png', '/t/c.jpg', '/t/e.webp'])
   expect(sentImages(undefined)).toEqual([])
   expect(sentImages('error text')).toEqual([])
   expect(sentImages({ attachments: 'x' })).toEqual([])
+})
+
+test('an image type: by its media type, else by its name; with neither, a PNG to try', () => {
+  expect(imageKindOf({ path: '/t/a', media_type: 'image/png' })).toBe('png')
+  expect(imageKindOf({ path: '/t/a', media_type: 'IMAGE/JPEG' })).toBe('jpeg')
+  expect(imageKindOf({ path: '/t/a', media_type: 'image/jpg' })).toBe('jpeg')
+  expect(imageKindOf({ path: '/t/a', media_type: 'image/webp' })).toBe('webp')
+  // The media type wins over the name.
+  expect(imageKindOf({ path: '/t/a.jpg', media_type: 'image/png' })).toBe('png')
+  expect(imageKindOf({ path: '/t/a.png', media_type: 'image/gif' })).toBe(null)
+  expect(imageKindOf({ path: '/t/a.png', media_type: 'image/svg+xml' })).toBe(null)
+  expect(imageKindOf({ path: '/t/a.PNG' })).toBe('png')
+  expect(imageKindOf({ path: '/t/a.JPG' })).toBe('jpeg')
+  expect(imageKindOf({ path: '/t/a.jpeg' })).toBe('jpeg')
+  expect(imageKindOf({ path: '/t/a.WebP' })).toBe('webp')
+  expect(imageKindOf({ path: '/t/screenshot' })).toBe('png')
+})
+
+test('a Markdown file: .md or .markdown, not an image; all files in their order, each once', () => {
+  expect(isMarkdownPath('/t/notes.md')).toBe(true)
+  expect(isMarkdownPath('/t/NOTES.Markdown')).toBe(true)
+  expect(isMarkdownPath('/t/notes.mdx')).toBe(false)
+  expect(isMarkdownPath('/t/md')).toBe(false)
+  expect(sentFiles({
+    attachments: [
+      { path: '/t/notes.md', size: 1, isImage: false },
+      { path: '/t/a.jpg', size: 1, isImage: true },
+      { path: '/t/b.txt', size: 1, isImage: false },
+      { path: '/t/c.png', size: 1, isImage: true, media_type: 'image/png' },
+      { path: '/t/notes.md', size: 1, isImage: false },
+      { path: '/t/odd.md', size: 1, isImage: true, media_type: 'image/png' },
+      { path: '/t/d.webp', size: 1, isImage: true },
+    ],
+  })).toEqual([
+    { path: '/t/notes.md', kind: 'markdown' },
+    { path: '/t/a.jpg', kind: 'jpeg' },
+    { path: '/t/c.png', kind: 'png' },
+    { path: '/t/odd.md', kind: 'png' },
+    { path: '/t/d.webp', kind: 'webp' },
+  ])
+  expect(sentFiles(null)).toEqual([])
+})
+
+test('the folder of a file, for the relative images of a Markdown file', () => {
+  expect(folderOf('/t/docs/notes.md')).toBe('/t/docs')
+  expect(folderOf('/notes.md')).toBe('/')
+  expect(folderOf('/t//notes.md')).toBe('/t')
+})
+
+test('a converted PNG is named by the file and its stat stamp, in a key folder of the cache', () => {
+  const one = convertedPath('/c', '/t/a.jpg', '1:1000')
+  expect(one).toMatch(/^\/c\/[0-9a-f]{16}\/image\.png$/)
+  expect(convertedPath('/c', '/t/a.jpg', '1:1000')).toBe(one)
+  expect(convertedPath('/c', '/t/a.jpg', '2:1000')).not.toBe(one)
+  expect(convertedPath('/c', '/t/b.jpg', '1:1000')).not.toBe(one)
+})
+
+test('the conversion call: render/convert.typ at 72 ppi, the file and the 4096 px cap as inputs, no network', () => {
+  const { argv, env } = convertCall({ typst: '/usr/bin/typst', root: '/r', cache: '/c', file: '/t/a b.webp', out: '/c/k/image.png' })
+  expect(argv).toEqual([
+    '/usr/bin/typst', 'compile', '--root', '/', '--format', 'png', '--diagnostic-format', 'short', '--ppi', '72',
+    '--input', 'f=/t/a b.webp', '--input', 'max=4096', '/r/render/convert.typ', '/c/k/image.png',
+  ])
+  expect(env.TYPST_PACKAGE_CACHE_PATH).toBe('/c/pkg-cache')
+  expect(env.HTTPS_PROXY).toBe('http://127.0.0.1:9')
+})
+
+test('a Markdown file folder is part of the key; with none, the key is as before', () => {
+  const o = {
+    textHash: 'h', columns: 100, cell: DEFAULT_CELL, size: 100, mode: 'dark' as const, termFont: '', columnPt: 6,
+    templateStamp: '1', look: { name: 'vscode', dir: '/t', stamp: '0' },
+  }
+  expect(renderKey({ ...o, base: undefined })).toBe(renderKey(o))
+  expect(renderKey({ ...o, base: '/t/docs' })).not.toBe(renderKey(o))
+  expect(renderKey({ ...o, base: '/t/docs' })).not.toBe(renderKey({ ...o, base: '/t/other' }))
 })
 
 test('the [Image #N] marks of a prompt, each once', () => {
@@ -72,38 +150,120 @@ const PASTED = '/private/tmp/claude-501/-w-app/sid-1/images'
 
 // A Mac with kitty (pictures drawn), uid 501, session sid-1 in /w/app. `files`
 // are the files that exist, by path: their first bytes as od prints them.
-function world(on: any, o: { vars?: Record<string, string>; files?: Record<string, string>; dirs?: string[]; projects?: string[] } = {}) {
+// `texts` are text files (a Markdown file Claude sends), `mtimes` the files'
+// mtimes (1 when not set). `typst`: Typst is found; it makes a PNG of a JPEG
+// or WebP (unless `failConvert`; `mv` moves it, unless `failMove`), and
+// compiles Markdown to one page.
+// `holdConvert`: a conversion ends only once its file had that many stats
+// (other rows reached it while it runs). `holdCompile`: a Markdown compile
+// ends only when this settles.
+function world(on: any, o: {
+  vars?: Record<string, string>
+  files?: Record<string, string>
+  texts?: Record<string, string>
+  mtimes?: Record<string, number>
+  dirs?: string[]
+  projects?: string[]
+  typst?: boolean
+  failConvert?: boolean
+  failMove?: boolean
+  holdConvert?: number
+  holdCompile?: Promise<void>
+} = {}) {
   mock.store(on)
   const clock = mock.clock(on)
   mock.env(on, { HOME: '/h', TERM: 'xterm-kitty', ...o.vars })
   const files = o.files ?? {}
+  const texts = o.texts ?? {}
+  const mtimes = o.mtimes ?? {}
+  const written = new Map<string, string>()
   const dirs = new Set(o.dirs ?? [])
   const heads: string[] = []
   const reads: string[] = []
+  const converts: string[][] = []
+  const moves: string[][] = []
+  const docs: any[] = []
+  const logs: string[] = []
+  const stats = new Map<string, number>()
+  const waits: { path: string; done: () => void }[] = []
+  const statted = (path: string) => {
+    stats.set(path, (stats.get(path) ?? 0) + 1)
+    for (const w of waits.filter(w => w.path === path && stats.get(path)! >= (o.holdConvert ?? 0))) {
+      waits.splice(waits.indexOf(w), 1)
+      w.done()
+    }
+  }
   on('process.run', async ($: any, e: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
     if (/md-preview-/.test(cmd)) return ok('/c\nDarwin\n')
     if (argv[0] === 'id' && argv[1] === '-u') return ok('501\n')
+    if (cmd.includes('command -v typst')) return o.typst ? ok('/usr/bin/typst\n') : ok('', 1)
+    if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
+    if (argv[0] === 'mv') {
+      moves.push(argv)
+      if (o.failMove || !(argv[2]! in files)) return ok('', 1)
+      files[argv[3]!] = files[argv[2]!]!
+      delete files[argv[2]!]
+      return ok('')
+    }
+    if (argv[0] === '/usr/bin/typst' && argv[1] === 'compile' && argv.at(-2)!.endsWith('/render/convert.typ')) {
+      converts.push(argv)
+      const file = argv.find(a => a.startsWith('f='))!.slice(2)
+      if ((stats.get(file) ?? 0) < (o.holdConvert ?? 0)) await new Promise<void>(done => waits.push({ path: file, done }))
+      if (o.failConvert) return ok('', 1)
+      files[argv.at(-1)!] = HEAD
+      return ok('')
+    }
+    if (argv[0] === '/usr/bin/typst' && argv[1] === 'compile') {
+      const doc = argv.find(a => a.startsWith('doc='))!.slice(4)
+      docs.push(JSON.parse(written.get(doc)!))
+      await o.holdCompile
+      return ok('')
+    }
     if (cmd.includes('od -An')) {
-      const file = argv.at(-1)!
-      heads.push(file)
-      return ok(`${files[file] ?? ''}\n@\n`)
+      const all = argv.slice(4)
+      heads.push(...all)
+      return ok(all.map(f => `${files[f] ?? (f.startsWith('/c/') ? HEAD : '')}\n@\n`).join(''))
+    }
+    if (cmd.includes('debug.log')) {
+      logs.push(e.init?.stdin ?? '')
+      return ok('')
     }
     return ok('', 1)
   })
   on('session.id', async () => ({ value: 'sid-1' }))
   on('session.cwd', async () => ({ value: '/w/app' }))
   on('session.root', async () => ({ value: '/w/app' }))
-  on('fs.stat', async ($: any, e: any, next: any) =>
-    e.path in files ? { value: { kind: 'file', size: 1000, mtimeMs: 1, isLink: false } } : e.path.startsWith('/t/') || e.path.startsWith('/private/') ? { deny: 'ENOENT' } : next(e))
-  on('fs.exists', async ($: any, e: any, next: any) => (e.path.startsWith('/private/') ? { value: dirs.has(e.path) } : next(e)))
-  on('fs.list', async ($: any, e: any, next: any) =>
-    e.path === '/private/tmp/claude-501' ? { value: (o.projects ?? []).map(name => ({ name, kind: 'dir', size: 0, mtimeMs: 1, isLink: false })) } : next(e))
-  on('fs.read', async ($: any, e: any, next: any) => (e.as === 'bytes' && e.path in files ? (reads.push(e.path), { value: { base64: PNG } }) : next(e)))
+  on('fs.stat', async ($: any, e: any, next: any) => {
+    statted(e.path)
+    const size = e.path in files ? 1000 : e.path in texts ? texts[e.path]!.length : -1
+    if (size >= 0) return { value: { kind: 'file', size, mtimeMs: mtimes[e.path] ?? 1, isLink: false } }
+    return e.path.startsWith('/t/') || e.path.startsWith('/private/') || e.path.startsWith('/c/') ? { deny: 'ENOENT' } : next(e)
+  })
+  on('fs.exists', async ($: any, e: any, next: any) => {
+    if (e.path.startsWith('/private/')) return { value: dirs.has(e.path) }
+    if (e.path.startsWith('/t/')) return { value: e.path in files || e.path in texts }
+    // Typst only where `typst` says (not the one on this computer).
+    return e.path.endsWith('/typst') ? { value: false } : next(e)
+  })
+  on('fs.list', async ($: any, e: any, next: any) => {
+    if (e.path === '/private/tmp/claude-501') return { value: (o.projects ?? []).map(name => ({ name, kind: 'dir', size: 0, mtimeMs: 1, isLink: false })) }
+    return e.path.startsWith('/c/') ? { value: [{ name: 'a-1.png', kind: 'file', size: 1, mtimeMs: 1, isLink: false }] } : next(e)
+  })
+  on('fs.write', async ($: any, e: any) => {
+    written.set(e.path, e.text)
+    return { value: undefined }
+  })
+  on('fs.read', async ($: any, e: any, next: any) => {
+    if (e.as === 'bytes' && e.path in files) return (reads.push(e.path), { value: { base64: PNG } })
+    if (e.as !== 'bytes' && e.path in texts) return (reads.push(e.path), { value: texts[e.path] })
+    if (written.has(e.path)) return { value: written.get(e.path) }
+    return e.path.startsWith('/c/') || e.path.startsWith('/t/') ? { deny: 'ENOENT' } : next(e)
+  })
   on('ui.toast', async () => ({ value: undefined }))
   on('ui.render', () => ENGINE as any)
-  return { clock, heads, reads }
+  return { clock, heads, reads, converts, moves, docs, logs, files, texts, mtimes, written }
 }
 
 const sent = (output: unknown, isErrored = false, id = 'tu-1') =>
@@ -112,6 +272,8 @@ const sent = (output: unknown, isErrored = false, id = 'tu-1') =>
     props: { tool_use_id: id, tool: 'SendUserFile', output, isErrored }, viewport: { columns: 100, rows: 40 },
   }) as any
 const attach = (path: string, isImage = true) => ({ attachments: [{ path, size: 1000, isImage, ...(isImage ? { media_type: 'image/png' } : {}) }] })
+// Several attachments: an image by its name (no media type), else a file.
+const attachAll = (...paths: string[]) => ({ attachments: paths.map(path => ({ path, size: 1000, isImage: /\.(png|jpe?g|webp)$/i.test(path) })) })
 const prompt = (text: string, origin: any = { kind: 'composer' }, id = 'u-1') =>
   ({
     plugin: 'md-preview', surface: 'terminal', component: 'UserMessage', requestId: id,
@@ -154,6 +316,193 @@ test('a file that is not an image, a JPEG and a missing file leave the row as it
     expect(await ui.drawn()).toMatchObject(ENGINE)
     expect(images(await ui.drawn())).toEqual([])
   }
+})
+
+test('a JPEG and a WebP Claude sends are made PNGs by Typst once, and draw under the row', async ($, on) => {
+  const { converts, moves, heads } = world(on, { typst: true, files: { '/t/photo.jpg': JPEG, '/t/shot.webp': '' } })
+  await ready($)
+  const output = { attachments: [
+    { path: '/t/photo.jpg', size: 1000, isImage: true, media_type: 'image/jpeg' },
+    { path: '/t/shot.webp', size: 1000, isImage: true, media_type: 'image/webp' },
+  ] }
+  const ui = await $.ui.mount(sent(output))
+  const tree: any = await ui.drawn()
+  expect(tree.children[0]).toMatchObject(ENGINE)
+  const shown = images(tree)
+  expect(shown.map(i => i.props.alt)).toEqual(['photo.jpg', 'shot.webp'])
+  expect(shown[0].props).toMatchObject({ columns: 40, rows: 10 })
+  expect(shown[0].props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/image\.png$/)
+  expect(shown[0].props.source.file).not.toBe(shown[1].props.source.file)
+  expect(converts.map(argv => argv.find(a => a.startsWith('f=')))).toEqual(['f=/t/photo.jpg', 'f=/t/shot.webp'])
+  // Typst writes a part file; only a whole one is moved to image.png.
+  const out = shown[0].props.source.file
+  expect(converts[0]!.at(-1)).toBe(out.replace(/image\.png$/, 'image.part.png'))
+  expect(moves[0]).toEqual(['mv', '-f', converts[0]!.at(-1), out])
+  // A redraw converts nothing again, and the JPEG's own bytes are never read as a PNG.
+  await ui.redraw(sent(output).props)
+  expect(images(await ui.drawn()).length).toBe(2)
+  expect(converts.length).toBe(2)
+  expect(heads).not.toContain('/t/photo.jpg')
+})
+
+test('a JPEG by its name; two rows at once convert it once; a changed file converts again', async ($, on) => {
+  // The first row's run ends only after the second row read the file's stat.
+  const { converts, mtimes } = world(on, { typst: true, holdConvert: 2, files: { '/t/a.JPG': JPEG } })
+  await ready($)
+  const [one, two] = await Promise.all([$.ui.mount(sent(attachAll('/t/a.JPG'), false, 'tu-1')), $.ui.mount(sent(attachAll('/t/a.JPG'), false, 'tu-2'))])
+  const first = images(await one.drawn())[0].props.source.file
+  expect(images(await two.drawn())[0].props.source.file).toBe(first)
+  expect(converts.length).toBe(1)
+  mtimes['/t/a.JPG'] = 5
+  const three = await $.ui.mount(sent(attachAll('/t/a.JPG'), false, 'tu-3'))
+  expect(images(await three.drawn())[0].props.source.file).not.toBe(first)
+  expect(converts.length).toBe(2)
+})
+
+test('over ssh, a converted JPEG goes as bytes', async ($, on) => {
+  const { reads } = world(on, { typst: true, vars: { SSH_CONNECTION: '10.0.0.2 50000 10.0.0.1 22' }, files: { '/t/photo.jpg': JPEG } })
+  await ready($)
+  const ui = await $.ui.mount(sent(attachAll('/t/photo.jpg')))
+  expect(images(await ui.drawn())[0].props.source).toEqual({ png: PNG })
+  expect(reads.length).toBe(1)
+  expect(reads[0]).toMatch(/^\/c\/[0-9a-f]{16}\/image\.png$/)
+})
+
+test('with no Typst, or a conversion that fails, a JPEG leaves the row as it is', async ($, on) => {
+  const { converts, moves, logs, files } = world(on, { typst: true, failConvert: true, files: { '/t/photo.jpg': JPEG } })
+  await ready($)
+  const ui = await $.ui.mount(sent(attachAll('/t/photo.jpg')))
+  expect(await ui.drawn()).toMatchObject(ENGINE)
+  expect(converts.length).toBe(1)
+  expect(logs.join('')).toContain('convert /t/photo.jpg failed')
+  // Nothing is moved, so no image.png is there for a later load.
+  expect(moves).toEqual([])
+  expect(Object.keys(files).filter(f => f.endsWith('/image.png'))).toEqual([])
+  // The failure is kept for this stamp: no second run.
+  await ui.redraw(sent(attachAll('/t/photo.jpg')).props)
+  expect(converts.length).toBe(1)
+})
+
+test('a part file that can not be moved draws no picture; an image.png made before is used with no run', async ($, on) => {
+  const { converts, logs, files } = world(on, { typst: true, failMove: true, files: { '/t/photo.jpg': JPEG, '/t/old.jpg': JPEG } })
+  await ready($)
+  const ui = await $.ui.mount(sent(attachAll('/t/photo.jpg'), false, 'tu-1'))
+  expect(await ui.drawn()).toMatchObject(ENGINE)
+  expect(converts.length).toBe(1)
+  expect(logs.join('')).toContain('convert /t/photo.jpg: could not move')
+  expect(Object.keys(files).filter(f => f.endsWith('/image.png'))).toEqual([])
+  // An earlier load made the PNG of old.jpg (same stamp): no run, it draws.
+  files[convertedPath('/c', '/t/old.jpg', '1:1000')] = HEAD
+  const old = await $.ui.mount(sent(attachAll('/t/old.jpg'), false, 'tu-2'))
+  expect(images(await old.drawn())[0].props.source.file).toBe(convertedPath('/c', '/t/old.jpg', '1:1000'))
+  expect(converts.length).toBe(1)
+})
+
+test('with no Typst, a JPEG and a Markdown file leave the row as it is; a PNG still draws', async ($, on) => {
+  const { converts } = world(on, { files: { '/t/photo.jpg': JPEG, '/t/icon.png': HEAD }, texts: { '/t/notes.md': '# Notes' } })
+  await ready($)
+  const ui = await $.ui.mount(sent(attachAll('/t/photo.jpg', '/t/notes.md', '/t/icon.png')))
+  const shown = images(await ui.drawn())
+  expect(shown.map(i => i.props.alt)).toEqual(['icon.png'])
+  expect(converts).toEqual([])
+})
+
+test('a Markdown file Claude sends draws as pictures under the row, its images by its own folder', async ($, on) => {
+  const text = '# Notes\n\n![pic](pic.png) and ![gone](gone.png)'
+  const { clock, docs } = world(on, { typst: true, files: { '/t/docs/pic.png': HEAD }, texts: { '/t/docs/notes.md': text } })
+  await ready($)
+  const ui = await $.ui.mount(sent(attachAll('/t/docs/notes.md')))
+  await clock.settle()
+  await ui.redraw(sent(attachAll('/t/docs/notes.md')).props)
+  const tree: any = await ui.drawn()
+  expect(tree.children[0]).toMatchObject(ENGINE)
+  const [page] = images(tree)
+  expect(page.props.columns).toBe(98)
+  expect(page.props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/a-1\.png$/)
+  expect(docs).toEqual([{ base: '/t/docs', segments: [text], images: ['pic.png', '/t/docs/pic.png'] }])
+})
+
+test('the same Markdown in two folders compiles twice; an answer still uses the session folder', async ($, on) => {
+  const { clock, docs } = world(on, { typst: true, texts: { '/t/a/n.md': '# Same', '/t/b/n.md': '# Same' } })
+  await ready($)
+  const a = await $.ui.mount(sent(attachAll('/t/a/n.md'), false, 'tu-a'))
+  const b = await $.ui.mount(sent(attachAll('/t/b/n.md'), false, 'tu-b'))
+  await clock.settle()
+  await a.redraw(sent(attachAll('/t/a/n.md'), false, 'tu-a').props)
+  await b.redraw(sent(attachAll('/t/b/n.md'), false, 'tu-b').props)
+  expect(images(await a.drawn())[0].props.source.file).not.toBe(images(await b.drawn())[0].props.source.file)
+  const answer = { plugin: 'md-preview', surface: 'terminal', component: 'AssistantMessage', requestId: 'r-1', props: { text: '# Same', isFirstOfReply: true }, viewport: { columns: 100, rows: 40 } } as any
+  await $.ui.mount(answer)
+  await clock.settle()
+  expect(docs.map(d => d.base)).toEqual(['/t/a', '/t/b', '/w/app'])
+})
+
+test('while a Markdown file compiles: an empty space, then for a moment the row alone, then its pictures', async ($, on) => {
+  let release = () => {}
+  const holdCompile = new Promise<void>(done => (release = done))
+  const { clock } = world(on, { typst: true, holdCompile, files: { '/t/one.png': HEAD }, texts: { '/t/notes.md': '# Notes' } })
+  await ready($)
+  const output = attachAll('/t/notes.md', '/t/one.png')
+  const ui = await $.ui.mount(sent(output))
+  const blank: any = await ui.drawn()
+  expect(blank.children[0]).toMatchObject(ENGINE)
+  expect(blank.children[1].children[0]).toMatchObject({ type: 'Box', props: { key: 'blank-0' } })
+  expect(images(blank).map(i => i.props.alt)).toEqual(['one.png'])
+  // Not ready after 1 s: the Markdown file draws nothing, the image stays.
+  await clock.advance(1000)
+  await ui.redraw(sent(output).props)
+  const text: any = await ui.drawn()
+  expect(text.children[1].children.length).toBe(1)
+  expect(images(text).map(i => i.props.alt)).toEqual(['one.png'])
+  release()
+  await clock.settle()
+  await ui.redraw(sent(output).props)
+  expect(images(await ui.drawn()).map(i => i.props.alt)).toEqual(['Notes', 'one.png'])
+})
+
+test('images and Markdown files draw in the attachments order', async ($, on) => {
+  const { clock } = world(on, { typst: true, files: { '/t/one.png': HEAD, '/t/two.jpg': JPEG }, texts: { '/t/notes.md': '# Notes' } })
+  await ready($)
+  const output = attachAll('/t/one.png', '/t/notes.md', '/t/two.jpg')
+  const ui = await $.ui.mount(sent(output))
+  await clock.settle()
+  await ui.redraw(sent(output).props)
+  const shown = images(await ui.drawn())
+  expect(shown.length).toBe(3)
+  expect(shown[0].props.source.file).toBe('/t/one.png')
+  expect(shown[1].props.source.file).toMatch(/\/a-1\.png$/)
+  expect(shown[2].props.alt).toBe('two.jpg')
+  // Each Image has a key of its own in the tree.
+  expect(new Set(shown.map(i => i.props.key)).size).toBe(3)
+})
+
+test('a Markdown file that is empty, too large, gone or not Markdown leaves the row as it is', async ($, on) => {
+  const { clock, docs, reads } = world(on, {
+    typst: true, texts: { '/t/empty.md': ' \n\n', '/t/big.md': `# Big\n${'x'.repeat(256 * 1024)}`, '/t/notes.txt': '# Text' },
+  })
+  await ready($)
+  for (const [i, path] of ['/t/empty.md', '/t/big.md', '/t/gone.md', '/t/notes.txt'].entries()) {
+    const ui = await $.ui.mount(sent(attachAll(path), false, `tu-${i}`))
+    await clock.settle()
+    expect(await ui.drawn()).toMatchObject(ENGINE)
+  }
+  expect(docs).toEqual([])
+  expect(reads).toEqual(['/t/empty.md'])
+})
+
+test('a Markdown file is read again only when its stat changes', async ($, on) => {
+  const { clock, docs, reads, texts, mtimes } = world(on, { typst: true, texts: { '/t/n.md': '# One' } })
+  await ready($)
+  const ui = await $.ui.mount(sent(attachAll('/t/n.md')))
+  await clock.settle()
+  await ui.redraw(sent(attachAll('/t/n.md')).props)
+  expect(reads).toEqual(['/t/n.md'])
+  texts['/t/n.md'] = '# Two'
+  mtimes['/t/n.md'] = 2
+  await ui.redraw(sent(attachAll('/t/n.md')).props)
+  await clock.settle()
+  expect(reads).toEqual(['/t/n.md', '/t/n.md'])
+  expect(docs.map(d => d.segments.join(''))).toEqual(['# One', '# Two'])
 })
 
 test('an errored SendUserFile call leaves the row as it is', async ($, on) => {

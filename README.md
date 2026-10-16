@@ -19,10 +19,14 @@ Only the drawing changes. The saved answer stays Markdown.
   ```
 
   A `theme` dictionary (`theme.fg`, `theme.muted`, `theme.blue`, `theme.palette`, `theme.width`, …) is in scope, so drawings match the terminal's colours. The mod tells Claude about this in a short part of the system prompt.
-- Images that Claude sends to you as files (the SendUserFile tool). The mod draws each PNG image under the row that shows the file.
+- Files that Claude sends to you (the SendUserFile tool). The mod draws each file under the row that shows the files, in the same order:
+  - PNG, JPEG and WebP images. Typst changes a JPEG or WebP image into a PNG image in the cache folder. It does this one time for each version of the file. The long side of that PNG image is 4096 pixels or less.
+  - Markdown files (`.md` or `.markdown`, 256 KiB or less). The mod draws the file as rendered pictures, the same as an answer. A relative image path in the file starts from the folder of the file.
+
+  Other files stay as the normal row. JPEG images, WebP images and Markdown files need Typst.
 - Images that you paste into the prompt (`[Image #N]`). The mod draws each image under your prompt.
 
-  These pictures are not larger than the image. They are not wider than the transcript, and not taller than 24 rows or half the screen. The mod draws PNG images only. Other image types stay as the normal row.
+  These pictures are not larger than the image. They are not wider than the transcript, and not taller than 24 rows or half the screen. The mod draws PNG, JPEG and WebP images only. Other image types (for example GIF and SVG) stay as the normal row.
 - The plan in plan mode (the ExitPlanMode tool). The mod draws the plan as a picture in the transcript, the same as an answer. Then the mod asks you to approve the plan. Refer to [Plan approval](#plan-approval).
 
 ## Requirements

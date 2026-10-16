@@ -63,10 +63,14 @@ export function renderKey(o: {
   look: Look
   // Over ssh: pages are cut shorter (inlineBudget), so they are other PNGs.
   inline?: boolean
+  // The folder relative images start from, when it is not the session's (a
+  // Markdown file's): the same text there shows other images.
+  base?: string
 }): string {
   return hashOf([
     o.textHash, o.columns, o.cell.width, o.cell.height, o.size, o.mode, o.termFont, o.columnPt,
     o.templateStamp, o.look.name, o.look.dir, o.look.stamp, TEMPLATE_VERSION, ...(o.inline ? ['inline'] : []),
+    ...(o.base ? ['base', o.base] : []),
   ])
 }
 
@@ -139,8 +143,9 @@ export async function inlineOf($: EngineInterface, result: Result): Promise<stri
 }
 
 // How a set of pages sits: `bullet` the reply bullet in the gutter (on the
-// first line's row), `gutter` its width (0: none), `marginTop` the rows above.
-export type PagesLayout = { bullet?: boolean; gutter?: number; marginTop?: number }
+// first line's row), `gutter` its width (0: none), `marginTop` the rows above,
+// `keys` a prefix for its Images' keys (several sets in one tree).
+export type PagesLayout = { bullet?: boolean; gutter?: number; marginTop?: number; keys?: string }
 
 // `inline`: each page's PNG as base64 (over ssh); else the terminal reads the file.
 export function drawPages($: EngineInterface, e: ResolveInput<RenderComponent, 'terminal'>, result: Result, columns: number, px: Cell, inline?: readonly string[], layout: PagesLayout = {}) {
@@ -158,7 +163,7 @@ export function drawPages($: EngineInterface, e: ResolveInput<RenderComponent, '
           const rows = rowsFor(page, columns, px)
           return (
             <Image
-              key={`p${i}`}
+              key={`${layout.keys ?? ''}p${i}`}
               source={inline ? { png: inline[i]! } : { file: page.file, format: 'png', generation: columns * 1000 + rows }}
               columns={columns}
               rows={rows}

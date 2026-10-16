@@ -1,7 +1,8 @@
 // One Markdown text through the answer pipeline: its key, the compiled
 // pages, and the states before they are ready (blank while it streams or
-// compiles, then the engine's text). The AssistantMessage hook and the plan
-// (its ExitPlanMode rows) all draw through it.
+// compiles, then the engine's text). The AssistantMessage hook, the plan
+// (its ExitPlanMode rows) and the Markdown files Claude sends all draw
+// through it.
 import type { EngineInterface } from 'claude-code'
 
 import { BLANK_AFTER_LIVE_MS, BLANK_RESUMED_MS, DEFAULT_CELL, DEFAULT_THEME, LIVE_STILL_MS, SETTLE_MS } from './settings'
@@ -15,15 +16,16 @@ export type Drawing = { kind: 'pages'; result: Result; px: Cell; bytes?: string[
 
 // `id` keys the text's place (its message, its row), `columns` is
 // the picture width. `canStream`: the text may still grow (an answer); a
-// plan is final when it is drawn, so it never waits as live.
-export async function pagesOf($: EngineInterface, o: { id: string; text: string; columns: number; env: Env; canStream: boolean }): Promise<Drawing> {
-  const { id, text, columns, env } = o
+// plan is final when it is drawn, so it never waits as live. `base`: the
+// folder relative images start from (a Markdown file's); else the session's.
+export async function pagesOf($: EngineInterface, o: { id: string; text: string; columns: number; env: Env; canStream: boolean; base?: string }): Promise<Drawing> {
+  const { id, text, columns, env, base } = o
   const px = S.cell ?? DEFAULT_CELL
   const textHash = hashOf([text])
   const active = S.look ?? { name: DEFAULT_THEME, dir: `${env.root}/render/themes/${DEFAULT_THEME}`, stamp: '0' }
   const key = renderKey({
     textHash, columns, cell: px, size: S.size, mode: S.theme, termFont: env.termFont,
-    columnPt: fontFit(env.metrics, S.size).columnPt, templateStamp: env.stamp, look: active, inline: env.inline,
+    columnPt: fontFit(env.metrics, S.size).columnPt, templateStamp: env.stamp, look: active, inline: env.inline, base,
   })
   const seen = lastText.get(id)
   const changed = seen !== text
@@ -40,7 +42,7 @@ export async function pagesOf($: EngineInterface, o: { id: string; text: string;
     const bytes = await inlineOf($, got)
     return bytes ? { kind: 'pages', result: got, px, bytes } : { kind: 'text' }
   }
-  const job: Job = { key, requestId: id, text, columns, cell: px, theme: S.theme, size: S.size, themeDir: active.dir, env }
+  const job: Job = { key, requestId: id, text, columns, cell: px, theme: S.theme, size: S.size, themeDir: active.dir, env, ...(base ? { base } : {}) }
   // Live: its text streams (inside a request we saw, or changing since we
   // last drew it). Drawn blank; final at the request's next block or end,
   // or once still for LIVE_STILL_MS (SETTLE_MS when no request was seen).
