@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import {
   claudeTmpOf, convertBox, convertCall, convertedPath, DEFAULT_CELL, folderOf, imageKindOf, isMarkdownPath, pasteDirOf, pastedImagePath, pastedNumbers,
-  PICTURE_MAX_ROWS, pictureCells, pictureRowsFor, projectSlug, renderKey, sentFiles, sentImages,
+  DEFAULT_HEIGHT, parseCommand, PICTURE_MAX_ROWS, PICTURE_ROOM_ROWS, pictureCells, pictureRowsFor, projectSlug, renderKey, sentFiles, sentImages,
 } from '../hooks/register'
 
 // ---- Pure helpers -----------------------------------------------------------
@@ -20,10 +20,36 @@ test('a picture keeps its aspect, is never made larger, and fits the box', () =>
 })
 
 test('a picture takes at most half the viewport, within 6 and 24 rows', () => {
-  expect(pictureRowsFor(undefined)).toBe(PICTURE_MAX_ROWS)
-  expect(pictureRowsFor(100)).toBe(PICTURE_MAX_ROWS)
-  expect(pictureRowsFor(30)).toBe(15)
-  expect(pictureRowsFor(8)).toBe(6)
+  expect(DEFAULT_HEIGHT).toBe('half')
+  expect(pictureRowsFor(undefined, 'half')).toBe(PICTURE_MAX_ROWS)
+  expect(pictureRowsFor(100, 'half')).toBe(PICTURE_MAX_ROWS)
+  expect(pictureRowsFor(30, 'half')).toBe(15)
+  expect(pictureRowsFor(8, 'half')).toBe(6)
+})
+
+test('height full: the viewport less 16 rows; a number: at most that, never under 6 or over 255', () => {
+  expect(PICTURE_ROOM_ROWS).toBe(16)
+  expect(pictureRowsFor(40, 'full')).toBe(24)
+  expect(pictureRowsFor(100, 'full')).toBe(84)
+  expect(pictureRowsFor(20, 'full')).toBe(6)
+  expect(pictureRowsFor(undefined, 'full')).toBe(32)
+  expect(pictureRowsFor(100, 12)).toBe(12)
+  expect(pictureRowsFor(40, 36)).toBe(24)
+  expect(pictureRowsFor(10, 12)).toBe(6)
+  expect(pictureRowsFor(400, 200)).toBe(200)
+  expect(pictureRowsFor(400, 'full')).toBe(255)
+})
+
+test('the height command: half, full, 6 to 200 rows, or nothing to show it', () => {
+  expect(parseCommand('height')).toEqual({ kind: 'height' })
+  expect(parseCommand('height half')).toEqual({ kind: 'height', height: 'half' })
+  expect(parseCommand('HEIGHT Full')).toEqual({ kind: 'height', height: 'full' })
+  expect(parseCommand('height 6')).toEqual({ kind: 'height', height: 6 })
+  expect(parseCommand('height 200')).toEqual({ kind: 'height', height: 200 })
+  expect(parseCommand('height 5')).toEqual({ kind: 'bad' })
+  expect(parseCommand('height 201')).toEqual({ kind: 'bad' })
+  expect(parseCommand('height tall')).toEqual({ kind: 'bad' })
+  expect(parseCommand('height 12 rows')).toEqual({ kind: 'bad' })
 })
 
 test('only PNG, JPEG and WebP image attachments are drawn', () => {
@@ -159,6 +185,8 @@ const JPEG = 'ff d8 ff e0 00 10 4a 46 49 46 00 01 01 00 00 01 00 01 00 00 ff db 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAABkAAAABACAYAAAAAAAAA'
 const ENGINE = { type: 'Text', props: {}, children: ['engine drawing'] }
 const PASTED = '/private/tmp/claude-501/-w-app/sid-1/images'
+// A tall PNG: 640 x 3200 px, 100 rows of 32 px at its own size.
+const TALL = '89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52 00 00 02 80 00 00 0c 80'
 
 // A Mac with kitty (pictures drawn), uid 501, session sid-1 in /w/app. `files`
 // are the files that exist, by path: their first bytes as od prints them.
@@ -173,6 +201,8 @@ const PASTED = '/private/tmp/claude-501/-w-app/sid-1/images'
 // ends only when this settles.
 function world(on: any, o: {
   vars?: Record<string, string>
+  // What md-preview kept in its store before (a setting).
+  stored?: Record<string, unknown>
   files?: Record<string, string>
   texts?: Record<string, string>
   mtimes?: Record<string, number>
@@ -186,7 +216,15 @@ function world(on: any, o: {
   holdRun?: { at: number; until: Promise<void> }
   holdCompile?: Promise<void>
 } = {}) {
-  mock.store(on)
+  // md-preview's store in memory (as mock.store), and its writes by key.
+  const store = new Map(Object.entries(o.stored ?? {}))
+  const kept: Record<string, unknown> = {}
+  on('store.get', async ($: any, e: any) => ({ value: store.get(e.key) }))
+  on('store.set', async ($: any, e: any) => {
+    store.set(e.key, e.value)
+    kept[e.key] = e.value
+    return { value: undefined }
+  })
   const clock = mock.clock(on)
   mock.env(on, { HOME: '/h', TERM: 'xterm-kitty', ...o.vars })
   const files = o.files ?? {}
@@ -280,7 +318,7 @@ function world(on: any, o: {
   })
   on('ui.toast', async () => ({ value: undefined }))
   on('ui.render', () => ENGINE as any)
-  return { clock, heads, reads, converts, moves, docs, logs, files, texts, mtimes, written }
+  return { clock, heads, reads, converts, moves, docs, logs, files, texts, mtimes, written, kept }
 }
 
 const sent = (output: unknown, isErrored = false, id = 'tu-1') =>
@@ -622,4 +660,77 @@ test('in a terminal that draws no pictures, rows stay as they are', async ($, on
   expect(shown.text).toContain('Claude Code draws no pictures here')
   expect(await (await $.ui.mount(sent(attach('/t/icon.png')))).drawn()).toMatchObject(ENGINE)
   expect(await (await $.ui.mount(prompt('[Image #5] hi'))).drawn()).toMatchObject(ENGINE)
+})
+
+// ---- The height setting -------------------------------------------------------
+
+test('a kept height caps sent and pasted images; height full draws them taller at once', async ($, on) => {
+  const { kept } = world(on, { stored: { height: 12 }, files: { '/t/tall.png': TALL, [`${PASTED}/5.png`]: TALL }, dirs: [PASTED] })
+  const ran = await ready($)
+  expect(ran.text).toContain('image height 12 rows')
+  const ui = await $.ui.mount(sent(attach('/t/tall.png')))
+  expect(images(await ui.drawn())[0].props.rows).toBe(12)
+  const pasted = await $.ui.mount(prompt('[Image #5] tall'))
+  expect(images(await pasted.drawn())[0].props.rows).toBe(12)
+  const set = await $.command.run({ command: 'md-preview', args: 'height full' } as any)
+  expect(set.text).toContain('full (the terminal height less 16 rows)')
+  expect(kept.height).toBe('full')
+  // 40 rows less 16.
+  await ui.redraw(sent(attach('/t/tall.png')).props)
+  expect(images(await ui.drawn())[0].props.rows).toBe(24)
+  await pasted.redraw(prompt('[Image #5] tall').props)
+  expect(images(await pasted.drawn())[0].props.rows).toBe(24)
+  // A number is never more than full.
+  await $.command.run({ command: 'md-preview', args: 'height 36' } as any)
+  expect(kept.height).toBe(36)
+  await ui.redraw(sent(attach('/t/tall.png')).props)
+  expect(images(await ui.drawn())[0].props.rows).toBe(24)
+  // Half, the default: half of 40 rows.
+  await $.command.run({ command: 'md-preview', args: 'height half' } as any)
+  await ui.redraw(sent(attach('/t/tall.png')).props)
+  expect(images(await ui.drawn())[0].props.rows).toBe(20)
+})
+
+test('a new height makes a new PNG of a JPEG in the background; the last one draws meanwhile', async ($, on) => {
+  let release = () => {}
+  const until = new Promise<void>(done => (release = done))
+  const { clock, converts } = world(on, { typst: true, holdRun: { at: 2, until }, files: { '/t/photo.jpg': JPEG } })
+  await ready($)
+  const ui = await $.ui.mount(sent(attachAll('/t/photo.jpg')))
+  const first = images(await ui.drawn())[0].props.source.file
+  expect(converts[0]).toContain('maxh=640')
+  await $.command.run({ command: 'md-preview', args: 'height full' } as any)
+  await ui.redraw(sent(attachAll('/t/photo.jpg')).props)
+  expect(images(await ui.drawn())[0].props.source.file).toBe(first)
+  // 24 rows of 32 px.
+  expect(converts[1]).toContain('maxh=768')
+  // The run ends: its refresh draws the row again, with the new PNG.
+  release()
+  await clock.settle()
+  expect(images(await ui.drawn())[0].props.source.file).toBe(convertedPath('/c', '/t/photo.jpg', '1:1000', { width: 1568, height: 768 }))
+})
+
+test('a background run that ends while the row draws still draws its PNG', async ($, on) => {
+  const { clock, converts } = world(on, { typst: true, files: { '/t/photo.jpg': JPEG } })
+  await ready($)
+  const ui = await $.ui.mount(sent(attachAll('/t/photo.jpg')))
+  const first = images(await ui.drawn())[0].props.source.file
+  await $.command.run({ command: 'md-preview', args: 'height full' } as any)
+  await ui.redraw(sent(attachAll('/t/photo.jpg')).props)
+  expect(converts.length).toBe(2)
+  await clock.settle()
+  const now = images(await ui.drawn())[0].props.source.file
+  expect(now).not.toBe(first)
+  expect(now).toBe(convertedPath('/c', '/t/photo.jpg', '1:1000', { width: 1568, height: 768 }))
+})
+
+test('height with no value shows it; a bad value is refused; a bad kept value is the default', async ($, on) => {
+  const { kept } = world(on, { stored: { height: 3 } })
+  const shown = await $.command.run({ command: 'md-preview', args: 'height' } as any)
+  expect(shown.text).toContain('The most rows an image takes: half (half the terminal, 6 to 24 rows)')
+  const bad = await $.command.run({ command: 'md-preview', args: 'height 5' } as any)
+  expect(bad.text).toContain('Not understood: "height 5"')
+  expect(kept.height).toBe(undefined)
+  await $.command.run({ command: 'md-preview', args: 'height 200' } as any)
+  expect(kept.height).toBe(200)
 })

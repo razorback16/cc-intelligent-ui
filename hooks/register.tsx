@@ -18,7 +18,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderViewport } from 'claude-code'
 
-import { DEFAULT_CELL, DEFAULT_THEME, IMAGE_MAX_COLUMNS, MAX_SIZE, MAX_WIDTH, MIN_SIZE, MIN_WIDTH, TYPST_PROMPT, widthText } from './lib/settings'
+import {
+  DEFAULT_CELL, DEFAULT_THEME, heightText, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, TYPST_PROMPT, widthText,
+} from './lib/settings'
 import { editedPlans, refresh, S, subagentPlans, writesLive, type Env } from './lib/state'
 import { columnsFor } from './lib/terminal'
 import { escapeControls, luminanceOf, modeLine, modeOfLuminance, parseOsc11, settingOf } from './lib/mode'
@@ -40,8 +42,8 @@ import {
 
 // The names this module exported before the split (the tests import them).
 export {
-  BASE_THEME, DEFAULT_CELL, DEFAULT_SIZE, DEFAULT_THEME, DEFAULT_WIDTH, IMAGE_MAX_COLUMNS, MAX_SIZE, MAX_WIDTH, MIN_SIZE, MIN_WIDTH,
-  PICTURE_MAX_ROWS, SEGMENT_ROWS, TYPST_PROMPT, widthText, type Width,
+  BASE_THEME, DEFAULT_CELL, DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_THEME, DEFAULT_WIDTH, heightText, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH,
+  MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, PICTURE_ROOM_ROWS, SEGMENT_ROWS, TYPST_PROMPT, widthText, type Height, type Width,
 } from './lib/settings'
 export { DEFAULT_METRICS, type Cell, type FontMetrics, type Look, type Metrics } from './lib/state'
 export {
@@ -122,7 +124,7 @@ export const register: Register = on => {
     const got = await next(e)
     if (!/^\s*\/md-preview\s/.test(e.text)) return got
     if (!S.themeChoices.length) await setUp($).catch(() => null)
-    const mine = commandSuggestions(e.text, e.token, e.start, { themes: S.themeChoices, active: S.look?.name ?? DEFAULT_THEME, size: S.size, width: S.width })
+    const mine = commandSuggestions(e.text, e.token, e.start, { themes: S.themeChoices, active: S.look?.name ?? DEFAULT_THEME, size: S.size, width: S.width, height: S.height })
     return mine.length ? { suggestions: [...got.suggestions, ...mine] } : got
   })
 
@@ -149,6 +151,16 @@ export const register: Register = on => {
       const most = typeof S.width === 'number' && S.width > IMAGE_MAX_COLUMNS ? ` (a picture is ${IMAGE_MAX_COLUMNS} columns at most)` : ''
       const head = asked.width === undefined ? 'The most columns a picture takes' : 'md-preview pictures now take at most'
       return { text: `${head}: ${widthText(S.width)}${most}. Use /md-preview width <${MIN_WIDTH}-${MAX_WIDTH}> for a cap, or /md-preview width full (the default) for no cap.` }
+    }
+    if (asked.kind === 'height') {
+      if (asked.height === undefined) await setUp($).catch(() => null)
+      else {
+        S.height = asked.height
+        await $.store.set('height', S.height)
+        refresh($)
+      }
+      const head = asked.height === undefined ? 'The most rows an image takes' : 'md-preview images now take at most'
+      return { text: `${head}: ${heightText(S.height)}. Use /md-preview height half (the default), /md-preview height full, or /md-preview height <${MIN_HEIGHT}-${MAX_HEIGHT}> (never more than full).` }
     }
     if (asked.kind === 'setup') {
       await setUp($).catch(() => null)
@@ -193,9 +205,9 @@ export const register: Register = on => {
       ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
       : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+ and Rio 0.5.27+ with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
     const tried = S.setupNeeded ? ' In iTerm2, run /md-preview setup once to show pictures.' : ''
-    const usage = `Use /md-preview on, /md-preview off, /md-preview size <${MIN_SIZE}-${MAX_SIZE}>, /md-preview width <${MIN_WIDTH}-${MAX_WIDTH}|full>, or /md-preview theme [name].`
+    const usage = `Use /md-preview on, /md-preview off, /md-preview size <${MIN_SIZE}-${MAX_SIZE}>, /md-preview width <${MIN_WIDTH}-${MAX_WIDTH}|full>, /md-preview height <${MIN_HEIGHT}-${MAX_HEIGHT}|half|full>, or /md-preview theme [name].`
     const bad = asked.kind === 'bad' ? `Not understood: "${e.args.trim()}". ` : ''
-    return { text: `${bad}md-preview is ${state}, theme ${S.look?.name ?? DEFAULT_THEME}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, ${font}. ${typst}; ${terminal}.${tried} ${usage}` }
+    return { text: `${bad}md-preview is ${state}, theme ${S.look?.name ?? DEFAULT_THEME}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image height ${heightText(S.height)}, ${font}. ${typst}; ${terminal}.${tried} ${usage}` }
   })
 
   on('config.set', { key: 'theme' }, async ($, e, next) => {

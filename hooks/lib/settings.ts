@@ -70,6 +70,22 @@ export const MODES = ['dark', 'light'] as const
 // at most this many rows tall, and at most half the viewport.
 export const PICTURE_MAX_ROWS = 24
 export const PICTURE_MIN_ROWS = 6
+// `/md-preview height`: the most rows an image takes (sent or pasted; not a
+// Markdown page). `half`, the default: as above. `full`: the viewport less
+// PICTURE_ROOM_ROWS. A number: that many rows, at most as many as `full`.
+// Never under PICTURE_MIN_ROWS.
+export type Height = number | 'half' | 'full'
+export const DEFAULT_HEIGHT: Height = 'half'
+export const MIN_HEIGHT = PICTURE_MIN_ROWS
+export const MAX_HEIGHT = 200
+// The rows an image leaves free: the row of the file, the text around it
+// and the prompt.
+export const PICTURE_ROOM_ROWS = 16
+// The height setting as words.
+export const heightText = (height: Height) =>
+  height === 'half' ? `half (half the terminal, ${PICTURE_MIN_ROWS} to ${PICTURE_MAX_ROWS} rows)`
+  : height === 'full' ? `full (the terminal height less ${PICTURE_ROOM_ROWS} rows)`
+  : `${height} rows`
 export const PICTURES_KEPT = 64
 // A Markdown file Claude sends (SendUserFile) draws when it is at most this
 // many bytes.

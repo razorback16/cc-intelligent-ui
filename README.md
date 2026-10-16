@@ -26,7 +26,7 @@ Only the drawing changes. The saved answer stays Markdown.
   Other files stay as the normal row. JPEG images, WebP images and Markdown files need Typst.
 - Images that you paste into the prompt (`[Image #N]`). The mod draws each image under your prompt.
 
-  These pictures are not larger than the image. They are not wider than the transcript, and not taller than 24 rows or half the screen. The mod draws PNG, JPEG and WebP images only. Other image types (for example GIF and SVG) stay as the normal row.
+  These pictures are not larger than the image. They are not wider than the transcript. The height setting (`/md-preview height`) sets the most rows that they can use: by default, half the screen and not more than 24 rows. The mod draws PNG, JPEG and WebP images only. Other image types (for example GIF and SVG) stay as the normal row.
 - The plan in plan mode (the ExitPlanMode tool). The mod draws the plan as a picture in the transcript, the same as an answer. Then the mod asks you to approve the plan. Refer to [Plan approval](#plan-approval).
 
 ## Requirements
@@ -69,13 +69,17 @@ To try it from a clone without installing: `claude --plugin-dir /path/to/claude-
 
 | Command | What it does |
 |---|---|
-| `/md-preview` | Shows the state, the text size, the width and the terminal font that the mod found |
+| `/md-preview` | Shows the state, the text size, the width, the image height and the terminal font that the mod found |
 | `/md-preview on` / `off` | Turns the pictures on or off (kept for later sessions) |
 | `/md-preview setup` / `setup remove` | iTerm2: adds or removes the shell line that turns pictures on (then close the tab and open a new one) |
 | `/md-preview size <80–200>` | Text size in percent. 100 is the same visual size as your terminal text. |
 | `/md-preview width` | Shows the width: the most columns that a picture can use |
 | `/md-preview width <40–400>` | Sets the most columns that a picture can use (kept for later sessions) |
 | `/md-preview width full` | Pictures use the full width of the terminal, the same as the text of Claude Code (kept for later sessions). This is the default. A picture is never wider than 255 columns. |
+| `/md-preview height` | Shows the image height: the most rows that an image can use. This applies to images that Claude sends and to images that you paste, not to answers. |
+| `/md-preview height half` | An image uses half the terminal height, from 6 to 24 rows (kept for later sessions). This is the default. |
+| `/md-preview height full` | An image uses the terminal height less 16 rows (kept for later sessions). The 16 rows are for the row of the file, the text around it and the prompt. |
+| `/md-preview height <6–200>` | Sets the most rows that an image can use (kept for later sessions). An image is never taller than with `full`. |
 | `/md-preview theme` | Lists the themes, shows which one is in use, and shows the folder for your own themes |
 | `/md-preview theme <name>` | Changes to that theme (kept for later sessions) |
 

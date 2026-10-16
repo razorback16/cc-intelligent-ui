@@ -4,7 +4,9 @@
 import { atom, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import { BASE_THEME, DEFAULT_SIZE, DEFAULT_THEME, DEFAULT_WIDTH, MAX_SIZE, MAX_WIDTH, MIN_SIZE, MIN_WIDTH, NO_TYPST } from './settings'
+import {
+  BASE_THEME, DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_THEME, DEFAULT_WIDTH, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, NO_TYPST,
+} from './settings'
 import { DEFAULT_METRICS, refresh, S, type Env } from './state'
 import { resolveMode, settingOf } from './mode'
 import { isItermIn } from './terminals'
@@ -75,6 +77,9 @@ export function setUp($: EngineInterface): Promise<Env> {
     S.size = kept >= MIN_SIZE && kept <= MAX_SIZE ? kept : DEFAULT_SIZE
     const width = await $.store.get('width').catch(() => undefined)
     S.width = width === 'full' ? 'full' : Number.isInteger(width) && Number(width) >= MIN_WIDTH && Number(width) <= MAX_WIDTH ? Number(width) : DEFAULT_WIDTH
+    const height = await $.store.get('height').catch(() => undefined)
+    S.height = height === 'half' || height === 'full' ? height
+      : Number.isInteger(height) && Number(height) >= MIN_HEIGHT && Number(height) <= MAX_HEIGHT ? Number(height) : DEFAULT_HEIGHT
     if ((await $.store.get('enabled').catch(() => undefined)) === false) await update($, isOn, () => false).catch(() => undefined)
     const isMac = os.trim() === 'Darwin'
     S.cell = await measureCell($)

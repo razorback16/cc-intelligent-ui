@@ -74,7 +74,7 @@ export async function shownOf($: EngineInterface, e: RowInput, ready: Env, files
 export async function shownOne($: EngineInterface, e: RowInput, ready: Env, file: string, alt = nameOf(file)): Promise<Shown | null> {
   const p = await pictureOf($, file)
   if (!p) return null
-  const fit = pictureCells(p, columnsFor(e.viewport?.columns, S.width), pictureRowsFor(e.viewport?.rows), S.cell ?? DEFAULT_CELL)
+  const fit = pictureCells(p, columnsFor(e.viewport?.columns, S.width), pictureRowsFor(e.viewport?.rows, S.height), S.cell ?? DEFAULT_CELL)
   if (ready.inline) {
     const png = await pictureBytes($, p)
     return png ? { source: { png }, ...fit, alt } : null
@@ -106,7 +106,9 @@ export async function convertedOf($: EngineInterface, ready: Env, file: string, 
     if (before && [...converting.keys()].some(k => k.startsWith(`${file}@${stamp}@`))) return before
     run = convertOnce($, ready, file, stamp, box, key).finally(() => converting.delete(key))
     converting.set(key, run)
-    if (before) void run.then(() => refresh($), () => undefined)
+    // The refresh one tick later: a run that ends while this row still draws
+    // must not be lost.
+    if (before) void run.then(() => void $.clock.after(0, () => refresh($)), () => undefined)
   }
   return before ?? run
 }
@@ -175,7 +177,7 @@ export async function sentOf(
   // Over ssh a Markdown file's page must stay INLINE_MAX_SIDE pixels wide at most.
   const columns = columnsFor(e.viewport?.columns, S.width, o.ready.inline ? (S.cell ?? DEFAULT_CELL) : null)
   // The space a picture takes (as in shownOne), which a JPEG or WebP is made to fit.
-  const box = convertBox(columns, pictureRowsFor(e.viewport?.rows), S.cell ?? DEFAULT_CELL)
+  const box = convertBox(columns, pictureRowsFor(e.viewport?.rows, S.height), S.cell ?? DEFAULT_CELL)
   const under: Under[] = []
   for (const f of o.files) {
     const full = imagePathOf(f.path, o.ready.cwd)

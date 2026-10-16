@@ -3,13 +3,18 @@
 // images, and the cells a picture takes. The drawing on the host is in
 // pictures.tsx.
 import type { Cell } from './state'
-import { CONVERT_MAX_SIDE, MAX_IMAGE_ROWS, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS } from './settings'
+import { CONVERT_MAX_SIDE, MAX_IMAGE_ROWS, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, PICTURE_ROOM_ROWS, type Height } from './settings'
 import { hashOf } from './draw'
 
-// The most rows a picture under a row takes: half the viewport, within
-// PICTURE_MIN_ROWS to PICTURE_MAX_ROWS.
-export function pictureRowsFor(viewportRows: number | undefined): number {
-  return Math.max(PICTURE_MIN_ROWS, Math.min(PICTURE_MAX_ROWS, Math.floor((viewportRows ?? 2 * PICTURE_MAX_ROWS) / 2)))
+// The most rows a picture under a row takes, by `height` (/md-preview
+// height): half the viewport within PICTURE_MIN_ROWS to PICTURE_MAX_ROWS
+// (half); the viewport less PICTURE_ROOM_ROWS (full); or a number, at most
+// as much as full. Never under PICTURE_MIN_ROWS or over MAX_IMAGE_ROWS.
+export function pictureRowsFor(viewportRows: number | undefined, height: Height): number {
+  const view = viewportRows ?? 2 * PICTURE_MAX_ROWS
+  const full = view - PICTURE_ROOM_ROWS
+  const rows = height === 'half' ? Math.min(PICTURE_MAX_ROWS, Math.floor(view / 2)) : height === 'full' ? full : Math.min(height, full)
+  return Math.min(MAX_IMAGE_ROWS, Math.max(PICTURE_MIN_ROWS, rows))
 }
 
 // The cells a picture of `size` pixels takes: its own size or smaller (never

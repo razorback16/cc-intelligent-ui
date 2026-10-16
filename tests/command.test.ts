@@ -14,6 +14,7 @@ const at = (text: string) => {
 test('the first word completes as a subcommand', () => {
   expect(at('/md-preview t').map(r => r.text)).toEqual(['theme'])
   expect(at('/md-preview w').map(r => r.text)).toEqual(['width'])
+  expect(at('/md-preview h').map(r => r.text)).toEqual(['height'])
   expect(at('/md-preview o').map(r => r.text)).toEqual(['on', 'off'])
   expect(at('/md-preview S').map(r => r.text)).toEqual(['size', 'setup'])
   expect(at('/md-preview x')).toEqual([])
@@ -31,6 +32,12 @@ test('right after theme or size, rows hold the word and its argument', () => {
   expect(widths.map(r => r.text)).toEqual(['width 80', 'width 100', 'width 120', 'width 160', 'width 200', 'width full'])
   // full is the default; with no width given, it is current.
   expect(widths.at(-1)!.description).toBe('current')
+  const heights = at('/md-preview height')
+  expect(heights.map(r => r.text)).toEqual(['height half', 'height full', 'height 12', 'height 24', 'height 36'])
+  expect(heights.map(r => r.label)).toEqual(['half', 'full', '12 rows', '24 rows', '36 rows'])
+  // half is the default; with no height given, it is current.
+  expect(heights[0]!.description).toBe('current')
+  expect(heights[1]!.description).toBe('the terminal height less 16 rows')
 })
 
 test('a theme name or size completes after its word', () => {
@@ -44,6 +51,11 @@ test('a theme name or size completes after its word', () => {
   const set = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, width: 160 })
   expect(set('/md-preview width 16')[0]!.description).toBe('current')
   expect(set('/md-preview width f')[0]!.description).toBe('the default')
+  expect(at('/md-preview height f').map(r => r.text)).toEqual(['full'])
+  expect(at('/md-preview height 2').map(r => r.text)).toEqual(['24'])
+  const tall = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, height: 24 })
+  expect(tall('/md-preview height 2')[0]!.description).toBe('current')
+  expect(tall('/md-preview height h')[0]!.description).toBe('the default: half the terminal')
 })
 
 test('other prompts and the command name itself get no rows', () => {

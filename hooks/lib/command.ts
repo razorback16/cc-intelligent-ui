@@ -2,15 +2,20 @@
 // its registration.
 import type { EngineInterface } from 'claude-code'
 
-import { DEFAULT_SIZE, DEFAULT_WIDTH, IMAGE_MAX_COLUMNS, MAX_SIZE, MAX_WIDTH, MIN_SIZE, MIN_WIDTH, type Width } from './settings'
+import {
+  DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, PICTURE_ROOM_ROWS,
+  type Height, type Width,
+} from './settings'
 import { isThemeName, type ThemeInfo } from './themes'
 
-// `/md-preview` arguments: on, off, size <80-200>, width [40-400|full], or
-// nothing (show state). A `width` with no value shows the width.
+// `/md-preview` arguments: on, off, size <80-200>, width [40-400|full],
+// height [6-200|half|full], or nothing (show state). A `width` or `height`
+// with no value shows it.
 export type Command =
   | { kind: 'on' | 'off' | 'show' | 'probe' }
   | { kind: 'size'; percent: number }
   | { kind: 'width'; width?: Width }
+  | { kind: 'height'; height?: Height }
   | { kind: 'theme'; name?: string }
   | { kind: 'setup'; remove: boolean }
   | { kind: 'bad' }
@@ -36,30 +41,38 @@ export function parseCommand(args: string): Command {
     const width = Number.parseInt(words[1]!, 10)
     if (width >= MIN_WIDTH && width <= MAX_WIDTH) return { kind: 'width', width }
   }
+  if (words[0] === 'height' && words.length === 1) return { kind: 'height' }
+  if (words[0] === 'height' && words.length === 2 && (words[1] === 'half' || words[1] === 'full')) return { kind: 'height', height: words[1] }
+  if (words[0] === 'height' && words.length === 2 && /^\d+$/.test(words[1]!)) {
+    const height = Number.parseInt(words[1]!, 10)
+    if (height >= MIN_HEIGHT && height <= MAX_HEIGHT) return { kind: 'height', height }
+  }
   return { kind: 'bad' }
 }
 
-// The /md-preview arguments, and the sizes and widths the typeahead offers.
+// The /md-preview arguments, and the sizes, widths and heights the typeahead offers.
 const SUBCOMMANDS = [
   { name: 'on', description: 'draw answers as pictures' },
   { name: 'off', description: 'show answers as text' },
   { name: 'size', description: `text size, ${MIN_SIZE}-${MAX_SIZE}%` },
   { name: 'width', description: `the most columns a picture takes, ${MIN_WIDTH}-${MAX_WIDTH} or full` },
+  { name: 'height', description: `the most rows an image takes, ${MIN_HEIGHT}-${MAX_HEIGHT}, half or full` },
   { name: 'theme', description: 'list the themes, or switch to one' },
   { name: 'setup', description: 'iTerm2: add the shell line that turns pictures on' },
 ] as const
 const SIZES = [80, 90, 100, 110, 120, 125, 150, 175, 200]
 const WIDTHS: readonly Width[] = [80, 100, 120, 160, 200, 'full']
+const HEIGHTS: readonly Height[] = ['half', 'full', 12, 24, 36]
 
 // Typeahead rows for `/md-preview` arguments: the word at the cursor (`token`,
 // starting at `start` in `text`) completed as a subcommand, a theme name, a
-// size or a width. Right after `theme`, `size` or `width`, rows hold the word
-// and its argument, since the typeahead asks only while a word is at the
-// cursor.
+// size, a width or a height. Right after `theme`, `size`, `width` or
+// `height`, rows hold the word and its argument, since the typeahead asks
+// only while a word is at the cursor.
 export type Suggestion = { text: string; label?: string; description?: string }
 export function commandSuggestions(
   text: string, token: string, start: number,
-  o: { themes: readonly ThemeInfo[]; active: string; size: number; width?: Width },
+  o: { themes: readonly ThemeInfo[]; active: string; size: number; width?: Width; height?: Height },
 ): Suggestion[] {
   const head = /^\s*\/md-preview\s+/.exec(text)
   if (!head || start < head[0].length) return []
@@ -84,8 +97,18 @@ export function commandSuggestions(
       label: w === 'full' ? 'full' : `${w} columns`,
       description: w === width ? 'current' : w === DEFAULT_WIDTH ? 'the default' : w === 'full' ? `the terminal width (${IMAGE_MAX_COLUMNS} at most)` : undefined,
     }))
+  const height = o.height ?? DEFAULT_HEIGHT
+  const heightRows = (prefix: string, lead: string) => HEIGHTS
+    .filter(h => String(h).startsWith(prefix))
+    .map(h => ({
+      text: `${lead}${h}`,
+      label: typeof h === 'number' ? `${h} rows` : h,
+      description: h === height ? 'current' : h === DEFAULT_HEIGHT ? 'the default: half the terminal'
+        : h === 'full' ? `the terminal height less ${PICTURE_ROOM_ROWS} rows` : undefined,
+    }))
   if (before.length === 0) {
     if (word === 'theme') return themeRows('', 'theme ')
+    if (word === 'height') return heightRows('', 'height ')
     if (word === 'size') return sizeRows('', 'size ')
     if (word === 'width') return widthRows('', 'width ')
     return SUBCOMMANDS.filter(c => c.name.startsWith(word)).map(c => ({ text: c.name, description: c.description }))
@@ -93,6 +116,7 @@ export function commandSuggestions(
   if (before.length === 1 && before[0] === 'theme') return themeRows(word, '')
   if (before.length === 1 && before[0] === 'size') return sizeRows(word.replace(/%$/, ''), '')
   if (before.length === 1 && before[0] === 'width') return widthRows(word, '')
+  if (before.length === 1 && before[0] === 'height') return heightRows(word, '')
   return []
 }
 
@@ -101,7 +125,7 @@ export function commandSuggestions(
 export async function registerCommand($: EngineInterface) {
   await $.command.register({
     name: 'md-preview',
-    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), theme [name] (list or switch themes)",
-    argumentHint: '[on|off|size <percent>|width [columns|full]|theme [name]]',
+    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image takes), theme [name] (list or switch themes)",
+    argumentHint: '[on|off|size <percent>|width [columns|full]|height [rows|half|full]|theme [name]]',
   }).catch(() => undefined)
 }
