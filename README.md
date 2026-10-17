@@ -1,6 +1,8 @@
-# md-preview
+# Intelligent UI
 
-A Claude Code mod that draws Claude's answers as rendered Markdown pictures, with a look close to VS Code's Markdown preview. Claude can also put live Typst in an answer, for diagrams, charts and math.
+A Claude Code mod that draws Claude's answers as rendered Markdown pictures, in Claude Code's own colours or with a look close to VS Code's Markdown preview.
+
+The plugin is still installed as `md-preview`, and its command is still `/md-preview`. A later version changes them to `claude-intelligent-ui` and `/iui`. Claude can also put live Typst in an answer, for diagrams, charts and math.
 
 Only the drawing changes. The saved answer stays Markdown.
 
@@ -104,11 +106,12 @@ The mod uses this flow only when it can draw the plan: the mod is on, Typst is i
 
 ## Themes
 
-A theme sets the colours, fonts and spacing of the picture. Two themes are in the mod:
+A theme sets the colours, fonts and spacing of the picture. Three themes are in the mod:
 
 | Name | Looks like |
 |---|---|
-| `vscode-modern` (default) | VS Code's Markdown preview with Dark Modern / Light Modern |
+| `claude-code` (default) | Claude Code's own Markdown colours, from its dark and light themes |
+| `vscode-modern` | VS Code's Markdown preview with Dark Modern / Light Modern |
 | `vscode` | The same, with the Dark+ / Light+ colours |
 
 Each theme has a dark and a light part. The mod uses the part that agrees with Claude Code's theme.
@@ -116,7 +119,7 @@ Each theme has a dark and a light part. The mod uses the part that agrees with C
 ### Make your own theme
 
 1. Make a folder: `~/.claude/md-preview/themes/<name>/`.
-2. Put a `theme.json` in it. Write only the keys that you change. The mod merges your file over the base theme, `vscode` (not over the default, `vscode-modern`).
+2. Put a `theme.json` in it. Write only the keys that you change. The mod merges your file over the base theme, `vscode` (not over the default, `claude-code`).
 3. Run `/md-preview theme <name>`. You do not have to restart.
 
 Example: pink inline code with rounder boxes.
@@ -137,7 +140,7 @@ Example: pink inline code with rounder boxes.
 
 All keys, their units and their defaults are in [`render/themes/README.md`](render/themes/README.md).
 
-The `vscode` and `vscode-modern` values come from VS Code (MIT licence, Copyright (c) 2015 - present Microsoft Corporation). The `LICENSE` file is in each of those folders.
+The `vscode` and `vscode-modern` values come from VS Code (MIT licence, Copyright (c) 2015 - present Microsoft Corporation). The `claude-code` theme uses the ANSI colours of the VS Code terminal for links and code. The `LICENSE` file is in each of those folders.
 
 ## How it works
 
@@ -151,20 +154,20 @@ The `vscode` and `vscode-modern` values come from VS Code (MIT licence, Copyrigh
 
 ### How `auto` is resolved
 
-Claude Code finds the light or dark mode for `auto` by asking the terminal for its background colour (OSC 11). A mod cannot see that answer, so md-preview uses these sources, in this order. The first source that gives an answer is used:
+Claude Code finds the light or dark mode for `auto` by asking the terminal for its background colour (OSC 11). A mod cannot see that answer, so Intelligent UI uses these sources, in this order. The first source that gives an answer is used:
 
-1. **The iTerm2 profile:** the background colour of the profile in use (`ITERM_PROFILE`, else the default profile). md-preview finds iTerm2 by `TERM_PROGRAM`. If `TERM_PROGRAM` is not set, `ITERM_PROFILE`, `ITERM_SESSION_ID` or `LC_TERMINAL=iTerm2` also show iTerm2. If the profile has separate colours for light and dark mode, md-preview uses the set for iTerm2's theme (Settings > Appearance). If that theme is Automatic, Minimal or Compact, it uses the set for the OS appearance.
-2. **The Ghostty config:** the `background` that `ghostty +show-config` gives. With a `theme = light:A,dark:B`, md-preview reads the background from the theme file for the OS appearance. With no theme and no `background`, it uses Ghostty's default (`#282c34`, dark).
-   - **cmux** (Ghostty inside, found by its `CMUX_*` variables) reads the same Ghostty config. If that config sets no `theme`, `background`, `foreground` or `palette`, cmux uses its adaptive default theme. md-preview then uses cmux's appearance: `app.appearance` in `~/.config/cmux/cmux.json`, else the value in cmux's Settings. If that appearance is System, md-preview uses the OS appearance. If `terminal.adaptiveDefaultTheme` is `false` in `cmux.json`, md-preview uses the Ghostty rules above.
-3. **The kitty config:** the `background` in `kitty.conf` and in the files that it includes (`include` lines only). The themes kitten writes such an include. If the config folder has `dark-theme.auto.conf`, `light-theme.auto.conf` or `no-preference-theme.auto.conf` (kitty 0.38 and later), md-preview uses the file for the OS appearance, as kitty does. With no `background`, it uses kitty's default (`#000000`, dark). The config folder is `KITTY_CONFIG_DIRECTORY`. If that is not set, it is the first of `$XDG_CONFIG_HOME/kitty`, `~/.config/kitty` and (on macOS) `~/Library/Preferences/kitty` that has a `kitty.conf`.
-4. **The Rio config:** `config.toml` in `RIO_CONFIG_HOME`, else in `~/.config/rio` (on Linux, `$XDG_CONFIG_HOME/rio` if that is set). With an `[adaptive-theme]`, md-preview reads the theme file for `force-theme`, else for the OS appearance. Else it reads the file for `theme`, else the `[colors] background`. Theme files are in the `themes` folder. With no background, it uses Rio's default (`#0F0D0E`, dark).
+1. **The iTerm2 profile:** the background colour of the profile in use (`ITERM_PROFILE`, else the default profile). Intelligent UI finds iTerm2 by `TERM_PROGRAM`. If `TERM_PROGRAM` is not set, `ITERM_PROFILE`, `ITERM_SESSION_ID` or `LC_TERMINAL=iTerm2` also show iTerm2. If the profile has separate colours for light and dark mode, Intelligent UI uses the set for iTerm2's theme (Settings > Appearance). If that theme is Automatic, Minimal or Compact, it uses the set for the OS appearance.
+2. **The Ghostty config:** the `background` that `ghostty +show-config` gives. With a `theme = light:A,dark:B`, Intelligent UI reads the background from the theme file for the OS appearance. With no theme and no `background`, it uses Ghostty's default (`#282c34`, dark).
+   - **cmux** (Ghostty inside, found by its `CMUX_*` variables) reads the same Ghostty config. If that config sets no `theme`, `background`, `foreground` or `palette`, cmux uses its adaptive default theme. Intelligent UI then uses cmux's appearance: `app.appearance` in `~/.config/cmux/cmux.json`, else the value in cmux's Settings. If that appearance is System, Intelligent UI uses the OS appearance. If `terminal.adaptiveDefaultTheme` is `false` in `cmux.json`, Intelligent UI uses the Ghostty rules above.
+3. **The kitty config:** the `background` in `kitty.conf` and in the files that it includes (`include` lines only). The themes kitten writes such an include. If the config folder has `dark-theme.auto.conf`, `light-theme.auto.conf` or `no-preference-theme.auto.conf` (kitty 0.38 and later), Intelligent UI uses the file for the OS appearance, as kitty does. With no `background`, it uses kitty's default (`#000000`, dark). The config folder is `KITTY_CONFIG_DIRECTORY`. If that is not set, it is the first of `$XDG_CONFIG_HOME/kitty`, `~/.config/kitty` and (on macOS) `~/Library/Preferences/kitty` that has a `kitty.conf`.
+4. **The Rio config:** `config.toml` in `RIO_CONFIG_HOME`, else in `~/.config/rio` (on Linux, `$XDG_CONFIG_HOME/rio` if that is set). With an `[adaptive-theme]`, Intelligent UI reads the theme file for `force-theme`, else for the OS appearance. Else it reads the file for `theme`, else the `[colors] background`. Theme files are in the `themes` folder. With no background, it uses Rio's default (`#0F0D0E`, dark).
 5. **`COLORFGBG`**, as it was when Claude Code started. Ghostty does not set it.
 6. **The OS appearance:** macOS Dark or Light, or GNOME's `color-scheme` on Linux.
 7. **Dark.**
 
 The terminal comes before the OS: a dark terminal on a light Mac is dark.
 
-md-preview checks every 3 s. After a change, each mode's pictures compile once. `/md-preview probe` asks the terminal for its background with OSC 11 (5 times) and shows the raw answers. This is a test of whether the answer can reach the mod. The 3 s check does not use OSC 11 yet.
+Intelligent UI checks every 3 s. After a change, each mode's pictures compile once. `/md-preview probe` asks the terminal for its background with OSC 11 (5 times) and shows the raw answers. This is a test of whether the answer can reach the mod. The 3 s check does not use OSC 11 yet.
 
 ## Limitations
 
@@ -178,7 +181,7 @@ md-preview checks every 3 s. After a change, each mode's pictures compile once. 
 - **The look is close to VS Code, not exact:** Typst does not use CSS. Raw HTML in Markdown is shown in a simple form or dropped. Loose lists have tight spacing.
 - **A picture that the terminal dropped from its image memory** (after many large pictures) is not sent again when you scroll back to it.
 - **Over ssh**, the mod cannot read the terminal's config on your computer. So it uses Menlo metrics for the text size, and `auto` uses `COLORFGBG` if ssh sends it. Else `auto` is dark. The mod does not use the OS appearance of the remote computer. Pages are shorter, so that each one is at most 4096 pixels tall. In tmux or screen on the remote computer, no pictures show.
-- **`auto` theme** reads the iTerm2 profile, the Ghostty, kitty and Rio configs, and the cmux settings directly. It does not read kitty's `globinclude`, `envinclude` and `geninclude` lines, or colours that you set while kitty runs. In other terminals, it uses `COLORFGBG` (set only when the terminal starts), then the OS appearance. If you change the theme of such a terminal and the OS appearance does not change, md-preview does not see it. A change shows after up to 3 s.
+- **`auto` theme** reads the iTerm2 profile, the Ghostty, kitty and Rio configs, and the cmux settings directly. It does not read kitty's `globinclude`, `envinclude` and `geninclude` lines, or colours that you set while kitty runs. In other terminals, it uses `COLORFGBG` (set only when the terminal starts), then the OS appearance. If you change the theme of such a terminal and the OS appearance does not change, Intelligent UI does not see it. A change shows after up to 3 s.
 
 ## Develop
 

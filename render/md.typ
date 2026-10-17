@@ -189,8 +189,15 @@
   marker: E.list.markers.map(list-marker),
   indent: E.list.indent-em * 1em, body-indent: E.list.gap-em * 1em, spacing: E.list.item-spacing-em * 1em,
 )
+// list.numbering is one Typst pattern: its counting symbols are the nesting
+// levels ("1.a.i." gives 1., a., i.), and the last one repeats. A pattern
+// with no counting symbol fails the compile, so it gets "1." instead.
+#let enum-numbering = {
+  let p = E.list.numbering
+  if type(p) == str and p.match(regex("[1aAiI*αΑא一壹あいアイㄱ가①⓵]")) != none { p } else { "1." }
+}
 #set enum(
-  numbering: "1.",
+  numbering: enum-numbering,
   indent: E.list.number-indent-em * 1em, body-indent: E.list.number-gap-em * 1em, spacing: E.list.item-spacing-em * 1em,
 )
 
@@ -222,15 +229,18 @@
   h(pad-x)
 }
 // Code blocks: VS Code's `pre` (padding 16px, radius 3px, 1px border) with
-// `code { line-height: 1.357em }`.
+// `code { line-height: 1.357em }`. A block with no language has its own
+// colour, code-plain-fg, when the theme sets one (Typst gives unscoped code
+// the text colour, not the tmTheme's).
 #show raw.where(block: true): it => context {
+  let fg = if it.lang == none { C.at("code-plain-fg", default: C.code-fg) } else { C.code-fg }
   let CB = E.code-block
   let area = measure(text(top-edge: "ascender", bottom-edge: "descender", "x")).height
   set par(leading: calc.max(0pt, CB.line-height * text.size - area), justify: false)
   block(
     width: 100%, fill: C.code-bg, stroke: CB.border-px * px + C.code-border,
     radius: CB.radius-px * px, inset: CB.pad-px * px, above: 1.2em, below: 1.2em,
-    text(fill: C.code-fg, it),
+    text(fill: fg, it),
   )
 }
 

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Claude Code's Markdown code colours: its highlight.js map of classes to
+     ANSI colour names, with the ANSI colours of VS Code's terminal
+     (light; MIT, Copyright (c) 2015 - present Microsoft Corporation:
+     src/vs/workbench/contrib/terminal/common/terminalColorRegistry.ts).
+     The scopes come from ../vscode/light.tmTheme. -->
+<plist version="1.0">
+<dict>
+  <key>name</key><string>Claude Code light (hljs, ANSI)</string>
+  <key>settings</key>
+  <array>
+    <dict><key>settings</key><dict><key>foreground</key><string>#000000</string><key>background</key><string>#F0F0F0</string></dict></dict>
+    <dict><key>name</key><string>hljs-operator</string><key>scope</key><string>keyword.operator, storage.type.function.arrow, punctuation.separator.key-value, punctuation.separator, punctuation.accessor, punctuation.terminator, constant.language.import-export-all, keyword.operator.assignment</string><key>settings</key><dict><key>foreground</key><string>#000000</string></dict></dict>
+    <dict><key>name</key><string>hljs-keyword</string><key>scope</key><string>keyword, storage, storage.type, storage.modifier, keyword.control, keyword.declaration, keyword.other, keyword.operator.new, keyword.operator.expression, keyword.operator.word, keyword.operator.wordlike, keyword.operator.logical.python, keyword.operator.instanceof, keyword.operator.typeof, keyword.operator.sizeof, variable.language, support.type.primitive</string><key>settings</key><dict><key>foreground</key><string>#0451A5</string></dict></dict>
+    <dict><key>name</key><string>hljs-literal</string><key>scope</key><string>constant.language</string><key>settings</key><dict><key>foreground</key><string>#0451A5</string></dict></dict>
+    <dict><key>name</key><string>hljs-built_in</string><key>scope</key><string>support.function.builtin, support.class.builtin, support.type.builtin, support.function.builtin.shell, support.macro, variable.function.macro, support.class, support.constant.builtin, storage.type.rust, entity.name.namespace</string><key>settings</key><dict><key>foreground</key><string>#0598BC</string></dict></dict>
+    <dict><key>name</key><string>hljs-type</string><key>scope</key><string>support.type, entity.name.type, storage.type.primitive, storage.type.numeric</string><key>settings</key><dict><key>foreground</key><string>#63BBD1</string></dict></dict>
+    <dict><key>name</key><string>hljs-number</string><key>scope</key><string>constant.numeric</string><key>settings</key><dict><key>foreground</key><string>#107C10</string></dict></dict>
+    <dict><key>name</key><string>hljs-string</string><key>scope</key><string>string, punctuation.definition.string, string punctuation.definition.string</string><key>settings</key><dict><key>foreground</key><string>#CD3131</string></dict></dict>
+    <dict><key>name</key><string>hljs-regexp</string><key>scope</key><string>string.regexp</string><key>settings</key><dict><key>foreground</key><string>#CD3131</string></dict></dict>
+    <dict><key>name</key><string>hljs-template_tag</string><key>scope</key><string>punctuation.definition.template-expression, punctuation.section.embedded</string><key>settings</key><dict><key>foreground</key><string>#000000</string></dict></dict>
+    <dict><key>name</key><string>hljs-subst</string><key>scope</key><string>meta.template.expression, meta.interpolation, source.python meta.interpolation</string><key>settings</key><dict><key>foreground</key><string>#000000</string></dict></dict>
+    <dict><key>name</key><string>hljs-title.function</string><key>scope</key><string>entity.name.function, variable.function, support.function, meta.function-call.generic</string><key>settings</key><dict><key>foreground</key><string>#949800</string></dict></dict>
+    <dict><key>name</key><string>hljs-title.class</string><key>scope</key><string>entity.name.class, entity.name.struct, entity.name.enum, entity.name.trait, entity.name.impl, entity.name.interface</string><key>settings</key><dict><key>foreground</key><string>#0451A5</string></dict></dict>
+    <dict><key>name</key><string>hljs-params</string><key>scope</key><string>variable.parameter</string><key>settings</key><dict><key>foreground</key><string>#000000</string></dict></dict>
+    <dict><key>name</key><string>hljs-comment</string><key>scope</key><string>comment, punctuation.definition.comment, comment punctuation.definition.comment</string><key>settings</key><dict><key>foreground</key><string>#107C10</string></dict></dict>
+    <dict><key>name</key><string>hljs-doctag</string><key>scope</key><string>comment.block.documentation storage.type, comment.block.documentation entity.name.tag, comment.block.documentation keyword, comment.line.documentation keyword</string><key>settings</key><dict><key>foreground</key><string>#107C10</string></dict></dict>
+    <dict><key>name</key><string>hljs-meta</string><key>scope</key><string>meta.preprocessor, entity.name.function.preprocessor, keyword.other.directive, meta.annotation, meta.decorator, entity.name.function.decorator, punctuation.definition.annotation, punctuation.definition.decorator, comment.line.shebang</string><key>settings</key><dict><key>foreground</key><string>#666666</string></dict></dict>
+    <dict><key>name</key><string>hljs-tag</string><key>scope</key><string>punctuation.definition.tag</string><key>settings</key><dict><key>foreground</key><string>#666666</string></dict></dict>
+    <dict><key>name</key><string>hljs-name</string><key>scope</key><string>entity.name.tag</string><key>settings</key><dict><key>foreground</key><string>#0451A5</string></dict></dict>
+    <dict><key>name</key><string>hljs-variable</string><key>scope</key><string>variable.other.readwrite.shell, variable.other.normal, variable.other.special, variable.other.positional, variable.other.bracket, punctuation.definition.variable, variable.other.php, variable.other.makefile</string><key>settings</key><dict><key>foreground</key><string>#000000</string></dict></dict>
+    <dict><key>name</key><string>hljs-attr</string><key>scope</key><string>meta.object-literal.key, meta.mapping.key string, meta.mapping.key, support.type.property-name.json, entity.name.tag.yaml, string.unquoted.key, entity.other.attribute-name, meta.structure.dictionary.key.python, meta.toml entity.name.tag, entity.name.tag.toml, meta.tag.toml</string><key>settings</key><dict><key>foreground</key><string>#0598BC</string></dict></dict>
+    <dict><key>name</key><string>hljs-attribute</string><key>scope</key><string>support.type.property-name, meta.property-name</string><key>settings</key><dict><key>foreground</key><string>#000000</string></dict></dict>
+    <dict><key>name</key><string>hljs-symbol</string><key>scope</key><string>constant.other.symbol, constant.character.escape</string><key>settings</key><dict><key>foreground</key><string>#000000</string></dict></dict>
+    <dict><key>name</key><string>hljs-bullet</string><key>scope</key><string>punctuation.definition.list.begin.markdown, punctuation.definition.list, markup.list.unnumbered punctuation</string><key>settings</key><dict><key>foreground</key><string>#000000</string></dict></dict>
+    <dict><key>name</key><string>hljs-link</string><key>scope</key><string>markup.underline.link, string.other.link</string><key>settings</key><dict><key>fontStyle</key><string>underline</string></dict></dict>
+    <dict><key>name</key><string>hljs-section</string><key>scope</key><string>markup.heading, entity.name.section, punctuation.definition.heading</string><key>settings</key><dict><key>foreground</key><string>#000000</string></dict></dict>
+    <dict><key>name</key><string>hljs-selector</string><key>scope</key><string>entity.name.tag.css, entity.other.attribute-name.class.css, entity.other.attribute-name.id.css, entity.other.attribute-name.pseudo-class.css, entity.other.pseudo-class, meta.selector</string><key>settings</key><dict><key>foreground</key><string>#000000</string></dict></dict>
+    <dict><key>name</key><string>hljs-emphasis</string><key>scope</key><string>markup.italic</string><key>settings</key><dict><key>fontStyle</key><string>italic</string></dict></dict>
+    <dict><key>name</key><string>hljs-strong</string><key>scope</key><string>markup.bold</string><key>settings</key><dict><key>fontStyle</key><string>bold</string></dict></dict>
+    <dict><key>name</key><string>hljs-addition</string><key>scope</key><string>markup.inserted</string><key>settings</key><dict><key>foreground</key><string>#107C10</string></dict></dict>
+    <dict><key>name</key><string>hljs-deletion</string><key>scope</key><string>markup.deleted</string><key>settings</key><dict><key>foreground</key><string>#CD3131</string></dict></dict>
+  </array>
+</dict>
+</plist>

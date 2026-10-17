@@ -6,7 +6,8 @@ const HOME = '/fake-home'
 const USER = `${HOME}/.claude/md-preview/themes`
 const files: Record<string, string> = {
   'render/themes/vscode/theme.json': '{"name":"VS Code","description":"built-in look"}',
-  'render/themes/vscode-modern/theme.json': '{"name":"VS Code Modern","description":"default look"}',
+  'render/themes/vscode-modern/theme.json': '{"name":"VS Code Modern","description":"modern look"}',
+  'render/themes/claude-code/theme.json': '{"name":"Claude Code","description":"default look"}',
   'render/themes/nord/theme.json': '{"description":"built-in nord"}',
   [`${USER}/nord/theme.json`]: '{"description":"my nord"}',
   [`${USER}/Broken/theme.json`]: '{"name":',
@@ -47,7 +48,8 @@ const withThemes = (on: any, stored: Record<string, unknown> = {}) => {
 test('/md-preview theme lists built-in and user themes; a user theme wins and a broken one is reported', async ($, on) => {
   withThemes(on)
   const ran = await $.command.run({ command: 'md-preview', args: 'theme' } as any)
-  expect(ran.text).toContain('* vscode-modern (built-in): default look')
+  expect(ran.text).toContain('* claude-code (built-in): default look')
+  expect(ran.text).toContain('- vscode-modern (built-in): modern look')
   expect(ran.text).toContain('- vscode (built-in): built-in look')
   expect(ran.text).toContain('- nord (user): my nord')
   expect(ran.text).toContain('- Sun.Light (user): bright')
@@ -72,7 +74,7 @@ test('/md-preview theme <name> switches and stores the name as typed; an unknown
   expect(store['theme-name']).toBe('Sun.Light')
 })
 
-test('a stored theme that is gone falls back to vscode-modern, with one toast', async ($, on) => {
+test('a stored theme that is gone falls back to claude-code, with one toast', async ($, on) => {
   withThemes(on, { 'theme-name': 'gone' })
   const toasts: string[] = []
   on('ui.toast', async ($: any, e: any) => {
@@ -80,6 +82,6 @@ test('a stored theme that is gone falls back to vscode-modern, with one toast', 
     return { value: undefined }
   })
   const ran = await $.command.run({ command: 'md-preview', args: 'theme' } as any)
-  expect(ran.text).toContain('* vscode-modern (built-in)')
-  expect(toasts.filter(t => t.includes('md-preview: theme gone not found, using vscode-modern')).length).toBe(1)
+  expect(ran.text).toContain('* claude-code (built-in)')
+  expect(toasts.filter(t => t.includes('md-preview: theme gone not found, using claude-code')).length).toBe(1)
 })

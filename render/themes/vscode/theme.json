@@ -78,6 +78,7 @@
     "gap-em": 0.55,
     "number-indent-em": 1.45,
     "number-gap-em": 0.5,
+    "numbering": "1.",
     "item-spacing-em": 0.38
   },
   "inline-code": {

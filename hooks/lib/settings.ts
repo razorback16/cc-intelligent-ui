@@ -67,7 +67,7 @@ export const HOST_CHECK_MS = 2000
 // The base every theme merges over (its theme.json and syntax files).
 export const BASE_THEME = 'vscode'
 // The theme used when none is chosen, or when the chosen one is not usable.
-export const DEFAULT_THEME = 'vscode-modern'
+export const DEFAULT_THEME = 'claude-code'
 // The two modes a theme has syntax colours for.
 export const MODES = ['dark', 'light'] as const
 // A picture under a row (an image Claude sends, an image the user pastes)

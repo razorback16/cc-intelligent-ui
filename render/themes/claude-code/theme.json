@@ -1,0 +1,68 @@
+{
+  "name": "Claude Code",
+  "description": "The colours of Claude Code's own Markdown in the terminal, with its dark and light themes",
+  "source": "Claude Code 2.1.302: its dark and light theme palettes (text, inactive, subtle, promptBorder, permission for inline code and code blocks with no language, claude for the accent, userMessageBackground for code blocks, the subagent colours for drawings) and its Markdown renderer (dim quote bar, no code background, underlined h1, '-' bullets, 1. a. i. 1. numbers, highlight.js classes as ANSI colours). ANSI colours (links, code) are VS Code's terminal colours, MIT, see LICENSE: src/vs/workbench/contrib/terminal/common/terminalColorRegistry.ts",
+  "syntax": { "dark": "dark.tmTheme", "light": "light.tmTheme" },
+  "dark": {
+    "fg": "#ffffff",
+    "muted": "#999999",
+    "link": "#3b8eea",
+    "accent": "#d77757",
+    "border": "#505050",
+    "th-border": "#888888",
+    "inline-code-fg": "#b1b9f9",
+    "inline-code-bg": "#00000000",
+    "code-fg": "#ffffff",
+    "code-plain-fg": "#b1b9f9",
+    "code-bg": "#373737",
+    "code-border": "#373737",
+    "quote-bg": "#00000000",
+    "quote-border": "#ffffff80",
+    "check": "#ffffff",
+    "red": "#dc2626",
+    "green": "#16a34a",
+    "blue": "#6a9bcc",
+    "yellow": "#ca8a04",
+    "orange": "#d97757",
+    "purple": "#827dbd"
+  },
+  "light": {
+    "fg": "#000000",
+    "muted": "#666666",
+    "link": "#0451a5",
+    "accent": "#d77757",
+    "border": "#afafaf",
+    "th-border": "#8a8a8a",
+    "inline-code-fg": "#5769f7",
+    "inline-code-bg": "#00000000",
+    "code-fg": "#000000",
+    "code-plain-fg": "#5769f7",
+    "code-bg": "#f0f0f0",
+    "code-border": "#f0f0f0",
+    "quote-bg": "#00000000",
+    "quote-border": "#00000080",
+    "check": "#ffffff",
+    "red": "#dc2626",
+    "green": "#16a34a",
+    "blue": "#6a9bcc",
+    "yellow": "#ca8a04",
+    "orange": "#d97757",
+    "purple": "#827dbd"
+  },
+  "heading": {
+    "rule-levels": 1
+  },
+  "list": {
+    "markers": ["-"],
+    "numbering": "1.a.i.1."
+  },
+  "inline-code": {
+    "pad-x-px": 0,
+    "pad-y-px": 0,
+    "radius-px": 0
+  },
+  "quote": {
+    "bar-px": 3,
+    "radius-px": 0
+  }
+}

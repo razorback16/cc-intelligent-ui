@@ -475,7 +475,7 @@ test('a missing theme falls back to the default theme when it is there', () => {
     themeEntry(BASE_THEME, `/mod/render/themes/${BASE_THEME}`, false, '{}'),
     themeEntry(DEFAULT_THEME, `/mod/render/themes/${DEFAULT_THEME}`, false, '{}'),
   ])
-  expect(DEFAULT_THEME).toBe('vscode-modern')
+  expect(DEFAULT_THEME).toBe('claude-code')
   expect(chooseTheme(themes, 'gone', '/mod')).toEqual({ name: DEFAULT_THEME, dir: `/mod/render/themes/${DEFAULT_THEME}`, isFallback: true })
   expect(chooseTheme(themes, DEFAULT_THEME, '/mod')).toMatchObject({ name: DEFAULT_THEME, isFallback: false })
   expect(chooseTheme(themes, BASE_THEME, '/mod')).toMatchObject({ name: BASE_THEME, isFallback: false })

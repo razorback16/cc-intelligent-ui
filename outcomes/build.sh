@@ -1,6 +1,6 @@
 #!/bin/sh
 # Renders the sample answers with md-preview's own template, then frames them.
-# Usage: marketing/build.sh   (needs typst 0.15)
+# Usage: outcomes/build.sh   (needs typst 0.15)
 #
 # The template gets the inputs the mod gives it (hooks/lib/typst.ts runTypst,
 # draw.tsx sizing/fontFit/alignFirstLine, answer.ts roomOf) for a terminal of
@@ -15,7 +15,7 @@ mkdir -p "$out/raw" "$work/pkg-cache"
 export TYPST_PACKAGE_CACHE_PATH="$work/pkg-cache"
 cols=${COLS:-118}; rows=${ROWS:-50}; cell_w=${CELL_W:-16}; cell_h=${CELL_H:-32}
 ppi=${PPI:-288}; font=${TERM_FONT:-MesloLGS NF}; img_w=${IMG_W:-600}
-theme_dir="$root/render/themes/vscode-modern"
+theme_dir="$root/render/themes/claude-code"
 
 # The font fit: the pt of one column and the code size (draw.tsx fontFit).
 metrics=$(typst eval 'query(<m>).first().value' --in "$root/render/measure.typ" --root / \
@@ -74,47 +74,47 @@ render() {
       "$root/render/md.typ" "$out/raw/$name-$mode-{0p}.png"
   done
 }
-for md in "$here"/samples/*.md; do render "$md" "$(basename "$md" .md)" "$cols"; done
-# The hero's windows are narrower: the same answer in a terminal of HERO_COLS.
-hero=3-mandelbrot; hero_cols=${HERO_COLS:-96}; hero_w=${HERO_W:-520}
-render "$here/samples/$hero.md" hero "$hero_cols"
+for md in "$here"/samples/[0-9]*.md; do render "$md" "$(basename "$md" .md)" "$cols"; done
+# The heroes' windows are narrower: their own answers (samples/hero-*.md) in a terminal of HERO_COLS.
+hero_cols=${HERO_COLS:-96}; hero_w=${HERO_W:-520}
+for md in "$here"/samples/hero-*.md; do render "$md" "$(basename "$md" .md)" "$hero_cols"; done
 ls "$out/raw"
 
 # The bullet offset of a sample (pt), from sizes().
 bullet() { cut -d' ' -f2 "$work/$1.top"; }
 
-# Frames: headline, subline and the prompt for each sample.
-frame() { # name title sub ask
+# Frames: headline and the prompt for each sample.
+frame() { # name title ask
   for mode in dark light; do
     typst compile --root / --ppi 216 --input img="$out/raw/$1-$mode-1.png" --input mode=$mode --input bullet="$(bullet "$1")" \
-      --input img-w="$img_w" --input title="$2" --input sub="$3" --input ask="$4" "$here/frame.typ" "$out/$1-$mode.png" 2>/dev/null
+      --input img-w="$img_w" --input title="$2" --input ask="$3" "$here/frame.typ" "$out/$1-$mode.png" 2>/dev/null
   done
 }
 frame 1-overview "Real Markdown, right in the terminal" \
-  "Tables, task lists, quotes and math, drawn like VS Code's preview." \
   "show me what Markdown you can draw"
 frame 2-math "LaTeX math that reads like a paper" \
-  "Inline and display math, matrices and cases, set by Typst." \
   "write out Maxwell's equations"
 frame 3-mandelbrot "A fractal, calculated as it draws" \
-  "Claude writes the code; Typst runs it and paints 4,000 cells." \
   "draw the Mandelbrot set"
 frame 4-fractal "Recursion and colour, live" \
-  "A 2,047-branch tree and a 720-segment curve, drawn with CeTZ." \
   "draw a fractal tree next to a Lissajous curve"
 frame 5-plot "Plots with axes and a legend" \
-  "cetz-plot draws functions in your theme's colours." \
   "plot a damped oscillator"
 frame 6-diagrams "Flow charts and commutative diagrams" \
-  "fletcher draws boxes, arrows and maths from a few lines of text." \
   "diagram the agent loop and the first isomorphism theorem"
 ls "$out"
 
-# Hero: the same answer in a dark and a light terminal.
-typst compile --root / --ppi 180 --input layout=hero --input mode=dark --input img-w="$hero_w" \
-  --input bullet="$(python3 -c 'import sys; print(round((float(sys.argv[1]) + 4.2) * float(sys.argv[2]) / float(sys.argv[3]) - 4.2, 2))' "$(bullet hero)" "$hero_w" "$img_w")" \
-  --input img-dark="$out/raw/hero-dark-1.png" --input img-light="$out/raw/hero-light-1.png" \
-  --input title="Claude's answers, rendered" \
-  --input sub="Markdown, math and live Typst drawings, in the colours of your terminal." \
-  --input ask="Demonstrate some insane capabilities of md-preview" "$here/frame.typ" "$out/0-hero.png" 2>/dev/null
+# Heroes: each answer in a dark and a light terminal.
+hero() { # name title ask
+  typst compile --root / --ppi 180 --input layout=hero --input mode=dark --input img-w="$hero_w" \
+    --input bullet="$(python3 -c 'import sys; print(round((float(sys.argv[1]) + 4.2) * float(sys.argv[2]) / float(sys.argv[3]) - 4.2, 2))' "$(bullet "hero-$1")" "$hero_w" "$img_w")" \
+    --input img-dark="$out/raw/hero-$1-dark-1.png" --input img-light="$out/raw/hero-$1-light-1.png" \
+    --input title="$2" --input ask="$3" "$here/frame.typ" "$out/0-hero-$1.png" 2>/dev/null
+}
+hero 1-attention "Claude's answers, rendered" \
+  "Explain attention in a transformer"
+hero 2-latency "See the problem at a glance" \
+  "Why is my API request slow?"
+hero 3-rebase "Ideas, drawn as Claude explains them" \
+  "Explain git rebase with a picture"
 ls "$out"
