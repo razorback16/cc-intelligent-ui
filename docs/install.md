@@ -4,7 +4,7 @@
 
 ## Requirements
 
-- Claude Code 2.1.301 or later (tested on 2.1.301)
+- Claude Code 2.1.298 or later (tested on 2.1.301)
 - [Typst](https://typst.app) 0.15 (tested on 0.15.1)
 - macOS (tested). Linux can work, but it is not tested.
 - A terminal where Claude Code draws pictures. Refer to [Terminals](#terminals).

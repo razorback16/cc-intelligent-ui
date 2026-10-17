@@ -16,6 +16,7 @@ Intelligent UI draws each answer from Claude as a typeset picture, with [Typst](
 - **LaTeX math.** Inline `$…$` and display `$$…$$` math, typeset.
 - **Live diagrams, charts and plots.** Claude writes Typst with CeTZ, cetz-plot and fletcher. The drawings use your theme's colours and work offline.
 - **Images and files.** Images in an answer, images that Claude sends, Markdown files that Claude sends, and images that you paste show in the transcript.
+- **Copy text from pictures.** Select and copy text with the mouse, as you do with normal text.
 - **Plans you can read.** In plan mode, the plan shows rendered, with an approve, edit or reject question under it.
 - **Themes that follow light and dark.** Claude Code's own colours by default, or VS Code's Markdown preview. You can make your own.
 
@@ -44,7 +45,7 @@ More in the [gallery](docs/gallery.md): plots, fractals and a tour of all the Ma
 
 ## Quick start
 
-You need Claude Code 2.1.301 or later, [Typst](https://typst.app) 0.15 and macOS. The pictures show only in some terminals:
+You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15 and macOS. The pictures show only in some terminals:
 
 | Terminal | Pictures | What to do |
 |---|---|---|
