@@ -4,6 +4,8 @@
 
 **Claude's answers, rendered.** Real Markdown, math, charts and diagrams, right in your terminal.
 
+**[See it live →](https://razorback16.github.io/cc-intelligent-ui/)**
+
 <sub>An independent, community-made mod for Claude Code. Not affiliated with Anthropic.</sub>
 
 Intelligent UI draws each answer from Claude as a typeset picture, with [Typst](https://typst.app). Tables line up, equations look like a paper, and Claude can draw a chart or a diagram when a picture explains more than words. Only the drawing changes. The saved answer stays Markdown.
