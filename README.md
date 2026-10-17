@@ -1,8 +1,12 @@
+<img alt="Introducing Intelligent UI" src="outcomes/samples/intelligent-ui.png" width="100%">
+
 # Intelligent UI for Claude Code
 
 **Claude's answers, rendered.** Real Markdown, math, charts and diagrams, right in your terminal.
 
 <sub>An independent, community-made mod for Claude Code. Not affiliated with Anthropic.</sub>
+
+Intelligent UI draws each answer from Claude as a typeset picture, with [Typst](https://typst.app). Tables line up, equations look like a paper, and Claude can draw a chart or a diagram when a picture explains more than words. Only the drawing changes. The saved answer stays Markdown.
 
 ## Install
 
@@ -30,10 +34,6 @@ You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15 and macOS
 | WezTerm, Warp, Konsole, Terminal.app, Alacritty, VS Code, Windows Terminal, GNOME Terminal, others | No | — |
 
 In other terminals, the mod shows the normal text. Refer to [Install](docs/install.md#terminals) for all the details, and run `/iui details` to see why pictures do or do not show.
-
-<img alt="Introducing Intelligent UI" src="outcomes/samples/intelligent-ui.png" width="100%">
-
-Intelligent UI draws each answer from Claude as a typeset picture, with [Typst](https://typst.app). Tables line up, equations look like a paper, and Claude can draw a chart or a diagram when a picture explains more than words. Only the drawing changes. The saved answer stays Markdown.
 
 ![Claude explains why an API request is slow: a timing chart shows the DB query takes 310 of 450 ms, with Amdahl's law and a table of fixes, in a dark and a light terminal](outcomes/out/0-hero-2-latency.png)
 
