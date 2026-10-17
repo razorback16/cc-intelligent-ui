@@ -96,8 +96,8 @@
   :root[data-theme="dark"] .sun, :root[data-theme="light"] .moon { display: none; }
 
   /* ---------- Hero ---------- */
-  .hero { padding: 112px 0 0; text-align: center; }
-  h1 { margin: 0 0 clamp(32px, 4vw, 48px); font: 400 clamp(44px, 7.4vw, 92px)/0.95 var(--serif); letter-spacing: -0.025em; }
+  .hero { padding: 100px 0 0; text-align: center; }
+  h1 { margin: 0 0 clamp(24px, 3vw, 36px); font: 400 clamp(44px, 7.4vw, 92px)/0.95 var(--serif); letter-spacing: -0.025em; }
   h1 em {
     font-style: italic; padding-right: 0.05em;
     background: linear-gradient(100deg, #f2c230, var(--clay) 55%, #b98ae0);
@@ -179,7 +179,7 @@
   .t-pic { grid-column: 2; position: relative; width: calc(var(--pt) * var(--w)); aspect-ratio: var(--ar); }
   .t-pic img { position: absolute; inset: 0; width: 100%; height: 100%; }
   .t-brew { margin-top: calc(var(--pt) * 10); color: var(--t-dim); }
-  .t-status { margin-top: calc(var(--pt) * 26); text-align: right; color: var(--t-dim); }
+  .t-status { margin-top: auto; padding-top: calc(var(--pt) * 26); text-align: right; color: var(--t-dim); }
   .t-rule { height: max(1px, calc(var(--pt) * 0.5)); background: var(--t-sep); }
   .t-input { padding: calc(var(--pt) * 2) 0; white-space: pre; }
   .t-cur {
@@ -200,14 +200,16 @@
   .t-pic { clip-path: inset(0 0 100% 0); opacity: 0; }
   .term.answered .t-pic {
     clip-path: inset(0 0 0 0); opacity: 1;
-    transition: clip-path var(--draw, 1.3s) cubic-bezier(0.45, 0, 0.2, 1), opacity 0.35s;
+    transition: opacity 0.35s;
   }
-  /* The windows grow as the answer arrives, as a new session does. */
-  .term.grow:not(.asked) .t-ask, .term.grow:not(.asked) .t-answer, .term.grow.idle .t-answer, .term.grow:not(.done) .t-brew { display: none; }
-  .term.grow .t-answer { min-height: calc(var(--dot) * 2); }
-  .term.grow .t-pic { aspect-ratio: auto; height: 0; overflow: hidden; clip-path: none; opacity: 1; }
-  .term.grow .t-pic img { height: calc(var(--pt) * var(--h)); bottom: auto; }
-  .term.grow.answered .t-pic { height: calc(var(--pt) * var(--h)); transition: height var(--draw, 1.3s) cubic-bezier(0.45, 0, 0.2, 1); }
+  /* A window keeps one height: the answer fills it from the top, the input box stays at the bottom. */
+  .term.full { display: flex; flex-direction: column; }
+  .term.full .t-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  /* The transcript follows a tall answer as it draws, as a terminal does; then you can scroll it. */
+  .term.full .t-scroll {
+    flex: 1; min-height: 0; overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: var(--t-sep) transparent;
+  }
 
   /* ---------- Gallery ---------- */
   .gallery { padding: clamp(96px, 14vw, 160px) 0 40px; }
@@ -313,7 +315,7 @@
     wrap.innerHTML = `
       <div class="term" style="--f:${a.frame + 40};--w:${a.frame};--h:${a.frame * a.ratio};--ar:${1 / a.ratio};--dot:calc(var(--pt) * ${a.frame * a.bullet})">
         <div class="t-bar" aria-hidden="true"><span class="t-lights"><i></i><i></i><i></i></span><span class="t-title">Claude Code</span><span class="t-key">⌥⌘1</span></div>
-        <div class="t-body">
+        <div class="t-body"><div class="t-scroll"${full ? ' tabindex="0" aria-label="Transcript"' : ""}>
           ${full ? `<div class="t-head" aria-hidden="true">${mascot}<div><b>Claude Code</b> <span class="t-dim">v2.1.301</span><br><span class="t-dim">Opus 5.5 with high effort · Claude Max</span><br><span class="t-dim">~/projects/cc-intelligent-ui ·</span> <span class="t-green">/rc</span></div></div>` : ""}
           <div class="t-ask">❯ <span class="q"></span>${full ? "" : '<span class="t-cur"></span>'}</div>
           <div class="t-answer">
@@ -321,7 +323,7 @@
             <span class="t-dot" aria-hidden="true">●</span>
             <div class="t-pic"><img src="${src(a)}" alt="Claude's answer to “${esc(a.ask)}”, drawn by Intelligent UI" decoding="async"></div>
           </div>
-          <div class="t-brew">✻ Brewed for ${a.brew}s</div>
+          <div class="t-brew">✻ Brewed for ${a.brew}s</div></div>
           ${full ? `<div class="t-status">● high · /effort</div><div class="t-rule"></div><div class="t-input">❯ <span class="in"></span><span class="t-cur"></span></div><div class="t-rule"></div><div class="t-mode"><b>${tri}${tri} auto mode on</b> (shift+tab to cycle)</div>` : ""}
         </div>
       </div>`;
@@ -329,10 +331,17 @@
     const q = t.querySelector(".q"), input = t.querySelector(".in") || q;
     const cur = full ? null : t.querySelector(".t-ask .t-cur");
     const spin = t.querySelector(".t-spin b"), secs = t.querySelector(".t-spin span");
+    const box = t.querySelector(".t-scroll"), pic = t.querySelector(".t-pic");
+    // A scroll by the reader stops the transcript from following the drawing.
+    let manual = false;
+    for (const e of ["wheel", "touchmove", "keydown"]) box.addEventListener(e, () => { manual = true; }, { passive: true });
     let run = 0;
+    // The steps' times (ms); length is the whole animation, for the hero's timer.
+    const key = (i) => 30 + (i % 3) * 8, draw = 1000 + a.ratio * 600;
+    const length = 450 + [...a.ask].reduce((n, _, i) => n + key(i), 0) + 320 + 12 * 110 + draw;
 
-    const show = (...cls) => { t.className = ["term grow", ...cls].join(" "); };
-    const reset = () => { run++; q.textContent = ""; if (input !== q) input.textContent = ""; if (cur) cur.hidden = false; full ? show() : show("asked", "idle"); };
+    const show = (...cls) => { t.className = ["term", full && "full", ...cls].filter(Boolean).join(" "); };
+    const reset = () => { run++; q.textContent = ""; if (input !== q) input.textContent = ""; if (cur) cur.hidden = false; pic.style.clipPath = ""; box.scrollTop = 0; full ? show() : show("asked"); };
     const final = () => { run++; q.textContent = a.ask; if (input !== q) input.textContent = ""; if (cur) cur.hidden = true; show("asked", "answered", "done"); };
 
     // The answer as it happens: type the prompt, send it, think, draw.
@@ -343,8 +352,8 @@
       const wait = (ms) => new Promise((r) => setTimeout(r, ms)).then(() => { if (id !== run) throw 0; });
       try {
         await wait(450);
-        show(full ? "typing" : "asked typing idle");
-        for (const ch of a.ask) { input.textContent += ch; await wait(22 + Math.random() * 34); }
+        show(full ? "typing" : "asked typing");
+        for (const [i, ch] of [...a.ask].entries()) { input.textContent += ch; await wait(key(i)); }
         await wait(320);
         if (input !== q) input.textContent = "";
         if (cur) cur.hidden = true;
@@ -356,13 +365,24 @@
           secs.textContent = `(${1 + Math.floor(i / 9)}s · esc to interrupt)`;
           await wait(110);
         }
-        t.style.setProperty("--draw", `${0.9 + a.ratio * 0.6}s`);
+        // Draw the picture from the top, and keep its edge in view.
+        manual = false;
+        const ms = 900 + a.ratio * 600, over = box.scrollHeight - box.clientHeight, t0 = performance.now();
+        const ease = (p) => (p < 0.5 ? 4 * p ** 3 : 1 - (2 - 2 * p) ** 3 / 2);
+        pic.style.clipPath = "inset(0 0 100% 0)";
         show("asked", "answered");
-        await wait(1000 + a.ratio * 600);
+        await new Promise((done) => requestAnimationFrame(function step(now) {
+          if (id !== run) return done();
+          const e = ease(Math.min((now - t0) / ms, 1));
+          pic.style.clipPath = `inset(0 0 ${(1 - e) * 100}% 0)`;
+          if (!manual && over > 0) box.scrollTop = e * over;
+          if (e < 1) requestAnimationFrame(step); else { pic.style.clipPath = ""; done(); }
+        }));
+        await wait(draw - ms);
         show("asked", "answered", "done");
       } catch {}
     }
-    return { el: wrap, a, play, reset, final, img: t.querySelector("img") };
+    return { el: wrap, term: t, a, length, play, reset, final, img: t.querySelector("img") };
   }
 
   /* ---------- Hero: four answers that take turns ---------- */
@@ -381,9 +401,27 @@
     return b;
   });
 
-  const HOLD = 11000;
+  // All four windows have one height, so nothing moves when the tab changes: the tallest
+  // answer's, but no more than fits on the screen with the tabs, so the input box shows.
+  const level = () => {
+    heroes.forEach((h) => { h.term.style.height = ""; });
+    const tallest = Math.max(...heroes.map((h) => h.term.offsetHeight));
+    const room = innerHeight - (stage.getBoundingClientRect().top + scrollY) - 96;
+    const px = Math.min(tallest, Math.max(380, room));
+    heroes.forEach((h) => { h.term.style.height = px + "px"; });
+  };
+  level();
+  // Not for the small height changes of a phone's address bar, which would make it jump.
+  let size = [innerWidth, innerHeight];
+  addEventListener("resize", () => {
+    if (innerWidth === size[0] && Math.abs(innerHeight - size[1]) < 150) return;
+    size = [innerWidth, innerHeight];
+    level();
+  });
+
+  const HOLD = 4000; // the finished answer stays this long
   let at = -1, elapsed = 0, hover = false;
-  // Take turns only while the hero is on screen, so the page under it stays still.
+  // Take turns only while the hero is on screen.
   let seen = true;
   if ("IntersectionObserver" in window) new IntersectionObserver(([e]) => { seen = e.isIntersecting; }, { threshold: 0.2 }).observe(stage);
 
@@ -411,16 +449,23 @@
       if (k) { e.preventDefault(); select(at + k, true); }
     });
   });
-  stage.addEventListener("pointerenter", () => hover = true);
-  stage.addEventListener("pointerleave", () => hover = false);
+  stage.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse") hover = true; });
+  stage.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hover = false; });
+  // On a touch screen there is no hover: a touch stops the turns for 8 s.
+  let touchHold = 0;
+  stage.addEventListener("touchstart", () => {
+    hover = true; clearTimeout(touchHold);
+    touchHold = setTimeout(() => { hover = false; }, 8000);
+  }, { passive: true });
 
   let last = performance.now();
   function tick(now) {
     const dt = Math.min(now - last, 100); last = now;
     if (!reduce && !hover && seen && !document.hidden) {
       elapsed += dt;
-      tabs[at].style.setProperty("--p", Math.min(elapsed / HOLD, 1));
-      if (elapsed >= HOLD) select(at + 1);
+      const total = heroes[at].length + HOLD;
+      tabs[at].style.setProperty("--p", Math.min(elapsed / total, 1));
+      if (elapsed >= total) select(at + 1);
     }
     requestAnimationFrame(tick);
   }
