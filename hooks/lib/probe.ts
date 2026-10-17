@@ -63,9 +63,6 @@ const inflight = new Map<string, Promise<PageWords | null>>()
 
 const pageKey = (d: Drawn, page: number) => `${d.dir}#${page}`
 
-// Whether page `page` of a drawing is known (no probe needs to run).
-export const isProbed = (d: Drawn, page: number) => probed.has(pageKey(d, page))
-
 // The words of page `page` (0-based) of a drawing, for a copy: kept, else
 // its probe (one run per page at a time). Null when the drawing has no Job
 // or the probe fails (a failure is not kept: the next copy probes again).

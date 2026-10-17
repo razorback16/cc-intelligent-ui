@@ -21,7 +21,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderViewport } from 'claude-code'
 
 import {
-  DEFAULT_THEME, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, READING_TOAST_MS, RESULTS_KEPT, TYPST_PROMPT,
+  DEFAULT_THEME, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
   widthText,
 } from './lib/settings'
 import { clip, drawnAnswers, editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env } from './lib/state'
@@ -34,7 +34,7 @@ import { pollHost, PROBE_RUNS, probeOsc11, showMode, USE_OSC11, watchHost } from
 import { measureFonts } from './lib/typst'
 import { drawPages } from './lib/draw'
 import { finalizeAll } from './lib/stream'
-import { isProbed, noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf } from './lib/probe'
+import { noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf } from './lib/probe'
 import { codePointsOf, decodeSelection, hasPlaceholders, joinSegments, pageTopsOf, pickPages, textOfRun, type Pick, type Segment } from './lib/copy'
 import { pagesOf, type Drawing } from './lib/answer'
 import { setUp } from './lib/env'
@@ -208,37 +208,24 @@ function noteCopy($: EngineInterface, note: () => void) {
 type CopyRead = { text: string; segments: Segment[]; picks: Pick[]; runs: number; resolved: number }
 
 // The text for a clipboard (or selection) text with placeholders. A page
-// not probed yet is probed now; when that takes longer than
-// READING_TOAST_MS, a toast says so.
+// not probed yet is probed now, with no toast: only the copy has one.
 async function readCopy($: EngineInterface, raw: string, requestId?: string): Promise<CopyRead> {
   const segments = decodeSelection(raw)
   const picks = pickPages(segments, [...drawnAnswers.values()], requestId)
   const texts: (string | null)[] = []
   let resolved = 0
-  let toast: { cancel: () => void } | null = null
-  try {
-    for (const [i, seg] of segments.entries()) {
-      const pick = picks[i]
-      const d = pick ? drawnAnswers.get(pick.id) : undefined
-      const page = pick && d ? d.pages[pick.page] : undefined
-      if (seg.kind !== 'image' || !pick || !d || !page) {
-        texts.push(null)
-        continue
-      }
-      if (!toast && !isProbed(d, pick.page)) {
-        toast = $.clock.after(READING_TOAST_MS, () => {
-          try {
-            $.ui.toast('Intelligent UI: reading the picture…')
-          } catch {}
-        })
-      }
-      const words = await wordsOf($, d, pick.page)
-      const text = words ? textOfRun(seg.lines, words.items, words.blocks, page) : ''
-      if (text) resolved++
-      texts.push(text || null)
+  for (const [i, seg] of segments.entries()) {
+    const pick = picks[i]
+    const d = pick ? drawnAnswers.get(pick.id) : undefined
+    const page = pick && d ? d.pages[pick.page] : undefined
+    if (seg.kind !== 'image' || !pick || !d || !page) {
+      texts.push(null)
+      continue
     }
-  } finally {
-    toast?.cancel()
+    const words = await wordsOf($, d, pick.page)
+    const text = words ? textOfRun(seg.lines, words.items, words.blocks, page) : ''
+    if (text) resolved++
+    texts.push(text || null)
   }
   const runs = segments.filter(seg => seg.kind === 'image').length
   const read = { text: joinSegments(segments, texts), segments, picks, runs, resolved }

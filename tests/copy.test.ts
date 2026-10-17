@@ -7,7 +7,6 @@ import {
 } from '../hooks/register'
 import { WATCH_RESTART_MS } from '../hooks/lib/frame'
 import { rowsAfter, type Under } from '../hooks/lib/pictures'
-import { READING_TOAST_MS } from '../hooks/lib/settings'
 import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI } from './copy-fixture'
 
 // One screen row of a picture as Claude Code draws it: `lead` (the gutter),
@@ -547,14 +546,14 @@ test('positions are kept in memory: copies of the same page share one probe run,
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
-  // A slow probe: a toast says the mod reads the picture.
+  // A slow probe: no toast until the copy is done.
+  const before = w.toasts.length
   w.hold()
   w.copy(COPY)
   await w.clock.settle()
   expect(w.queries.length).toBe(1)
-  expect(w.toasts).not.toContain('Intelligent UI: reading the picture…')
-  await w.clock.advance(READING_TOAST_MS)
-  expect(w.toasts).toContain('Intelligent UI: reading the picture…')
+  await w.clock.advance(1000)
+  expect(w.toasts.length).toBe(before)
   // /iui grab of the same page meanwhile waits for the same run.
   w.selection = { text: COPY, requestId: 'ans-1' }
   const grabbed = $.command.run({ command: 'iui', args: 'grab' } as any)
@@ -570,7 +569,7 @@ test('positions are kept in memory: copies of the same page share one probe run,
   w.selection = undefined
   w.copy([cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n'))
   await w.clock.settle()
-  await w.clock.advance(READING_TOAST_MS)
+  await w.clock.advance(1000)
   expect(w.queries.length).toBe(1)
   expect(w.copies.length).toBe(3)
   expect(w.toasts.slice(toasts)).toEqual(['Intelligent UI: copied 35 chars of text'])

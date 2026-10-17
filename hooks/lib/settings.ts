@@ -68,12 +68,10 @@ export const NO_NETWORK = 'http://127.0.0.1:9'
 export const HOST_POLL_MS = 3000
 export const HOST_CHECK_MS = 2000
 // Copy: how often the watcher reads the clipboard's change count (macOS;
-// one call in the watcher, no process), the word positions of how many
-// pages are kept in memory (a copy probes only the pages it reads), and
-// how long a probe runs before a toast says the mod reads the picture.
+// one call in the watcher, no process), and the word positions of how
+// many pages are kept in memory (a copy probes only the pages it reads).
 export const CLIP_WAKE_MS = 300
 export const PROBED_KEPT = 64
-export const READING_TOAST_MS = 150
 // The base every theme merges over (its theme.json and syntax files).
 export const BASE_THEME = 'vscode'
 // The theme used when none is chosen, or when the chosen one is not usable.
