@@ -20,13 +20,13 @@ import { findTypst, measureFonts } from './typst'
 
 // The `isOn` atom, which setUp turns off when the stored setting says so (a
 // copy of its own: see state.ts).
-const isOn = atom({ plugin: 'intelligent-ui', key: 'isOn' } as const, true)
+const isOn = atom({ plugin: 'cc-intelligent-ui', key: 'isOn' } as const, true)
 
 // Makes the cache folder, drops key folders not touched for 2 days, makes
 // the designs folder (outside the tmp cache) and drops design files not
 // touched for DESIGNS_KEPT_DAYS; prints the cache folder, the OS name and
 // the designs folder.
-const CACHE_SH = `d="\${TMPDIR:-/tmp}"; d="\${d%/}/intelligent-ui-$(id -u)"; g="\${XDG_CACHE_HOME:-$HOME/.cache}/intelligent-ui/designs"; mkdir -p "$d" && chmod 700 "$d" && { find "$d" -mindepth 1 -maxdepth 1 -type d -mtime +2 ! -name pkg-cache -exec rm -rf {} + 2>/dev/null; mkdir -p "$g" 2>/dev/null && find "$g" -type f -mtime +${DESIGNS_KEPT_DAYS} -delete 2>/dev/null; printf '%s\\n%s\\n%s\\n' "$d" "$(uname -s)" "$g"; }`
+const CACHE_SH = `d="\${TMPDIR:-/tmp}"; d="\${d%/}/cc-intelligent-ui-$(id -u)"; g="\${XDG_CACHE_HOME:-$HOME/.cache}/cc-intelligent-ui/designs"; mkdir -p "$d" && chmod 700 "$d" && { find "$d" -mindepth 1 -maxdepth 1 -type d -mtime +2 ! -name pkg-cache -exec rm -rf {} + 2>/dev/null; mkdir -p "$g" 2>/dev/null && find "$g" -type f -mtime +${DESIGNS_KEPT_DAYS} -delete 2>/dev/null; printf '%s\\n%s\\n%s\\n' "$d" "$(uname -s)" "$g"; }`
 
 // Once per load: the cache folder, Typst, the terminal and its font, the
 // theme, the cell. A failed setup is tried again on the next call.
@@ -35,7 +35,7 @@ export function setUp($: EngineInterface): Promise<Env> {
     await registerCommand($)
     const made = await $.process.run(['sh', '-c', CACHE_SH]).catch(() => null)
     const [made1 = '', os = '', made3 = ''] = (made?.stdout ?? '').split('\n')
-    const cache = made1.trim() || '/tmp/intelligent-ui'
+    const cache = made1.trim() || '/tmp/cc-intelligent-ui'
     // The key folders on disk now: a key found here is read back at once.
     const listed = await $.fs.list(cache).catch(() => [])
     S.onDisk = new Set(listed.filter(entry => entry.kind === 'dir' && entry.name !== 'pkg-cache').map(entry => entry.name))
@@ -98,7 +98,7 @@ export function setUp($: EngineInterface): Promise<Env> {
     }
     const termFont = await termFontOf($, program, isMac).catch(() => '')
     const home = (await $.env.get('HOME')) ?? ''
-    const designs = made3.trim() || (home ? `${home}/.cache/intelligent-ui/designs` : `${cache}/designs`)
+    const designs = made3.trim() || (home ? `${home}/.cache/cc-intelligent-ui/designs` : `${cache}/designs`)
     const stored = await $.store.get('theme-name').catch(() => undefined)
     const wanted = typeof stored === 'string' && stored ? stored : DEFAULT_THEME
     const applied = await applyTheme($, root, home, wanted).catch(() => null)

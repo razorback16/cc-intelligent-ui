@@ -10,8 +10,8 @@ import { readText } from './host'
 // $.env.set comes after its terminal check, too late). So the setup adds a
 // marked block to the shell's start file that sets it in iTerm2 alone, not in
 // tmux or screen (Claude Code cannot draw there).
-export const SETUP_START = '# >>> intelligent-ui: Claude Code pictures in iTerm2 >>>'
-export const SETUP_END = '# <<< intelligent-ui <<<'
+export const SETUP_START = '# >>> cc-intelligent-ui: Claude Code pictures in iTerm2 >>>'
+export const SETUP_END = '# <<< cc-intelligent-ui <<<'
 export type ShellRc = { path: string; kind: 'sh' | 'fish' }
 // The start file the setup writes for the login shell (`SHELL`); null for a
 // shell it does not know. iTerm2 starts login shells: bash reads
@@ -20,7 +20,7 @@ export function shellRcOf(o: { shell: string; home: string; zdotdir?: string; xd
   const name = o.shell.split('/').pop() ?? ''
   if (name === 'zsh') return { path: `${o.zdotdir || o.home}/.zshrc`, kind: 'sh' }
   if (name === 'bash') return { path: `${o.home}/${o.isMac ? '.bash_profile' : '.bashrc'}`, kind: 'sh' }
-  if (name === 'fish') return { path: `${o.xdgConfig || `${o.home}/.config`}/fish/conf.d/intelligent-ui.fish`, kind: 'fish' }
+  if (name === 'fish') return { path: `${o.xdgConfig || `${o.home}/.config`}/fish/conf.d/cc-intelligent-ui.fish`, kind: 'fish' }
   return null
 }
 export function setupBlock(kind: ShellRc['kind']): string {

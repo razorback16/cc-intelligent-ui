@@ -14,7 +14,7 @@ import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } 
 // `claude plugin validate` reads an atom only from a const in the file that
 // reads or writes it, so each such file has a copy of its own (atom() is a
 // plain description: the copies are one value).
-const done = atom({ plugin: 'intelligent-ui', key: 'done' } as const, 0)
+const done = atom({ plugin: 'cc-intelligent-ui', key: 'done' } as const, 0)
 
 export type Cell = { width: number; height: number }
 // The terminal now (one TIOCGWINSZ read): its columns, rows and cell in

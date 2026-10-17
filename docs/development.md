@@ -5,8 +5,8 @@
 ## Build and test
 
 ```
-git clone https://github.com/razorback16/claude-intelligent-ui
-cd claude-intelligent-ui
+git clone https://github.com/razorback16/cc-intelligent-ui
+cd cc-intelligent-ui
 claude --plugin-dir .          # once: Claude Code writes the API types to .claude-plugin/types/
 npx -p typescript tsc -p .     # type check
 claude plugin test .           # tests
@@ -17,7 +17,7 @@ claude plugin validate .
 
 ## Debug log
 
-Set `IUI_DEBUG=1` before you start Claude Code. The mod then writes trace lines to `debug.log` in the cache folder (`${TMPDIR}/intelligent-ui-<uid>/`).
+Set `IUI_DEBUG=1` before you start Claude Code. The mod then writes trace lines to `debug.log` in the cache folder (`${TMPDIR}/cc-intelligent-ui-<uid>/`).
 
 ## Module layout
 

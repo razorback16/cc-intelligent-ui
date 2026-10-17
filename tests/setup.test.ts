@@ -7,7 +7,7 @@ test('the setup writes the start file of the login shell', () => {
   expect(shellRcOf({ shell: '/bin/zsh', home: '/h', zdotdir: '/z', isMac: true })!.path).toBe('/z/.zshrc')
   expect(shellRcOf({ shell: '/bin/bash', home: '/h', isMac: true })!.path).toBe('/h/.bash_profile')
   expect(shellRcOf({ shell: '/bin/bash', home: '/h', isMac: false })!.path).toBe('/h/.bashrc')
-  expect(shellRcOf({ shell: '/opt/homebrew/bin/fish', home: '/h', isMac: true })).toEqual({ path: '/h/.config/fish/conf.d/intelligent-ui.fish', kind: 'fish' })
+  expect(shellRcOf({ shell: '/opt/homebrew/bin/fish', home: '/h', isMac: true })).toEqual({ path: '/h/.config/fish/conf.d/cc-intelligent-ui.fish', kind: 'fish' })
   expect(shellRcOf({ shell: '/bin/tcsh', home: '/h', isMac: true })).toBe(null)
 })
 
@@ -55,7 +55,7 @@ const iterm = (on: any, files: Record<string, string>, answer: string | null) =>
   on('ui.toast', async ($: any, e: any) => (toasts.push(e.text), { value: undefined }))
   on('ui.log', async ($: any, e: any) => (logs.push(e.text), { value: undefined }))
   on('process.run', async ($: any, e: any, next: any) =>
-    e.argv[0] === 'sh' && /intelligent-ui-/.test(e.argv.join(' '))
+    e.argv[0] === 'sh' && /cc-intelligent-ui-/.test(e.argv.join(' '))
       ? { value: { exitCode: 0, stdout: '/tmp/mdp\nDarwin\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
       : next(e))
   on('fs.read', async ($: any, e: any, next: any) => (e.path in files ? { value: files[e.path] } : e.path.startsWith('/h/') ? { deny: 'no such file' } : next(e)))

@@ -4,5 +4,5 @@
   "metadata": {
     "description": "Intelligent UI: Claude's answers drawn as rendered Markdown in your terminal"
   },
-  "plugins": [{ "name": "intelligent-ui", "source": "./" }]
+  "plugins": [{ "name": "cc-intelligent-ui", "source": "./" }]
 }

@@ -16,7 +16,7 @@ To change the theme, run `/iui theme <name>`. To list the themes, run `/iui them
 
 ## Make your own theme
 
-1. Make a folder: `~/.claude/intelligent-ui/themes/<name>/`.
+1. Make a folder: `~/.claude/cc-intelligent-ui/themes/<name>/`.
 2. Put a `theme.json` in it. Write only the keys that you change. The mod merges your file over the base theme, `vscode` (not over the default, `claude-code`).
 3. Run `/iui theme <name>`. You do not have to restart.
 

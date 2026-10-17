@@ -86,8 +86,8 @@ export {
 } from './lib/plan'
 
 // The atoms the hooks read and write (a copy of each in this file: see state.ts).
-const isOn = atom({ plugin: 'intelligent-ui', key: 'isOn' } as const, true)
-const done = atom({ plugin: 'intelligent-ui', key: 'done' } as const, 0)
+const isOn = atom({ plugin: 'cc-intelligent-ui', key: 'isOn' } as const, true)
+const done = atom({ plugin: 'cc-intelligent-ui', key: 'done' } as const, 0)
 
 // ---- Pictures under rows ----------------------------------------------------
 
@@ -554,7 +554,7 @@ export const register: Register = on => {
     if (!e.surfaces.includes('terminal') || !(await read($, isOn))) return composed
     const ready = S.env ?? (await setUp($).catch(() => null))
     if (!ready?.typst || !ready.canDraw) return composed
-    return { sections: [...composed.sections, { id: 'intelligent-ui:typst', text: TYPST_PROMPT, scope: 'session' as const }] }
+    return { sections: [...composed.sections, { id: 'cc-intelligent-ui:typst', text: TYPST_PROMPT, scope: 'session' as const }] }
   })
 
   // A main-loop model request: its text blocks are final when the next block

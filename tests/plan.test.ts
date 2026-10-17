@@ -157,7 +157,7 @@ function world($: any, on: any, o: {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
     if (argv[0] === 'kill') return ok('')
-    if (/intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
+    if (/cc-intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (cmd.includes('command -v typst')) return ok('/usr/bin/typst\n')
     if (cmd.includes('command -v code')) return o.code ? ok('/usr/local/bin/code\n') : ok('', 1)
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
@@ -219,7 +219,7 @@ function world($: any, on: any, o: {
 
 const use = (o: { id?: string; input?: unknown; output?: unknown; isRunning?: boolean; isErrored?: boolean } = {}) =>
   ({
-    plugin: 'intelligent-ui', surface: 'terminal', component: 'ToolUse', requestId: o.id ?? 'tu-plan',
+    plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'ToolUse', requestId: o.id ?? 'tu-plan',
     props: {
       tool_use_id: o.id ?? 'tu-plan', tool: 'ExitPlanMode', input: o.input ?? { plan: PLAN, planFilePath: FILE },
       isRunning: o.isRunning ?? true, isErrored: o.isErrored ?? false, isInterrupted: false, output: o.output,
@@ -228,12 +228,12 @@ const use = (o: { id?: string; input?: unknown; output?: unknown; isRunning?: bo
   }) as any
 const result = (output: unknown, isErrored = false, id = 'tu-plan') =>
   ({
-    plugin: 'intelligent-ui', surface: 'terminal', component: 'ToolResult', requestId: id,
+    plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'ToolResult', requestId: id,
     props: { tool_use_id: id, tool: 'ExitPlanMode', output, isErrored }, viewport: { columns: 100, rows: 40 },
   }) as any
 const dialog = (question: string, header = PLAN_HEADER, id = 'tu-ask') =>
   ({
-    plugin: 'intelligent-ui', surface: 'terminal', component: 'AskUserQuestion', requestId: id,
+    plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'AskUserQuestion', requestId: id,
     props: { tool: 'AskUserQuestion', questions: [{ question, header, options: [{ label: 'A', description: '' }, { label: 'B', description: '' }], multiSelect: false }] },
     viewport: { columns: 100, rows: 40 },
   }) as any

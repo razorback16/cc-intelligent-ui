@@ -101,7 +101,7 @@ export function themeListing(themes: ReadonlyMap<string, ThemeInfo>, problems: r
 }
 
 // The built-in themes under render/themes and the user's under
-// ~/.claude/intelligent-ui/themes, read fresh each call.
+// ~/.claude/cc-intelligent-ui/themes, read fresh each call.
 export async function scanThemes($: EngineInterface, root: string, home: string) {
   const found: (ThemeInfo | ThemeProblem)[] = []
   for (const [base, isUser] of [[`${root}/render/themes`, false], [userThemesOf(home), true]] as const) {
@@ -129,7 +129,7 @@ export async function missingSyntax($: EngineInterface, theme: ThemeInfo) {
   return lost
 }
 
-export const userThemesOf = (home: string) => `${home || '~'}/.claude/intelligent-ui/themes`
+export const userThemesOf = (home: string) => `${home || '~'}/.claude/cc-intelligent-ui/themes`
 
 // The mtimes of the files a theme's pictures depend on (themeFiles): a
 // change to any of them makes new keys.

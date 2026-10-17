@@ -65,7 +65,7 @@ brew install typst
 Then, in Claude Code:
 
 ```
-/plugin install intelligent-ui --marketplace razorback16/claude-intelligent-ui
+/plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui
 ```
 
 It works at once, with no restart.

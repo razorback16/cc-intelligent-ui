@@ -1,9 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 // A theme tree in memory: built-in themes under the mod's render/themes, user
-// themes under $HOME/.claude/intelligent-ui/themes.
+// themes under $HOME/.claude/cc-intelligent-ui/themes.
 const HOME = '/fake-home'
-const USER = `${HOME}/.claude/intelligent-ui/themes`
+const USER = `${HOME}/.claude/cc-intelligent-ui/themes`
 const files: Record<string, string> = {
   'render/themes/vscode/theme.json': '{"name":"VS Code","description":"built-in look"}',
   'render/themes/vscode-modern/theme.json': '{"name":"VS Code Modern","description":"modern look"}',

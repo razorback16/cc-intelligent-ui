@@ -11,7 +11,7 @@ test('with the theme on auto, the mode comes from the OS appearance, read every 
   on('config.set', async ($: any, e: any) => ({ value: e.value }))
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
-    if (argv[0] === 'sh' && /intelligent-ui-/.test(argv.join(' '))) return { value: { exitCode: 0, stdout: '/tmp/mdp\nDarwin\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(argv.join(' '))) return { value: { exitCode: 0, stdout: '/tmp/mdp\nDarwin\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) {
       reads.push('macOS')
       return { value: osDark
@@ -83,7 +83,7 @@ test('with the theme on auto, a dark iTerm2 profile on a light Mac draws dark', 
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (argv[0] === 'sh' && /intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
     if (argv[0] === 'sh' && cmd.includes('TabStyleWithAutomaticOption')) return ok(`${style}@\nG1\n@\n${marks}\n`)
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
     return next(e)
@@ -110,7 +110,7 @@ test('with the theme on auto, Ghostty draws as its background is', async ($, on)
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (argv[0] === 'sh' && /intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
     if (argv[0] === 'sh' && cmd.includes('+show-config')) return ok(config)
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return osDark ? ok('Dark\n') : ok('', 1)
     return next(e)
@@ -138,7 +138,7 @@ test('with the theme on auto, kitty draws as its config or auto theme is', async
   const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
-    if (argv[0] === 'sh' && /intelligent-ui-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return osDark ? ok('Dark\n') : ok('', 1)
     return next(e)
   })
@@ -171,7 +171,7 @@ test('with the theme on auto, Rio draws as its adaptive theme is', async ($, on)
   const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
-    if (argv[0] === 'sh' && /intelligent-ui-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('Dark\n')
     return next(e)
   })
@@ -201,7 +201,7 @@ for (const colorFgBg of [undefined, '0;15']) {
     const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     on('process.run', async ($: any, e: any, next: any) => {
       const argv: string[] = e.argv
-      if (argv[0] === 'sh' && /intelligent-ui-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
+      if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
       if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) {
         asked.push('macOS')
         return ok('', 1)
@@ -230,7 +230,7 @@ test('with the theme on auto, cmux draws as its appearance is', async ($, on) =>
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (argv[0] === 'sh' && /intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
     if (argv[0] === 'sh' && cmd.includes('+show-config')) return ok('font-family = Menlo\n')
     if (argv[0] === 'defaults' && argv.includes('com.cmuxterm.app')) return ok(saved)
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
@@ -281,7 +281,7 @@ test('with the theme on auto, iTerm2 with no TERM_PROGRAM is found by ITERM_PROF
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (argv[0] === 'sh' && /intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
     if (argv[0] === 'sh' && cmd.includes('TabStyleWithAutomaticOption')) return ok(`1\n@\nG1\n@\n${marks}\n`)
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
     return next(e)

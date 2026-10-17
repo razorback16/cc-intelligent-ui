@@ -175,7 +175,7 @@ function world(on: any, vars: Record<string, string>, head = HEAD, stored: Recor
       logs.push(e.init?.stdin ?? '')
       return ok('')
     }
-    if (/intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
+    if (/cc-intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (cmd.includes('command -v typst')) return ok('/usr/bin/typst\n')
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
     if (cmd.includes('od -An')) return ok(`${head}\n@\n`)
@@ -215,7 +215,7 @@ function world(on: any, vars: Record<string, string>, head = HEAD, stored: Recor
 const ENGINE = { type: 'Text', props: {}, children: ['engine drawing'] }
 const message = (requestId: string, text: string) =>
   ({
-    plugin: 'intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId,
+    plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId,
     props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40 },
   }) as any
 const props = (text: string) => ({ text, isFirstOfReply: true }) as any

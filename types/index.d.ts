@@ -3,7 +3,7 @@ export type IuiTheme = 'dark' | 'light'
 
 declare module 'claude-code' {
   interface PluginState {
-    'intelligent-ui': {
+    'cc-intelligent-ui': {
       // Whether answers are drawn as pictures (also kept in $.store as `enabled`).
       isOn: boolean
       // Goes up each time a render finishes or the setup changes, so the

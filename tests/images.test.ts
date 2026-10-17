@@ -275,7 +275,7 @@ function world(on: any, o: {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
     if (argv[0] === 'kill') return ok('')
-    if (/intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
+    if (/cc-intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (argv[0] === 'id' && argv[1] === '-u') return ok('501\n')
     if (cmd.includes('command -v typst')) return o.typst ? ok('/usr/bin/typst\n') : ok('', 1)
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
@@ -342,7 +342,7 @@ function world(on: any, o: {
 
 const sent = (output: unknown, isErrored = false, id = 'tu-1') =>
   ({
-    plugin: 'intelligent-ui', surface: 'terminal', component: 'ToolResult', requestId: id,
+    plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'ToolResult', requestId: id,
     props: { tool_use_id: id, tool: 'SendUserFile', output, isErrored }, viewport: { columns: 100, rows: 40 },
   }) as any
 const attach = (path: string, isImage = true) => ({ attachments: [{ path, size: 1000, isImage, ...(isImage ? { media_type: 'image/png' } : {}) }] })
@@ -350,7 +350,7 @@ const attach = (path: string, isImage = true) => ({ attachments: [{ path, size: 
 const attachAll = (...paths: string[]) => ({ attachments: paths.map(path => ({ path, size: 1000, isImage: /\.(png|jpe?g|webp)$/i.test(path) })) })
 const prompt = (text: string, origin: any = { kind: 'composer' }, id = 'u-1') =>
   ({
-    plugin: 'intelligent-ui', surface: 'terminal', component: 'UserMessage', requestId: id,
+    plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'UserMessage', requestId: id,
     props: { text, origin, isExpanded: true }, viewport: { columns: 100, rows: 40 },
   }) as any
 const images = (tree: any): any[] =>
@@ -576,7 +576,7 @@ test('the same Markdown in two folders compiles twice; an answer still uses the 
   await a.redraw(sent(attachAll('/t/a/n.md'), false, 'tu-a').props)
   await b.redraw(sent(attachAll('/t/b/n.md'), false, 'tu-b').props)
   expect(images(await a.drawn())[0].props.source.file).not.toBe(images(await b.drawn())[0].props.source.file)
-  const answer = { plugin: 'intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId: 'r-1', props: { text: '# Same', isFirstOfReply: true }, viewport: { columns: 100, rows: 40 } } as any
+  const answer = { plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId: 'r-1', props: { text: '# Same', isFirstOfReply: true }, viewport: { columns: 100, rows: 40 } } as any
   await $.ui.mount(answer)
   await clock.settle()
   expect(docs.map(d => d.base)).toEqual(['/t/a', '/t/b', '/w/app'])

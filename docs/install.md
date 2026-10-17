@@ -28,7 +28,7 @@ Where pictures cannot draw, the mod shows the normal text. To see why a terminal
 2. At the prompt of a Claude Code session in the terminal, type:
 
    ```
-   /plugin install intelligent-ui --marketplace razorback16/claude-intelligent-ui
+   /plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui
    ```
 
    Answer `y` to add the marketplace, then push Enter to install for your user. The mod starts at once, with no restart.
@@ -36,7 +36,7 @@ Where pictures cannot draw, the mod shows the normal text. To see why a terminal
 From a shell:
 
 ```
-claude plugin install intelligent-ui --marketplace razorback16/claude-intelligent-ui
+claude plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui
 ```
 
 ## Try it from a clone
@@ -44,6 +44,6 @@ claude plugin install intelligent-ui --marketplace razorback16/claude-intelligen
 To try it from a clone without installing:
 
 ```
-git clone https://github.com/razorback16/claude-intelligent-ui
-claude --plugin-dir /path/to/claude-intelligent-ui
+git clone https://github.com/razorback16/cc-intelligent-ui
+claude --plugin-dir /path/to/cc-intelligent-ui
 ```

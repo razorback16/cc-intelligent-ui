@@ -8,7 +8,7 @@ A theme is a folder with a `theme.json`. Intelligent UI ships three:
 | `vscode-modern` | VS Code Modern | VS Code's Markdown preview, Dark Modern / Light Modern |
 | `vscode` | VS Code | the same, with the Dark+ / Light+ colours; every theme merges over this one |
 
-Your own themes go in `~/.claude/intelligent-ui/themes/<name>/theme.json`. A theme there with the same folder name as a built-in one is used in its place. It is still merged over the built-in `vscode`, like every theme. Choose a theme with `/iui theme <name>`.
+Your own themes go in `~/.claude/cc-intelligent-ui/themes/<name>/theme.json`. A theme there with the same folder name as a built-in one is used in its place. It is still merged over the built-in `vscode`, like every theme. Choose a theme with `/iui theme <name>`.
 
 ## Merging
 

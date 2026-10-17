@@ -1,14 +1,14 @@
 {
-  "name": "intelligent-ui",
+  "name": "cc-intelligent-ui",
   "version": "0.1.0",
   "description": "Draws Claude's answers as rendered Markdown pictures in the terminal, with live Typst for diagrams, charts and math",
   "author": {
     "name": "razorback16",
     "url": "https://github.com/razorback16"
   },
-  "homepage": "https://github.com/razorback16/claude-intelligent-ui",
-  "repository": "https://github.com/razorback16/claude-intelligent-ui",
-  "documentationUrl": "https://github.com/razorback16/claude-intelligent-ui#readme",
+  "homepage": "https://github.com/razorback16/cc-intelligent-ui",
+  "repository": "https://github.com/razorback16/cc-intelligent-ui",
+  "documentationUrl": "https://github.com/razorback16/cc-intelligent-ui#readme",
   "license": "MIT",
   "keywords": [
     "markdown",

@@ -4,7 +4,7 @@ Here is one answer with everything Intelligent UI draws:
 
 ## Real documents, not raw text
 
-Claude's answers arrive with **headings**, *emphasis*, `inline code`, [links](https://github.com/razorback16/claude-intelligent-ui) and pictures like the one above.
+Claude's answers arrive with **headings**, *emphasis*, `inline code`, [links](https://github.com/razorback16/cc-intelligent-ui) and pictures like the one above.
 
 | Element | You write | You see |
 |:--|:--|:--:|

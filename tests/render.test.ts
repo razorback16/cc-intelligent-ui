@@ -5,7 +5,7 @@ const ENGINE = { type: 'Text', props: {}, children: ['engine drawing'] }
 
 const message = (requestId: string, props: Record<string, unknown>) =>
   ({
-    plugin: 'intelligent-ui',
+    plugin: 'cc-intelligent-ui',
     surface: 'terminal',
     component: 'AssistantMessage',
     requestId,

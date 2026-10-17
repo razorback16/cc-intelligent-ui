@@ -30,7 +30,7 @@ function world(on: any, o: { fail?: boolean; slow?: Promise<void>; tall?: boolea
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (/intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
+    if (/cc-intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (cmd.includes('command -v typst')) return ok('/usr/bin/typst\n')
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
     if (argv[0] === 'kill') return ok('')
@@ -73,7 +73,7 @@ function world(on: any, o: { fail?: boolean; slow?: Promise<void>; tall?: boolea
 
 const message = (requestId: string, text: string) =>
   ({
-    plugin: 'intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId,
+    plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId,
     props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40 },
   }) as any
 const props = (text: string) => ({ text, isFirstOfReply: true }) as any

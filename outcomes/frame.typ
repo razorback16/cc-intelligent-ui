@@ -48,7 +48,7 @@
         mascot(0.42pt, rgb("#d77757"), c.eye),
         [*Claude Code* #text(fill: c.dim)[v2.1.301] \
          #text(fill: c.dim)[Opus 5.5 with high effort · Claude Max] \
-         #text(fill: c.dim)[\~/projects/intelligent-ui ·] #text(fill: c.green)[/rc]])
+         #text(fill: c.dim)[\~/projects/cc-intelligent-ui ·] #text(fill: c.green)[/rc]])
       #v(14pt)
       #block(width: 100%, fill: c.ask-bg, inset: (x: 4pt, y: 4pt), below: 0pt)[❯ #ask]
       #v(12pt)
