@@ -79,6 +79,8 @@ for md in "$here"/samples/[0-9]*.md; do render "$md" "$(basename "$md" .md)" "$c
 hero_cols=${HERO_COLS:-96}; hero_w=${HERO_W:-520}
 for md in "$here"/samples/hero-*.md; do render "$md" "$(basename "$md" .md)" "$hero_cols"; done
 ls "$out/raw"
+# site/build.sh needs only the renders.
+[ -z "${RAW_ONLY:-}" ] || exit 0
 
 # The bullet offset of a sample (pt), from sizes().
 bullet() { cut -d' ' -f2 "$work/$1.top"; }

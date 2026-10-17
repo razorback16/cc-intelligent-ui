@@ -1,905 +1,479 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Intelligent UI for Claude Code</title>
-<meta name="description" content="Claude's answers, rendered. Real Markdown, LaTeX math, charts and diagrams, typeset with Typst, right in your terminal.">
-<meta name="theme-color" content="#16141d">
+<meta name="description" content="Claude's answers, rendered. Real Markdown, LaTeX math, charts and diagrams, right in your terminal.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Intelligent UI for Claude Code">
 <meta property="og:description" content="Claude's answers, rendered. Real Markdown, math, charts and diagrams, right in your terminal.">
-<meta property="og:image" content="assets/img/og.jpg">
+<meta property="og:image" content="https://razorback16.github.io/cc-intelligent-ui/assets/og.jpg">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23d97757'/%3E%3Cpath d='M9 11l6 5-6 5' stroke='%2316141d' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='17' y='19' width='7' height='3' rx='1.5' fill='%2316141d'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23d97757'/%3E%3Cpath d='M9 11l6 5-6 5' stroke='%2314161f' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='17' y='19' width='7' height='3' rx='1.5' fill='%2314161f'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="preload" as="image" href="assets/img/0-hero-1-attention.webp">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script>
+  // The theme before the first paint: the saved choice, else the system's.
+  (() => {
+    let t = null;
+    try { t = localStorage.getItem("iui-theme"); } catch {}
+    if (t !== "dark" && t !== "light") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
 <style>
+  /* ---------- Page colours (the outcome frames' gradients) ---------- */
   :root {
-    --bg: #16141d;
-    --bg-2: #1e1b27;
-    --panel: #221f2c;
-    --ink: #f3ece2;
-    --ink-2: #c9c1b6;
-    --muted: #8f877f;
-    --line: rgba(243, 236, 226, 0.11);
-    --line-2: rgba(243, 236, 226, 0.2);
-    --clay: #d97757;
-    --clay-2: #f0a07f;
-    --sun: #f2c230;
-    --sky: #6f9fd8;
-    --ok: #7cc58f;
     --serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
     --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
-    --wrap: 1180px;
+    --ui: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", "Geist", sans-serif;
+    --mono: "MesloLGS NF", Menlo, "JetBrains Mono", ui-monospace, monospace;
+    --clay: #d97757;
     --gutter: clamp(16px, 4vw, 40px);
-    --radius: 18px;
+  }
+  :root[data-theme="dark"] {
     color-scheme: dark;
+    --bg: #14161f;
+    --wash: linear-gradient(35deg, #14161f 0%, #2a1f3d 55%, #3b2416 100%);
+    --ink: #f3ece2;
+    --muted: #9b948c;
+    --line: rgba(243, 236, 226, 0.12);
+    --chip: rgba(243, 236, 226, 0.06);
+    --accent: #f0a07f;
+    --shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.75), 0 0 140px -30px rgba(217, 119, 87, 0.28);
+    /* Claude Code 2.1.301, dark (outcomes/frame.typ) */
+    --t-bg: #283237; --t-fg: #ffffff; --t-dim: #a7a5a5; --t-bar: #21211f; --t-title: #b6b6b4;
+    --t-edge: #3c4448; --t-sep: #7a7b7c; --t-ask: #343e43; --t-green: #52c96a; --t-mode: #ffd301;
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #fdf6ee;
+    --wash: linear-gradient(35deg, #fdf6ee 0%, #efe8fb 55%, #e6f1fb 100%);
+    --ink: #1d1d1f;
+    --muted: #6d6863;
+    --line: rgba(29, 29, 31, 0.12);
+    --chip: rgba(29, 29, 31, 0.05);
+    --accent: #c25a38;
+    --shadow: 0 40px 90px -30px rgba(60, 40, 90, 0.35), 0 0 140px -40px rgba(217, 119, 87, 0.25);
+    /* Claude Code 2.1.301, light (outcomes/frame.typ) */
+    --t-bg: #ffffff; --t-fg: #1f1f1f; --t-dim: #6e6e6e; --t-bar: #ececec; --t-title: #4d4d4d;
+    --t-edge: #d4d4d4; --t-sep: #b5b5b5; --t-ask: #f0f0f0; --t-green: #2f9e4b; --t-mode: #a07400;
   }
 
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
-  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
-
+  html { -webkit-text-size-adjust: 100%; }
   body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font: 400 17px/1.6 var(--sans);
+    margin: 0; min-height: 100vh; overflow-x: hidden;
+    background: var(--bg); color: var(--ink);
+    font: 400 16px/1.55 var(--sans);
     -webkit-font-smoothing: antialiased;
-    overflow-x: hidden;
   }
-
-  /* Warm dusk wash, the same light as the outcome frames */
-  body::before {
-    content: "";
-    position: fixed; inset: 0; z-index: -2;
-    background:
-      radial-gradient(60vw 50vh at 12% -5%, rgba(122, 86, 190, 0.28), transparent 70%),
-      radial-gradient(55vw 55vh at 100% 100%, rgba(217, 119, 87, 0.20), transparent 70%),
-      radial-gradient(40vw 40vh at 85% 10%, rgba(111, 159, 216, 0.10), transparent 70%),
-      var(--bg);
-  }
-  /* Paper grain, a nod to the collage banner */
-  body::after {
-    content: "";
-    position: fixed; inset: 0; z-index: 100; pointer-events: none;
-    opacity: 0.07; mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  }
-
+  body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: var(--wash); }
   a { color: inherit; }
-  img { display: block; max-width: 100%; height: auto; }
-  code, kbd, pre { font-family: var(--mono); }
-  ::selection { background: var(--clay); color: var(--bg); }
-  :focus-visible { outline: 2px solid var(--sun); outline-offset: 3px; border-radius: 6px; }
-
-  .wrap { width: min(100% - 2 * var(--gutter), var(--wrap)); margin-inline: auto; }
-
-  .sr-only {
-    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
-  }
+  img { display: block; }
+  :focus-visible { outline: 2px solid var(--clay); outline-offset: 3px; border-radius: 6px; }
+  .wrap { width: min(100% - 2 * var(--gutter), 1120px); margin-inline: auto; }
 
   /* ---------- Nav ---------- */
-  .nav {
-    position: sticky; top: 0; z-index: 50;
-    backdrop-filter: blur(14px) saturate(140%);
-    -webkit-backdrop-filter: blur(14px) saturate(140%);
-    background: rgba(22, 20, 29, 0.62);
-    border-bottom: 1px solid transparent;
-    transition: border-color 0.3s;
+  .nav { position: absolute; inset: 0 0 auto; z-index: 10; }
+  .nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 68px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; text-decoration: none; letter-spacing: -0.01em; }
+  .brand i {
+    width: 26px; height: 26px; border-radius: 7px; background: var(--clay); color: #14161f;
+    display: grid; place-items: center; font: normal 700 12px/1 var(--mono);
   }
-  .nav.scrolled { border-bottom-color: var(--line); }
-  .nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 16px; }
-  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 600; letter-spacing: -0.01em; }
-  .brand-mark {
-    width: 28px; height: 28px; border-radius: 8px; background: var(--clay);
-    display: grid; place-items: center; color: var(--bg);
-    font: 700 14px/1 var(--mono);
+  .nav-r { display: flex; gap: 6px; }
+  .icon-btn {
+    display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px;
+    border-radius: 999px; border: 1px solid var(--line); background: var(--chip); color: var(--ink);
+    font: 500 14px/1 var(--sans); text-decoration: none; cursor: pointer;
   }
-  .brand small { font-weight: 400; color: var(--muted); }
-  .nav-links { display: flex; align-items: center; gap: 4px; }
-  .nav-links a {
-    text-decoration: none; color: var(--ink-2); font-size: 15px;
-    padding: 8px 12px; border-radius: 999px; transition: color 0.2s, background 0.2s;
-  }
-  .nav-links a:hover { color: var(--ink); background: rgba(243, 236, 226, 0.06); }
-  .nav-links .gh {
-    display: inline-flex; align-items: center; gap: 8px; color: var(--ink);
-    border: 1px solid var(--line-2);
-  }
-  .nav-links .gh svg { width: 16px; height: 16px; }
-  @media (max-width: 640px) { .nav-links .hide-sm { display: none; } .brand small { display: none; } }
+  .icon-btn:hover { border-color: var(--muted); }
+  .icon-btn svg { width: 16px; height: 16px; }
+  .icon-btn.sq { width: 38px; padding: 0; justify-content: center; }
+  :root[data-theme="dark"] .sun, :root[data-theme="light"] .moon { display: none; }
 
   /* ---------- Hero ---------- */
-  .hero { padding: clamp(40px, 6vw, 72px) 0 clamp(56px, 8vw, 96px); text-align: center; }
-  .eyebrow {
-    display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
-    font: 500 13px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2);
-    padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: rgba(243, 236, 226, 0.03);
-  }
-  .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px rgba(124, 197, 143, 0.18); }
-  .hero h1 {
-    font: 400 clamp(52px, 9vw, 116px)/0.92 var(--serif);
-    letter-spacing: -0.025em;
-    margin: 28px 0 0;
-  }
-  .hero h1 em {
-    font-style: italic;
-    background: linear-gradient(100deg, var(--sun) 0%, var(--clay-2) 35%, var(--clay) 60%, #b98ae0 100%);
+  .hero { padding: 112px 0 0; text-align: center; }
+  h1 { margin: 0 0 clamp(32px, 4vw, 48px); font: 400 clamp(44px, 7.4vw, 92px)/0.95 var(--serif); letter-spacing: -0.025em; }
+  h1 em {
+    font-style: italic; padding-right: 0.05em;
+    background: linear-gradient(100deg, #f2c230, var(--clay) 55%, #b98ae0);
     -webkit-background-clip: text; background-clip: text; color: transparent;
-    padding-right: 0.06em;
   }
-  .lede { max-width: 640px; margin: 24px auto 0; color: var(--ink-2); font-size: clamp(17px, 2vw, 20px); }
-  .cta { display: flex; justify-content: center; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 36px; }
-
   .cmd {
-    display: inline-flex; align-items: center; gap: 12px; max-width: 100%;
-    padding: 8px 8px 8px 18px; border-radius: 14px;
-    background: var(--panel); border: 1px solid var(--line-2);
-    font: 400 14px/1.4 var(--mono); color: var(--ink);
-    box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.6);
+    display: inline-flex; align-items: center; gap: 10px; max-width: 100%;
+    margin-top: 22px; padding: 6px 6px 6px 16px; border-radius: 12px;
+    background: var(--chip); border: 1px solid var(--line);
+    font: 400 13.5px/1.3 var(--mono);
   }
-  .cmd code { min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+  .cmd code { font: inherit; white-space: nowrap; overflow-x: auto; scrollbar-width: none; min-width: 0; }
   .cmd code::-webkit-scrollbar { display: none; }
-  .cmd .p { color: var(--clay); user-select: none; }
+  .cmd b { color: var(--clay); font-weight: 400; }
   .copy {
-    flex: none; font: 500 13px/1 var(--sans); color: var(--ink);
-    background: rgba(243, 236, 226, 0.08); border: 1px solid var(--line); border-radius: 9px;
-    padding: 9px 12px; cursor: pointer; transition: background 0.2s, color 0.2s;
-    display: inline-flex; align-items: center; gap: 6px;
+    flex: none; height: 30px; padding: 0 11px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--chip); color: var(--ink); font: 500 12.5px/1 var(--sans);
   }
-  .copy:hover { background: rgba(243, 236, 226, 0.14); }
-  .copy.done { color: var(--ok); }
-  .copy svg { width: 14px; height: 14px; }
+  .copy:hover { border-color: var(--muted); }
+  .copy.done { color: #52c96a; }
 
-  .btn {
-    display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
-    font-weight: 500; font-size: 15px; padding: 13px 20px; border-radius: 14px;
-    background: var(--ink); color: var(--bg); transition: transform 0.2s, background 0.2s;
-  }
-  .btn:hover { transform: translateY(-1px); background: #fff; }
-  .btn svg { width: 16px; height: 16px; }
-
-  /* ---------- Showcase (hero tabs) ---------- */
-  .showcase { margin-top: clamp(40px, 5vw, 64px); text-align: left; }
+  .dock { position: sticky; bottom: 16px; z-index: 5; margin-top: 26px; }
   .tabs {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
-    margin-bottom: 16px;
+    display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; max-width: 100%;
+    background: color-mix(in srgb, var(--bg) 78%, transparent); border: 1px solid var(--line);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.35);
   }
   .tab {
-    position: relative; overflow: hidden; text-align: left; cursor: pointer;
-    background: rgba(243, 236, 226, 0.03); color: var(--ink-2);
-    border: 1px solid var(--line); border-radius: 14px;
-    padding: 14px 16px 16px; font: inherit;
-    transition: background 0.25s, border-color 0.25s, color 0.25s;
+    position: relative; overflow: hidden; cursor: pointer; border: 0; border-radius: 999px;
+    padding: 9px 16px; background: none; color: var(--muted);
+    font: 500 14px/1 var(--sans); white-space: nowrap; transition: color 0.2s, background 0.2s;
   }
-  .tab:hover { background: rgba(243, 236, 226, 0.06); color: var(--ink); }
-  .tab[aria-selected="true"] { background: var(--panel); border-color: var(--line-2); color: var(--ink); }
-  .tab-top { display: flex; align-items: baseline; gap: 10px; }
-  .tab-num { font: italic 400 22px/1 var(--serif); color: var(--muted); }
-  .tab[aria-selected="true"] .tab-num { color: var(--clay); }
-  .tab-title { font-weight: 600; font-size: 16px; letter-spacing: -0.01em; }
-  .tab-prompt {
-    display: block; margin-top: 8px; font: 400 12.5px/1.4 var(--mono); color: var(--muted);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.4em;
+  .tab:hover { color: var(--ink); }
+  .tab[aria-selected="true"] { background: var(--ink); color: var(--bg); }
+  .tab .bar { position: absolute; left: 14px; right: 14px; bottom: 4px; height: 2px; border-radius: 2px; overflow: hidden; }
+  .tab .bar i { display: block; height: 100%; width: calc(var(--p, 0) * 100%); background: var(--clay); }
+  .tab:not([aria-selected="true"]) .bar { display: none; }
+  @media (max-width: 520px) { .tab { padding: 9px 11px; font-size: 13px; } }
+
+  .stage { position: relative; width: min(100%, 860px); margin: 0 auto; }
+  .stage > .t-wrap {
+    position: absolute; inset: 0 0 auto; opacity: 0; transform: translateY(10px) scale(0.99); pointer-events: none;
+    transition: opacity 0.5s, transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
-  .tab-prompt::before { content: "❯ "; color: var(--clay); }
-  .tab[aria-selected="true"] .tab-prompt { color: var(--ink-2); }
-  .tab-prompt .caret {
-    display: inline-block; width: 0.55em; height: 1.05em; margin-left: 1px; vertical-align: -0.15em;
-    background: var(--ink-2); animation: blink 1s steps(1) infinite;
+  .stage > .t-wrap.on { position: relative; opacity: 1; transform: none; pointer-events: auto; }
+
+  /* ---------- The terminal (outcomes/frame.typ; sizes in pt of the frame) ---------- */
+  .t-wrap { container-type: inline-size; text-align: left; }
+  .term {
+    --pt: calc(100cqw / var(--f));
+    background: var(--t-bg); color: var(--t-fg);
+    border: max(1px, calc(var(--pt) * 0.6)) solid var(--t-edge);
+    border-radius: calc(var(--pt) * 10); overflow: hidden;
+    box-shadow: var(--shadow);
+    font: 400 calc(var(--pt) * 8.5)/1.42 var(--mono);
   }
+  .t-bar {
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: calc(var(--pt) * 12);
+    padding: calc(var(--pt) * 8) calc(var(--pt) * 10); background: var(--t-bar); font-family: var(--ui);
+  }
+  .t-lights { display: flex; gap: calc(var(--pt) * 6); }
+  .t-lights i { width: calc(var(--pt) * 8.4); height: calc(var(--pt) * 8.4); border-radius: 50%; background: #ff5f57; }
+  .t-lights i:nth-child(2) { background: #febc2e; }
+  .t-lights i:nth-child(3) { background: #28c840; }
+  .t-title { font-size: calc(var(--pt) * 9); font-weight: 600; color: var(--t-title); }
+  .t-key { font-size: calc(var(--pt) * 8); color: var(--t-dim); }
+  .t-body { padding: calc(var(--pt) * 12) calc(var(--pt) * 8) calc(var(--pt) * 8); }
+  .t-head { display: flex; align-items: center; gap: calc(var(--pt) * 9); line-height: 1.3; margin-bottom: calc(var(--pt) * 14); }
+  .t-head svg { width: calc(var(--pt) * 31.5); flex: none; }
+  .t-dim { color: var(--t-dim); }
+  .t-green { color: var(--t-green); }
+  .t-ask { background: var(--t-ask); padding: calc(var(--pt) * 4); white-space: pre; overflow: hidden; }
+  .t-answer { position: relative; display: grid; grid-template-columns: calc(var(--pt) * 12) auto; margin-top: calc(var(--pt) * 12); }
+  .t-dot { position: absolute; left: calc(var(--pt) * 3); top: var(--dot); transform: translateY(-50%); font-size: calc(var(--pt) * 8); line-height: 1; }
+  .t-spin { position: absolute; left: 0; top: var(--dot); transform: translateY(-50%); line-height: 1; white-space: nowrap; color: var(--t-dim); }
+  .t-spin b { font-weight: 400; color: var(--clay); display: inline-block; width: 1ch; }
+  .t-spin i { font-style: normal; color: var(--clay); }
+  .t-pic { grid-column: 2; position: relative; width: calc(var(--pt) * var(--w)); aspect-ratio: var(--ar); }
+  .t-pic img { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .t-brew { margin-top: calc(var(--pt) * 10); color: var(--t-dim); }
+  .t-status { margin-top: calc(var(--pt) * 26); text-align: right; color: var(--t-dim); }
+  .t-rule { height: max(1px, calc(var(--pt) * 0.5)); background: var(--t-sep); }
+  .t-input { padding: calc(var(--pt) * 2) 0; white-space: pre; }
+  .t-cur {
+    display: inline-block; width: calc(var(--pt) * 5.2); height: calc(var(--pt) * 9);
+    background: var(--t-fg); vertical-align: calc(var(--pt) * -1.5); animation: blink 1.05s steps(1) infinite;
+  }
+  .term.typing .t-cur { animation: none; }
+  .t-cur[hidden] { display: none; }
   @keyframes blink { 50% { opacity: 0; } }
-  .tab-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: transparent; }
-  .tab-bar i {
-    display: block; height: 100%; width: calc(var(--p, 0) * 100%);
-    background: linear-gradient(90deg, var(--sun), var(--clay));
-  }
-  .tab:not([aria-selected="true"]) .tab-bar i { width: 0; }
+  .t-mode { padding-top: calc(var(--pt) * 2); color: var(--t-dim); }
+  .t-mode b { font-weight: 400; color: var(--t-mode); }
+  .t-mode svg { width: calc(var(--pt) * 4.2); height: calc(var(--pt) * 5.2); fill: var(--t-mode); margin-right: calc(var(--pt) * 0.8); }
 
-  .stage {
-    position: relative; border-radius: var(--radius); overflow: hidden;
-    background: #201b2a;
-    border: 1px solid var(--line);
-    box-shadow:
-      0 0 0 1px rgba(0, 0, 0, 0.3),
-      0 40px 80px -30px rgba(0, 0, 0, 0.8),
-      0 0 120px -20px rgba(217, 119, 87, 0.25);
-    transition: height 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* The answer, step by step: typing → asked → working (spinner) → answered (the picture draws) → done */
+  .t-head + .t-ask, .t-dot, .t-spin, .t-brew { opacity: 0; transition: opacity 0.3s; }
+  .term.asked .t-ask { opacity: 1; }
+  .term.working .t-spin, .term.answered .t-dot, .term.done .t-brew { opacity: 1; }
+  .t-pic { clip-path: inset(0 0 100% 0); opacity: 0; }
+  .term.answered .t-pic {
+    clip-path: inset(0 0 0 0); opacity: 1;
+    transition: clip-path var(--draw, 1.3s) cubic-bezier(0.45, 0, 0.2, 1), opacity 0.35s;
   }
-  .stage figure {
-    margin: 0; position: absolute; inset: 0 0 auto 0;
-    opacity: 0; transform: scale(1.015);
-    transition: opacity 0.7s ease, transform 1.2s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  .stage figure.is-active { opacity: 1; transform: none; position: relative; }
-  .stage img { width: 100%; }
-  .stage-foot {
-    display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
-    margin-top: 14px; color: var(--muted); font-size: 14px;
-  }
-  .stage-foot .ctrl {
-    display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
-    background: none; border: 1px solid var(--line); color: var(--ink-2);
-    border-radius: 999px; padding: 6px 12px; font: 500 13px/1 var(--sans);
-  }
-  .stage-foot .ctrl:hover { color: var(--ink); border-color: var(--line-2); }
-  .stage-foot .ctrl svg { width: 12px; height: 12px; }
+  /* The windows grow as the answer arrives, as a new session does. */
+  .term.grow:not(.asked) .t-ask, .term.grow:not(.asked) .t-answer, .term.grow.idle .t-answer, .term.grow:not(.done) .t-brew { display: none; }
+  .term.grow .t-answer { min-height: calc(var(--dot) * 2); }
+  .term.grow .t-pic { aspect-ratio: auto; height: 0; overflow: hidden; clip-path: none; opacity: 1; }
+  .term.grow .t-pic img { height: calc(var(--pt) * var(--h)); bottom: auto; }
+  .term.grow.answered .t-pic { height: calc(var(--pt) * var(--h)); transition: height var(--draw, 1.3s) cubic-bezier(0.45, 0, 0.2, 1); }
 
-  @media (max-width: 760px) {
-    .tabs { grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-    .tab { padding: 10px 10px 12px; }
-    .tab-prompt { display: none; }
-    .tab-title { font-size: 14px; }
-    .tab-num { font-size: 18px; }
-    .tab-top { flex-direction: column; gap: 4px; }
+  /* ---------- Gallery ---------- */
+  .gallery { padding: clamp(96px, 14vw, 160px) 0 40px; }
+  .gallery .kicker { text-align: center; margin: 0 0 44px; font: italic 400 clamp(30px, 4vw, 44px)/1 var(--serif); color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 32px 28px; align-items: start; }
+  .card { margin: 0; cursor: pointer; }
+  .card figcaption {
+    margin-top: 12px; display: flex; justify-content: space-between; gap: 12px;
+    font: 500 12px/1 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
   }
+  .card figcaption span:last-child { opacity: 0; transition: opacity 0.2s; }
+  .card:hover figcaption span:last-child, .card:focus-visible figcaption span:last-child { opacity: 1; }
 
-  /* ---------- Sections ---------- */
-  section { padding: clamp(64px, 10vw, 120px) 0; }
-  .kicker { font: 500 13px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--clay); }
-  .h2 {
-    font: 400 clamp(40px, 6vw, 72px)/1 var(--serif); letter-spacing: -0.02em; margin: 16px 0 0;
-  }
-  .h2 em { font-style: italic; color: var(--clay-2); }
-  .sub { color: var(--ink-2); max-width: 600px; margin: 18px 0 0; font-size: 18px; }
+  /* ---------- Footer ---------- */
+  footer { padding: 72px 0 56px; text-align: center; }
+  footer .big { margin: 0; font: 400 clamp(36px, 5vw, 60px)/1 var(--serif); }
+  footer .big em { font-style: italic; color: var(--accent); }
+  .install { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; justify-items: center; margin-top: 28px; }
+  .install .cmd { margin: 0; }
+  .links { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 28px; }
+  .fine { margin: 40px auto 0; max-width: 620px; color: var(--muted); font-size: 13px; }
 
-  /* Strip of terminal-friendly facts */
-  .strip { border-block: 1px solid var(--line); padding: 0; }
-  .strip .wrap { display: grid; grid-template-columns: repeat(4, 1fr); }
-  .strip div { padding: 28px 20px; border-left: 1px solid var(--line); }
-  .strip div:first-child { border-left: 0; padding-left: 0; }
-  .strip b { display: block; font: 400 clamp(30px, 4vw, 44px)/1 var(--serif); color: var(--ink); }
-  .strip span { color: var(--muted); font-size: 14px; }
-  @media (max-width: 760px) {
-    .strip .wrap { grid-template-columns: 1fr 1fr; }
-    .strip div { padding: 22px 0 22px 16px; }
-    .strip div:nth-child(odd) { border-left: 0; padding-left: 0; }
-    .strip div:nth-child(n+3) { border-top: 1px solid var(--line); }
-  }
-
-  /* Features */
-  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 56px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-  .feature { background: var(--bg); padding: 28px 26px 30px; position: relative; transition: background 0.3s; }
-  .feature:hover { background: var(--bg-2); }
-  .feature .n { font: italic 400 28px/1 var(--serif); color: var(--clay); }
-  .feature h3 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin: 18px 0 6px; }
-  .feature p { margin: 0; color: var(--ink-2); font-size: 15.5px; }
-  .feature code { font-size: 0.88em; color: var(--sun); }
-  .feature.wide { grid-column: span 2; }
-  @media (max-width: 900px) { .features { grid-template-columns: 1fr 1fr; } .feature.wide { grid-column: span 2; } }
-  @media (max-width: 600px) { .features { grid-template-columns: 1fr; } .feature.wide { grid-column: auto; } }
-
-  /* Gallery */
-  .gallery-head { display: flex; align-items: end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
-  .mode {
-    display: inline-flex; padding: 4px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line);
-  }
-  .mode button {
-    font: 500 14px/1 var(--sans); color: var(--ink-2); background: none; border: 0; cursor: pointer;
-    padding: 10px 16px; border-radius: 999px; display: inline-flex; align-items: center; gap: 8px;
-    transition: background 0.25s, color 0.25s;
-  }
-  .mode button svg { width: 15px; height: 15px; }
-  .mode button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
-
-  .exhibits { margin-top: 64px; display: grid; gap: clamp(72px, 10vw, 128px); }
-  .exhibit { display: grid; grid-template-columns: 5fr 7fr; gap: clamp(28px, 5vw, 72px); align-items: center; }
-  .exhibit:nth-child(even) { grid-template-columns: 7fr 5fr; }
-  .exhibit:nth-child(even) .ex-text { order: 2; }
-  .ex-num { font: italic 400 clamp(64px, 9vw, 112px)/0.8 var(--serif); color: transparent; -webkit-text-stroke: 1px var(--line-2); }
-  .ex-tag {
-    display: inline-block; margin-top: 18px; font: 500 12px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
-    color: var(--sun); border: 1px solid rgba(242, 194, 48, 0.3); padding: 6px 10px; border-radius: 999px;
-  }
-  .ex-text h3 { font: 400 clamp(32px, 4vw, 48px)/1.05 var(--serif); letter-spacing: -0.015em; margin: 16px 0 0; }
-  .ex-text p { color: var(--ink-2); margin: 14px 0 0; }
-  .ex-ask {
-    display: inline-flex; gap: 10px; margin-top: 22px; padding: 10px 14px; border-radius: 10px;
-    background: var(--panel); border: 1px solid var(--line); font: 400 13.5px/1.4 var(--mono); color: var(--ink-2);
-  }
-  .ex-ask::before { content: "❯"; color: var(--clay); }
-  .shot {
-    display: block; width: 100%; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
-    background: #201b2a; cursor: zoom-in; position: relative;
-    box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.7);
-    transition: transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.5s;
-  }
-  .shot:hover { transform: translateY(-4px) rotate(-0.3deg); box-shadow: 0 40px 80px -30px rgba(0, 0, 0, 0.8), 0 0 80px -30px rgba(217, 119, 87, 0.35); }
-  .exhibit:nth-child(even) .shot:hover { transform: translateY(-4px) rotate(0.3deg); }
-  .shot img { width: 100%; transition: opacity 0.35s ease; }
-  .shot.swap img { opacity: 0; }
-  .exhibit.tall .shot { max-width: 520px; justify-self: center; }
-  @media (max-width: 860px) {
-    .exhibit, .exhibit:nth-child(even) { grid-template-columns: 1fr; }
-    .exhibit:nth-child(even) .ex-text { order: 0; }
-    .ex-num { font-size: 64px; }
-  }
-
-  /* Banner band */
-  .band { padding: 0; }
-  .band figure { margin: 0; position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); }
-  .band img { width: 100%; aspect-ratio: 1600 / 821; object-fit: cover; }
-
-  /* Install */
-  .install { display: grid; grid-template-columns: 5fr 7fr; gap: clamp(32px, 6vw, 80px); align-items: start; }
-  .install > * { min-width: 0; }
-  @media (max-width: 900px) { .install { grid-template-columns: 1fr; } }
-  .steps { list-style: none; margin: 36px 0 0; padding: 0; counter-reset: s; display: grid; gap: 22px; }
-  .steps li { counter-increment: s; display: grid; grid-template-columns: 40px 1fr; gap: 14px; }
-  .steps li::before {
-    content: counter(s); width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
-    border: 1px solid var(--line-2); font: italic 400 18px/1 var(--serif); color: var(--clay);
-  }
-  .steps h3 { margin: 4px 0 10px; font-size: 17px; font-weight: 600; }
-  .steps p { margin: 10px 0 0; color: var(--muted); font-size: 14.5px; }
-  .steps li > div { min-width: 0; }
-  .steps .cmd { display: flex; width: 100%; justify-content: space-between; box-shadow: none; }
-
-  .table-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-  .table-card h3 { margin: 0; padding: 20px 22px; font-size: 16px; font-weight: 600; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .table-card h3 small { color: var(--muted); font-weight: 400; font-size: 13px; }
-  .table-scroll { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
-  th, td { text-align: left; padding: 13px 22px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  tr:last-child td { border-bottom: 0; }
-  th { font: 500 12px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-  td code { font-size: 0.9em; color: var(--sun); overflow-wrap: anywhere; }
-  td:first-child code { white-space: nowrap; }
-  td .muted { color: var(--muted); }
-  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; white-space: nowrap; }
-  .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-  .pill.yes { color: var(--ok); }
-  .pill.maybe { color: var(--sun); }
-  .pill.no { color: var(--muted); }
-
-  .commands { margin-top: 28px; }
-
-  /* Footer */
-  footer { border-top: 1px solid var(--line); padding: 56px 0 64px; color: var(--muted); font-size: 14px; }
-  .foot { display: flex; justify-content: space-between; gap: 32px; flex-wrap: wrap; }
-  .foot .big { font: 400 clamp(34px, 5vw, 56px)/1 var(--serif); color: var(--ink); margin: 0 0 18px; }
-  .foot .big em { color: var(--clay-2); }
-  .foot nav { display: grid; grid-template-columns: repeat(2, auto); gap: 8px 32px; align-content: start; }
-  .foot nav a { text-decoration: none; color: var(--ink-2); }
-  .foot nav a:hover { color: var(--ink); }
-  .fine { margin-top: 40px; max-width: 760px; line-height: 1.6; }
-
-  /* Lightbox */
-  dialog.lightbox {
-    border: 0; padding: 0; background: transparent; max-width: min(96vw, 1400px); max-height: 94vh; overflow: visible;
-  }
-  dialog.lightbox::backdrop { background: rgba(10, 9, 14, 0.86); backdrop-filter: blur(6px); }
-  dialog.lightbox img { max-height: 90vh; width: auto; border-radius: 14px; margin: 0 auto; }
-  dialog.lightbox .close {
-    position: absolute; top: -14px; right: -14px; width: 36px; height: 36px; border-radius: 50%;
-    border: 1px solid var(--line-2); background: var(--panel); color: var(--ink); cursor: pointer; font-size: 18px; line-height: 1;
-  }
-  @media (max-width: 640px) { dialog.lightbox .close { top: 8px; right: 8px; } }
-
-  /* Reveal on scroll (only with JS) */
-  .js .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.8s ease, transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1); }
-  .js .reveal.in { opacity: 1; transform: none; }
   @media (prefers-reduced-motion: reduce) {
-    .js .reveal { opacity: 1; transform: none; transition: none; }
-    .stage figure, .stage { transition: none; }
-    .tab-prompt .caret { animation: none; }
+    .stage > .t-wrap, .term.answered .t-pic { transition: none !important; }
+    .t-cur { animation: none !important; }
   }
 </style>
-<script>document.documentElement.classList.add("js");</script>
 </head>
 <body>
 
-<header class="nav" id="top">
+<header class="nav">
   <div class="wrap">
-    <a class="brand" href="#top" aria-label="Intelligent UI, back to top">
-      <span class="brand-mark" aria-hidden="true">❯_</span>
-      <span>Intelligent UI <small>for Claude Code</small></span>
-    </a>
-    <nav class="nav-links" aria-label="Main">
-      <a class="hide-sm" href="#features">Features</a>
-      <a class="hide-sm" href="#gallery">Gallery</a>
-      <a href="#install">Install</a>
-      <a class="gh" href="https://github.com/razorback16/cc-intelligent-ui">
+    <a class="brand" href="./"><i aria-hidden="true">❯_</i>Intelligent UI</a>
+    <div class="nav-r">
+      <button class="icon-btn sq" id="theme" type="button" aria-label="Switch light or dark">
+        <svg class="moon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.2 1.5a6.5 6.5 0 108.3 8.3A5.5 5.5 0 016.2 1.5z"/></svg>
+        <svg class="sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg>
+      </button>
+      <a class="icon-btn" href="https://github.com/razorback16/cc-intelligent-ui">
         <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         GitHub
       </a>
-    </nav>
+    </div>
   </div>
 </header>
 
 <main>
-  <!-- ======================= Hero ======================= -->
-  <section class="hero" aria-labelledby="hero-title">
+  <section class="hero">
     <div class="wrap">
-      <span class="eyebrow"><span class="dot" aria-hidden="true"></span>A mod for Claude Code · Typst · MIT</span>
-      <h1 id="hero-title">Claude’s answers,<br><em>rendered.</em></h1>
-      <p class="lede">Real Markdown, LaTeX math, charts and diagrams, typeset with Typst and drawn right in your terminal. Only the drawing changes. The answer stays Markdown.</p>
-
-      <div class="cta">
-        <div class="cmd">
-          <code><span class="p">/</span>plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui</code>
-          <button class="copy" type="button" data-copy="/plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="2"/><path d="M11 5V3.5A1.5 1.5 0 009.5 2h-6A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5"/></svg>
-            <span>Copy</span>
-          </button>
-        </div>
-        <a class="btn" href="#install">Get started
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </a>
-      </div>
-
-      <div class="showcase" id="showcase">
-        <div class="tabs" role="tablist" aria-label="Example answers">
-          <button class="tab" role="tab" id="tab-1" aria-controls="panel-1" aria-selected="true" data-prompt="Explain attention in a transformer">
-            <span class="tab-top"><span class="tab-num">01</span><span class="tab-title">Attention</span></span>
-            <span class="tab-prompt">Explain attention in a transformer</span>
-            <span class="tab-bar" aria-hidden="true"><i></i></span>
-          </button>
-          <button class="tab" role="tab" id="tab-2" aria-controls="panel-2" aria-selected="false" tabindex="-1" data-prompt="Why is my API request slow?">
-            <span class="tab-top"><span class="tab-num">02</span><span class="tab-title">Latency</span></span>
-            <span class="tab-prompt">Why is my API request slow?</span>
-            <span class="tab-bar" aria-hidden="true"><i></i></span>
-          </button>
-          <button class="tab" role="tab" id="tab-3" aria-controls="panel-3" aria-selected="false" tabindex="-1" data-prompt="Explain git rebase with a picture">
-            <span class="tab-top"><span class="tab-num">03</span><span class="tab-title">Git rebase</span></span>
-            <span class="tab-prompt">Explain git rebase with a picture</span>
-            <span class="tab-bar" aria-hidden="true"><i></i></span>
-          </button>
-        </div>
-
-        <div class="stage" id="stage">
-          <figure class="is-active" role="tabpanel" id="panel-1" aria-labelledby="tab-1">
-            <img src="assets/img/0-hero-1-attention.webp" width="2000" height="1181" alt="Claude explains attention in a transformer: the attention formula and a heat map of attention weights, in a dark and a light terminal">
-          </figure>
-          <figure role="tabpanel" id="panel-2" aria-labelledby="tab-2" aria-hidden="true" inert>
-            <img src="assets/img/0-hero-2-latency.webp" width="2000" height="1215" alt="Claude explains why an API request is slow: a timing chart shows the DB query takes 310 of 450 ms, with Amdahl's law and a table of fixes" loading="lazy">
-          </figure>
-          <figure role="tabpanel" id="panel-3" aria-labelledby="tab-3" aria-hidden="true" inert>
-            <img src="assets/img/0-hero-3-rebase.webp" width="2000" height="1060" alt="Claude explains git rebase: a commit graph before and after the rebase and a table that compares merge and rebase" loading="lazy">
-          </figure>
-        </div>
-        <div class="stage-foot">
-          <span>Each answer in a dark and a light terminal. Same Markdown, your theme's colours.</span>
-          <button class="ctrl" type="button" id="playpause" aria-pressed="false">
-            <svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect x="2" y="1.5" width="2.6" height="9" rx="1"/><rect x="7.4" y="1.5" width="2.6" height="9" rx="1"/></svg>
-            <span>Pause</span>
-          </button>
-        </div>
-      </div>
+      <h1>Claude’s answers, <em>rendered.</em></h1>
+      <div class="stage" id="stage"></div>
+      <div class="dock"><div class="tabs" role="tablist" aria-label="Example answers" id="tabs"></div></div>
+      <div><div class="cmd">
+        <code><b>/</b>plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui</code>
+        <button class="copy" type="button" data-copy="/plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui">Copy</button>
+      </div></div>
     </div>
   </section>
 
-  <!-- ======================= Strip ======================= -->
-  <section class="strip" aria-label="At a glance">
+  <section class="gallery" aria-label="More answers">
     <div class="wrap">
-      <div><b>0</b><span>restarts to install</span></div>
-      <div><b>3</b><span>live drawing libraries</span></div>
-      <div><b>∞</b><span>light and dark themes</span></div>
-      <div><b>100%</b><span>Markdown, saved as text</span></div>
-    </div>
-  </section>
-
-  <!-- ======================= Features ======================= -->
-  <section id="features" aria-labelledby="features-title">
-    <div class="wrap">
-      <p class="kicker reveal">Why</p>
-      <h2 class="h2 reveal" id="features-title">Your terminal, <em>typeset.</em></h2>
-      <p class="sub reveal">Tables line up, equations look like a paper, and Claude can draw a chart when a picture explains more than words.</p>
-
-      <div class="features reveal">
-        <article class="feature wide">
-          <span class="n">i.</span>
-          <h3>Rendered Markdown</h3>
-          <p>Headings, tables, task lists, block quotes and code with syntax colours, in your terminal's own font.</p>
-        </article>
-        <article class="feature">
-          <span class="n">ii.</span>
-          <h3>LaTeX math</h3>
-          <p>Inline <code>$…$</code> and display <code>$$…$$</code> math, typeset.</p>
-        </article>
-        <article class="feature">
-          <span class="n">iii.</span>
-          <h3>Live diagrams and plots</h3>
-          <p>Claude writes Typst with CeTZ, cetz-plot and fletcher. The drawings use your theme's colours and work offline.</p>
-        </article>
-        <article class="feature">
-          <span class="n">iv.</span>
-          <h3>Images and files</h3>
-          <p>Images in an answer, images Claude sends, Markdown files and images you paste all show in the transcript.</p>
-        </article>
-        <article class="feature">
-          <span class="n">v.</span>
-          <h3>Copy text from pictures</h3>
-          <p>Select and copy text with the mouse, as you do with normal text.</p>
-        </article>
-        <article class="feature">
-          <span class="n">vi.</span>
-          <h3>Plans you can read</h3>
-          <p>In plan mode, the plan shows rendered, with an approve, edit or reject question under it.</p>
-        </article>
-        <article class="feature wide">
-          <span class="n">vii.</span>
-          <h3>Themes that follow light and dark</h3>
-          <p>Claude Code's own colours by default, or VS Code's Markdown preview. Or make your own with <code>/iui theme</code>.</p>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <!-- ======================= Gallery ======================= -->
-  <section id="gallery" aria-labelledby="gallery-title">
-    <div class="wrap">
-      <div class="gallery-head">
-        <div>
-          <p class="kicker reveal">Gallery</p>
-          <h2 class="h2 reveal" id="gallery-title">Real answers, <em>drawn.</em></h2>
-          <p class="sub reveal">Each picture is one Claude answer in Claude Code. Switch the terminal to see the same answer in the other theme.</p>
-        </div>
-        <div class="mode" role="group" aria-label="Terminal theme">
-          <button type="button" data-mode="dark" aria-pressed="true">
-            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.2 1.5a6.5 6.5 0 108.3 8.3A5.5 5.5 0 016.2 1.5z"/></svg>
-            Dark
-          </button>
-          <button type="button" data-mode="light" aria-pressed="false">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg>
-            Light
-          </button>
-        </div>
-      </div>
-
-      <div class="exhibits">
-        <article class="exhibit tall reveal">
-          <div class="ex-text">
-            <div class="ex-num" aria-hidden="true">01</div>
-            <span class="ex-tag">Markdown</span>
-            <h3>Real Markdown, right in the terminal</h3>
-            <p>Headings, an image, a table, inline math, a code block with syntax colours, a task list and a block quote, in one answer.</p>
-            <span class="ex-ask">show me what Markdown you can draw</span>
-          </div>
-          <button class="shot" type="button" aria-label="Enlarge: Real Markdown, right in the terminal">
-            <img data-name="1-overview" src="assets/img/1-overview-dark.webp" width="1400" height="1633" loading="lazy" alt="One Claude answer with a banner image, a heading, a table, inline math, a syntax-coloured code block, a task list and a block quote">
-          </button>
-        </article>
-
-        <article class="exhibit reveal">
-          <div class="ex-text">
-            <div class="ex-num" aria-hidden="true">02</div>
-            <span class="ex-tag">LaTeX math</span>
-            <h3>Math that reads like a paper</h3>
-            <p>Euler's identity, the Gaussian integral, Maxwell's equations, a matrix and a piecewise function.</p>
-            <span class="ex-ask">write out Maxwell's equations</span>
-          </div>
-          <button class="shot" type="button" aria-label="Enlarge: Math that reads like a paper">
-            <img data-name="2-math" src="assets/img/2-math-dark.webp" width="1400" height="932" loading="lazy" alt="Typeset LaTeX math in Claude Code: the Gaussian integral, Maxwell's equations, a rotation matrix and a piecewise function">
-          </button>
-        </article>
-
-        <article class="exhibit reveal">
-          <div class="ex-text">
-            <div class="ex-num" aria-hidden="true">03</div>
-            <span class="ex-tag">Typst compute</span>
-            <h3>A fractal, calculated as it draws</h3>
-            <p>Typst calculates each pixel of the Mandelbrot set at render time: 100,000 pixels, up to 120 iterations each.</p>
-            <span class="ex-ask">draw the Mandelbrot set</span>
-          </div>
-          <button class="shot" type="button" aria-label="Enlarge: A fractal, calculated as it draws">
-            <img data-name="3-mandelbrot" src="assets/img/3-mandelbrot-dark.webp" width="1400" height="1083" loading="lazy" alt="A Mandelbrot set with smooth colouring, calculated by a live Typst block in a Claude answer">
-          </button>
-        </article>
-
-        <article class="exhibit reveal">
-          <div class="ex-text">
-            <div class="ex-num" aria-hidden="true">04</div>
-            <span class="ex-tag">CeTZ</span>
-            <h3>Recursion and colour, live</h3>
-            <p>A recursive fractal tree and a rainbow Lissajous curve, drawn with CeTZ.</p>
-            <span class="ex-ask">draw a fractal tree next to a Lissajous curve</span>
-          </div>
-          <button class="shot" type="button" aria-label="Enlarge: Recursion and colour, live">
-            <img data-name="4-fractal" src="assets/img/4-fractal-dark.webp" width="1400" height="1008" loading="lazy" alt="A recursive fractal tree with a colour gradient next to a rainbow Lissajous curve, drawn with CeTZ">
-          </button>
-        </article>
-
-        <article class="exhibit reveal">
-          <div class="ex-text">
-            <div class="ex-num" aria-hidden="true">05</div>
-            <span class="ex-tag">cetz-plot</span>
-            <h3>Plots with axes and a legend</h3>
-            <p>A damped oscillator and its exponential envelope, drawn with cetz-plot.</p>
-            <span class="ex-ask">plot a damped oscillator</span>
-          </div>
-          <button class="shot" type="button" aria-label="Enlarge: Plots with axes and a legend">
-            <img data-name="5-plot" src="assets/img/5-plot-dark.webp" width="1400" height="1008" loading="lazy" alt="A function plot of a damped oscillator with its exponential envelope, axes and a legend, drawn with cetz-plot">
-          </button>
-        </article>
-
-        <article class="exhibit reveal">
-          <div class="ex-text">
-            <div class="ex-num" aria-hidden="true">06</div>
-            <span class="ex-tag">fletcher</span>
-            <h3>Flow charts and commutative diagrams</h3>
-            <p>An agent loop and the First Isomorphism Theorem, drawn with fletcher.</p>
-            <span class="ex-ask">diagram the agent loop and the first isomorphism theorem</span>
-          </div>
-          <button class="shot" type="button" aria-label="Enlarge: Flow charts and commutative diagrams">
-            <img data-name="6-diagrams" src="assets/img/6-diagrams-dark.webp" width="1400" height="1046" loading="lazy" alt="A flow chart of an agent loop and a commutative diagram of the First Isomorphism Theorem, drawn with fletcher">
-          </button>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <!-- ======================= Banner band ======================= -->
-  <section class="band" aria-label="Introducing Intelligent UI">
-    <div class="wrap reveal">
-      <figure>
-        <img src="assets/img/banner.webp" width="1600" height="821" loading="lazy" alt="Introducing Intelligent UI: a collage of a yellow sketch, a dusk sky and a rust-red texture">
-      </figure>
-    </div>
-  </section>
-
-  <!-- ======================= Install ======================= -->
-  <section id="install" aria-labelledby="install-title">
-    <div class="wrap install">
-      <div>
-        <p class="kicker reveal">Install</p>
-        <h2 class="h2 reveal" id="install-title">Two commands. <em>No restart.</em></h2>
-        <p class="sub reveal">You need Claude Code 2.1.298 or later, Typst 0.15 and macOS.</p>
-
-        <ol class="steps reveal">
-          <li>
-            <div>
-              <h3>Install Typst</h3>
-              <div class="cmd">
-                <code><span class="p">$ </span>brew install typst</code>
-                <button class="copy" type="button" data-copy="brew install typst"><span>Copy</span></button>
-              </div>
-            </div>
-          </li>
-          <li>
-            <div>
-              <h3>Install the mod, in Claude Code</h3>
-              <div class="cmd">
-                <code><span class="p">/</span>plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui</code>
-                <button class="copy" type="button" data-copy="/plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui"><span>Copy</span></button>
-              </div>
-              <p>It works at once. Run <code>/iui details</code> to see why pictures do or do not show.</p>
-            </div>
-          </li>
-          <li>
-            <div>
-              <h3>Ask for a picture</h3>
-              <p style="margin-top:0">“Plot this CSV.” “Draw the state machine.” “Explain this with a diagram.”</p>
-            </div>
-          </li>
-        </ol>
-      </div>
-
-      <div class="reveal">
-        <div class="table-card">
-          <h3>Terminal support <small>Other terminals show the normal text</small></h3>
-          <div class="table-scroll">
-            <table>
-              <thead><tr><th>Terminal</th><th>Pictures</th><th>What to do</th></tr></thead>
-              <tbody>
-                <tr><td>kitty 0.28+, Ghostty, cmux</td><td><span class="pill yes">Yes</span></td><td class="muted">Nothing</td></tr>
-                <tr><td>iTerm2 3.6+</td><td><span class="pill yes">Yes</span></td><td>Run <code>/iui setup</code> one time</td></tr>
-                <tr><td>Rio 0.5.27+</td><td><span class="pill maybe">Not tested</span></td><td>Set <code>CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1</code></td></tr>
-                <tr><td>ssh</td><td><span class="pill yes">Yes</span></td><td class="muted">From kitty or Ghostty</td></tr>
-                <tr><td>tmux, screen</td><td><span class="pill no">No</span></td><td class="muted">—</td></tr>
-                <tr><td>WezTerm, Warp, Terminal.app, VS Code, others</td><td><span class="pill no">No</span></td><td class="muted">—</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="table-card commands">
-          <h3>Commands</h3>
-          <div class="table-scroll">
-            <table>
-              <tbody>
-                <tr><td><code>/iui</code></td><td>Shows the state and a problem that keeps pictures away</td></tr>
-                <tr><td><code>/iui on</code> · <code>off</code></td><td>Turns the pictures on or off</td></tr>
-                <tr><td><code>/iui theme &lt;name&gt;</code></td><td><code>claude-code</code>, <code>vscode-modern</code>, <code>vscode</code> or your own</td></tr>
-                <tr><td><code>/iui size &lt;80–200&gt;</code></td><td>Text size in percent of your terminal text</td></tr>
-                <tr><td><code>/iui grab</code></td><td>Copies the text under your last mouse selection of pictures</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+      <p class="kicker">and more, drawn live</p>
+      <div class="grid" id="grid"></div>
     </div>
   </section>
 </main>
 
 <footer>
   <div class="wrap">
-    <div class="foot">
-      <div>
-        <p class="big">Ask once. <em>See it.</em></p>
-        <a class="btn" href="https://github.com/razorback16/cc-intelligent-ui">
-          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-          View on GitHub
-        </a>
-      </div>
-      <nav aria-label="Docs">
-        <a href="https://github.com/razorback16/cc-intelligent-ui/blob/main/docs/install.md">Install</a>
-        <a href="https://github.com/razorback16/cc-intelligent-ui/blob/main/docs/usage.md">Usage</a>
-        <a href="https://github.com/razorback16/cc-intelligent-ui/blob/main/docs/themes.md">Themes</a>
-        <a href="https://github.com/razorback16/cc-intelligent-ui/blob/main/docs/how-it-works.md">How it works</a>
-        <a href="https://github.com/razorback16/cc-intelligent-ui/blob/main/docs/limitations.md">Limitations</a>
-        <a href="https://github.com/razorback16/cc-intelligent-ui/blob/main/docs/development.md">Development</a>
-      </nav>
+    <p class="big">Ask once. <em>See it.</em></p>
+    <div class="install">
+      <div class="cmd"><code><b>$ </b>brew install typst</code><button class="copy" type="button" data-copy="brew install typst">Copy</button></div>
+      <div class="cmd"><code><b>/</b>plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui</code><button class="copy" type="button" data-copy="/plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui">Copy</button></div>
     </div>
-    <p class="fine">Intelligent UI is an independent, community-made project. It is not made, supported or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC. MIT licence. The vendored Typst packages keep their own licences.</p>
+    <div class="links">
+      <a class="icon-btn" href="https://github.com/razorback16/cc-intelligent-ui">GitHub</a>
+      <a class="icon-btn" href="https://github.com/razorback16/cc-intelligent-ui/blob/main/docs/install.md">Install guide</a>
+    </div>
+    <p class="fine">Needs Claude Code 2.1.298 or later, Typst 0.15 and macOS. An independent, community-made mod, not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC. MIT licence.</p>
   </div>
 </footer>
 
-<dialog class="lightbox" id="lightbox" aria-label="Enlarged picture">
-  <button class="close" type="button" aria-label="Close">×</button>
-  <img alt="">
-</dialog>
-
+<script src="assets/answers.js"></script>
 <script>
 (() => {
+  const answers = window.IUI_ANSWERS;
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const root = document.documentElement;
+  const theme = () => root.dataset.theme;
+  const src = (a, t = theme()) => `assets/render/${a.name}-${t}.webp`;
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-  /* ---------- Hero tabs that cycle ---------- */
-  const DURATION = 7000;
-  const showcase = document.getElementById("showcase");
-  const stage = document.getElementById("stage");
-  const tabs = [...showcase.querySelectorAll('[role="tab"]')];
-  const panels = [...stage.querySelectorAll("figure")];
-  const playBtn = document.getElementById("playpause");
-  let idx = 0, elapsed = 0, last = performance.now();
-  let userPaused = reduce, hoverPaused = false, typing = 0;
+  // The Claude Code mascot and the mode line's triangle (outcomes/frame.typ).
+  const mascot = '<svg viewBox="0 0 75 48" aria-hidden="true"><g fill="#d77757"><rect x="9" width="57" height="36"/><rect y="20" width="75" height="8"/><rect x="9" y="36" width="4" height="12"/><rect x="18" y="36" width="4" height="12"/><rect x="52" y="36" width="4" height="12"/><rect x="61" y="36" width="4" height="12"/></g><g fill="#050302"><rect x="18" y="8" width="4" height="12"/><rect x="52" y="8" width="4" height="12"/></g></svg>';
+  const tri = '<svg viewBox="0 0 4.2 5.2" aria-hidden="true"><path d="M0 0l4.2 2.6L0 5.2z"/></svg>';
 
-  const ratio = (i) => { const img = panels[i].querySelector("img"); return img.height / img.width; };
-  const fit = () => { stage.style.height = stage.clientWidth * ratio(idx) + "px"; };
+  /* ---------- A Claude Code window around one answer ---------- */
+  // full: the header, the input box and the mode line, as in outcomes/frame.typ.
+  // Else the title bar, the prompt and the answer only; the prompt types in place.
+  function terminal(a, full) {
+    const wrap = document.createElement("div");
+    wrap.className = "t-wrap";
+    wrap.innerHTML = `
+      <div class="term" style="--f:${a.frame + 40};--w:${a.frame};--h:${a.frame * a.ratio};--ar:${1 / a.ratio};--dot:calc(var(--pt) * ${a.frame * a.bullet})">
+        <div class="t-bar" aria-hidden="true"><span class="t-lights"><i></i><i></i><i></i></span><span class="t-title">Claude Code</span><span class="t-key">⌥⌘1</span></div>
+        <div class="t-body">
+          ${full ? `<div class="t-head" aria-hidden="true">${mascot}<div><b>Claude Code</b> <span class="t-dim">v2.1.301</span><br><span class="t-dim">Opus 5.5 with high effort · Claude Max</span><br><span class="t-dim">~/projects/cc-intelligent-ui ·</span> <span class="t-green">/rc</span></div></div>` : ""}
+          <div class="t-ask">❯ <span class="q"></span>${full ? "" : '<span class="t-cur"></span>'}</div>
+          <div class="t-answer">
+            <span class="t-spin" aria-hidden="true"><b>✻</b> <i>Brewing…</i> <span></span></span>
+            <span class="t-dot" aria-hidden="true">●</span>
+            <div class="t-pic"><img src="${src(a)}" alt="Claude's answer to “${esc(a.ask)}”, drawn by Intelligent UI" decoding="async"></div>
+          </div>
+          <div class="t-brew">✻ Brewed for ${a.brew}s</div>
+          ${full ? `<div class="t-status">● high · /effort</div><div class="t-rule"></div><div class="t-input">❯ <span class="in"></span><span class="t-cur"></span></div><div class="t-rule"></div><div class="t-mode"><b>${tri}${tri} auto mode on</b> (shift+tab to cycle)</div>` : ""}
+        </div>
+      </div>`;
+    const t = wrap.firstElementChild;
+    const q = t.querySelector(".q"), input = t.querySelector(".in") || q;
+    const cur = full ? null : t.querySelector(".t-ask .t-cur");
+    const spin = t.querySelector(".t-spin b"), secs = t.querySelector(".t-spin span");
+    let run = 0;
 
-  function typePrompt(tab) {
-    const el = tab.querySelector(".tab-prompt");
-    const text = tab.dataset.prompt;
-    clearInterval(typing);
-    tabs.forEach(t => { if (t !== tab) t.querySelector(".tab-prompt").textContent = t.dataset.prompt; });
-    if (reduce) { el.textContent = text; return; }
-    let n = 0;
-    el.textContent = "";
-    const caret = document.createElement("span");
-    caret.className = "caret";
-    typing = setInterval(() => {
-      n++;
-      el.textContent = text.slice(0, n);
-      el.appendChild(caret);
-      if (n >= text.length) { clearInterval(typing); setTimeout(() => caret.remove(), 1400); }
-    }, 32);
+    const show = (...cls) => { t.className = ["term grow", ...cls].join(" "); };
+    const reset = () => { run++; q.textContent = ""; if (input !== q) input.textContent = ""; if (cur) cur.hidden = false; full ? show() : show("asked", "idle"); };
+    const final = () => { run++; q.textContent = a.ask; if (input !== q) input.textContent = ""; if (cur) cur.hidden = true; show("asked", "answered", "done"); };
+
+    // The answer as it happens: type the prompt, send it, think, draw.
+    async function play() {
+      if (reduce) return final();
+      reset();
+      const id = run;
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms)).then(() => { if (id !== run) throw 0; });
+      try {
+        await wait(450);
+        show(full ? "typing" : "asked typing idle");
+        for (const ch of a.ask) { input.textContent += ch; await wait(22 + Math.random() * 34); }
+        await wait(320);
+        if (input !== q) input.textContent = "";
+        if (cur) cur.hidden = true;
+        q.textContent = a.ask;
+        show("asked", "working");
+        const glyphs = "·✢✳✶✻✽✻✶✳✢";
+        for (let i = 0; i < 12; i++) {
+          spin.textContent = glyphs[i % glyphs.length];
+          secs.textContent = `(${1 + Math.floor(i / 9)}s · esc to interrupt)`;
+          await wait(110);
+        }
+        t.style.setProperty("--draw", `${0.9 + a.ratio * 0.6}s`);
+        show("asked", "answered");
+        await wait(1000 + a.ratio * 600);
+        show("asked", "answered", "done");
+      } catch {}
+    }
+    return { el: wrap, a, play, reset, final, img: t.querySelector("img") };
   }
 
-  function select(i, focus) {
-    idx = (i + tabs.length) % tabs.length;
-    elapsed = 0;
-    tabs.forEach((t, j) => {
-      const on = j === idx;
-      t.setAttribute("aria-selected", on);
-      t.tabIndex = on ? 0 : -1;
-      t.style.setProperty("--p", 0);
-      panels[j].classList.toggle("is-active", on);
-      panels[j].toggleAttribute("inert", !on);
-      panels[j].setAttribute("aria-hidden", !on);
-    });
-    fit();
-    typePrompt(tabs[idx]);
-    if (focus) tabs[idx].focus();
-  }
-
-  tabs.forEach((t, i) => {
-    t.addEventListener("click", () => select(i));
-    t.addEventListener("keydown", e => {
-      const k = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
-      if (k) { e.preventDefault(); select(idx + k, true); }
-      if (e.key === "Home") { e.preventDefault(); select(0, true); }
-      if (e.key === "End") { e.preventDefault(); select(tabs.length - 1, true); }
-    });
+  /* ---------- Hero: four answers that take turns ---------- */
+  const tabsEl = document.getElementById("tabs"), stage = document.getElementById("stage");
+  const heroes = answers.filter((a) => a.group === "hero").map((a) => terminal(a, true));
+  const tabs = heroes.map((h, i) => {
+    const b = document.createElement("button");
+    b.className = "tab"; b.type = "button"; b.id = `tab-${i}`;
+    b.setAttribute("role", "tab");
+    b.innerHTML = `${esc(h.a.label)}<span class="bar" aria-hidden="true"><i></i></span>`;
+    h.el.id = `panel-${i}`;
+    h.el.setAttribute("role", "tabpanel");
+    h.el.setAttribute("aria-labelledby", b.id);
+    b.setAttribute("aria-controls", h.el.id);
+    tabsEl.append(b); stage.append(h.el);
+    return b;
   });
 
-  showcase.addEventListener("pointerenter", () => hoverPaused = true);
-  showcase.addEventListener("pointerleave", () => hoverPaused = false);
+  const HOLD = 11000;
+  let at = -1, elapsed = 0, hover = false;
+  // Take turns only while the hero is on screen, so the page under it stays still.
+  let seen = true;
+  if ("IntersectionObserver" in window) new IntersectionObserver(([e]) => { seen = e.isIntersecting; }, { threshold: 0.2 }).observe(stage);
 
-  function setPlay(paused) {
-    userPaused = paused;
-    playBtn.setAttribute("aria-pressed", paused);
-    playBtn.querySelector("span").textContent = paused ? "Play" : "Pause";
-    playBtn.querySelector("svg").innerHTML = paused
-      ? '<path d="M3 1.5v9l7.5-4.5z"/>'
-      : '<rect x="2" y="1.5" width="2.6" height="9" rx="1"/><rect x="7.4" y="1.5" width="2.6" height="9" rx="1"/>';
+  function select(i, focus) {
+    i = (i + heroes.length) % heroes.length;
+    const old = heroes[at];
+    if (old && at !== i) setTimeout(() => { if (!old.el.classList.contains("on")) old.reset(); }, 600);
+    at = i; elapsed = 0;
+    heroes.forEach((h, j) => {
+      const on = j === i;
+      h.el.classList.toggle("on", on);
+      h.el.toggleAttribute("inert", !on);
+      tabs[j].setAttribute("aria-selected", on);
+      tabs[j].tabIndex = on ? 0 : -1;
+      tabs[j].style.setProperty("--p", 0);
+    });
+    heroes[i].play();
+    if (focus) tabs[i].focus();
   }
-  playBtn.addEventListener("click", () => setPlay(!userPaused));
-  setPlay(userPaused);
 
+  tabs.forEach((b, i) => {
+    b.addEventListener("click", () => select(i));
+    b.addEventListener("keydown", (e) => {
+      const k = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+      if (k) { e.preventDefault(); select(at + k, true); }
+    });
+  });
+  stage.addEventListener("pointerenter", () => hover = true);
+  stage.addEventListener("pointerleave", () => hover = false);
+
+  let last = performance.now();
   function tick(now) {
-    const dt = now - last; last = now;
-    if (!userPaused && !hoverPaused && !document.hidden) {
+    const dt = Math.min(now - last, 100); last = now;
+    if (!reduce && !hover && seen && !document.hidden) {
       elapsed += dt;
-      tabs[idx].style.setProperty("--p", Math.min(elapsed / DURATION, 1));
-      if (elapsed >= DURATION) select(idx + 1);
+      tabs[at].style.setProperty("--p", Math.min(elapsed / HOLD, 1));
+      if (elapsed >= HOLD) select(at + 1);
     }
     requestAnimationFrame(tick);
   }
-
-  // Warm the cache so each swap is instant
-  panels.forEach(p => { const img = p.querySelector("img"); img.loading = "eager"; });
-  addEventListener("resize", fit);
+  heroes.forEach((h) => h.reset());
   select(0);
-  requestAnimationFrame(t => { last = t; tick(t); });
+  requestAnimationFrame((t) => { last = t; tick(t); });
 
-  /* ---------- Copy buttons ---------- */
-  document.querySelectorAll("[data-copy]").forEach(btn => {
-    const label = btn.querySelector("span");
-    btn.addEventListener("click", async () => {
-      const text = btn.dataset.copy;
-      try { await navigator.clipboard.writeText(text); }
-      catch {
-        const ta = Object.assign(document.createElement("textarea"), { value: text });
-        document.body.appendChild(ta); ta.select();
-        try { document.execCommand("copy"); } catch {}
-        ta.remove();
-      }
-      btn.classList.add("done"); label.textContent = "Copied";
-      setTimeout(() => { btn.classList.remove("done"); label.textContent = "Copy"; }, 1600);
-    });
+  /* ---------- Gallery: each answer plays when it comes into view ---------- */
+  const grid = document.getElementById("grid");
+  const cards = answers.filter((a) => a.group === "gallery").map((a) => {
+    const t = terminal(a, false);
+    t.img.loading = "lazy";
+    const fig = document.createElement("figure");
+    fig.className = "card"; fig.tabIndex = 0;
+    fig.setAttribute("aria-label", `${a.label}: ${a.ask}. Press to play again.`);
+    fig.append(t.el);
+    fig.insertAdjacentHTML("beforeend", `<figcaption><span>${esc(a.label)}</span><span>↻ Play again</span></figcaption>`);
+    fig.addEventListener("click", () => t.play());
+    fig.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); t.play(); } });
+    t.reset();
+    grid.append(fig);
+    return { fig, t };
   });
-
-  /* ---------- Gallery: dark or light terminal ---------- */
-  const modeBtns = [...document.querySelectorAll(".mode button")];
-  const shots = [...document.querySelectorAll(".shot img[data-name]")];
-  function setMode(mode, animate) {
-    modeBtns.forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === mode));
-    shots.forEach(img => {
-      const src = `assets/img/${img.dataset.name}-${mode}.webp`;
-      if (img.getAttribute("src") === src) return;
-      if (!animate || reduce) { img.src = src; return; }
-      const box = img.parentElement;
-      box.classList.add("swap");
-      const pre = new Image();
-      pre.onload = pre.onerror = () => setTimeout(() => { img.src = src; box.classList.remove("swap"); }, 180);
-      pre.src = src;
-    });
-    try { localStorage.setItem("iui-mode", mode); } catch {}
-  }
-  let saved = null;
-  try { saved = localStorage.getItem("iui-mode"); } catch {}
-  setMode(saved || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"), false);
-  modeBtns.forEach(b => b.addEventListener("click", () => setMode(b.dataset.mode, true)));
-
-  /* ---------- Lightbox ---------- */
-  const box = document.getElementById("lightbox");
-  const boxImg = box.querySelector("img");
-  document.querySelectorAll(".shot").forEach(s => s.addEventListener("click", () => {
-    const img = s.querySelector("img");
-    boxImg.src = img.currentSrc || img.src;
-    boxImg.alt = img.alt;
-    box.showModal();
-  }));
-  box.addEventListener("click", e => { if (e.target === box || e.target.closest(".close")) box.close(); });
-
-  /* ---------- Nav border and reveal ---------- */
-  const nav = document.querySelector(".nav");
-  addEventListener("scroll", () => nav.classList.toggle("scrolled", scrollY > 8), { passive: true });
-
   if ("IntersectionObserver" in window && !reduce) {
-    const io = new IntersectionObserver(entries => entries.forEach(e => {
-      if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
-    }), { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
-    document.querySelectorAll(".reveal").forEach(el => io.observe(el));
-  } else {
-    document.querySelectorAll(".reveal").forEach(el => el.classList.add("in"));
-  }
+    const io = new IntersectionObserver((es) => es.forEach((e) => {
+      if (!e.isIntersecting) return;
+      io.unobserve(e.target);
+      cards.find((c) => c.fig === e.target).t.play();
+    }), { threshold: 0.45 });
+    cards.forEach((c) => io.observe(c.fig));
+  } else cards.forEach((c) => c.t.final());
+
+  /* ---------- Light or dark: the page, the terminals and the pictures ---------- */
+  const all = [...heroes, ...cards.map((c) => c.t)];
+  document.getElementById("theme").addEventListener("click", () => {
+    root.dataset.theme = theme() === "dark" ? "light" : "dark";
+    try { localStorage.setItem("iui-theme", theme()); } catch {}
+    all.forEach((t) => { t.img.src = src(t.a); });
+  });
+  // Warm the other theme's hero pictures, so the switch is instant.
+  addEventListener("load", () => heroes.forEach((h) => { new Image().src = src(h.a, theme() === "dark" ? "light" : "dark"); }));
+
+  /* ---------- Copy ---------- */
+  document.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy); } catch {
+      const ta = Object.assign(document.createElement("textarea"), { value: b.dataset.copy });
+      document.body.append(ta); ta.select();
+      try { document.execCommand("copy"); } catch {}
+      ta.remove();
+    }
+    b.classList.add("done"); b.textContent = "Copied";
+    setTimeout(() => { b.classList.remove("done"); b.textContent = "Copy"; }, 1500);
+  }));
 })();
 </script>
 </body>
