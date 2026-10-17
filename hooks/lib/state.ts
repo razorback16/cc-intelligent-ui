@@ -1,9 +1,9 @@
-// md-preview's state: the types the modules share, the values that change
+// Intelligent UI's state: the types the modules share, the values that change
 // (`S`), the caches, and refresh (the `done` atom).
 import { atom, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { MdPreviewTheme } from '../../types'
+import type { IuiTheme } from '../../types'
 import type { ThemeInfo } from './themes'
 import type { HostMode, ThemeSetting } from './mode'
 import type { PlanVerdict } from './plan'
@@ -13,7 +13,7 @@ import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } 
 // `claude plugin validate` reads an atom only from a const in the file that
 // reads or writes it, so each such file has a copy of its own (atom() is a
 // plain description: the copies are one value).
-const done = atom({ plugin: 'md-preview', key: 'done' } as const, 0)
+const done = atom({ plugin: 'intelligent-ui', key: 'done' } as const, 0)
 
 export type Cell = { width: number; height: number }
 // The terminal now (one TIOCGWINSZ read): its columns, rows and cell in
@@ -67,7 +67,7 @@ export type Job = {
   text: string
   columns: number
   cell: Cell
-  theme: MdPreviewTheme
+  theme: IuiTheme
   size: number
   themeDir: string
   env: Env
@@ -117,11 +117,11 @@ export const S = {
   // The key folders in the cache at setUp: a key found there is read back
   // at once (a reopened session), with no queue and no blank.
   onDisk: new Set<string>(),
-  theme: 'dark' as MdPreviewTheme,
+  theme: 'dark' as IuiTheme,
   size: DEFAULT_SIZE,
-  // `/md-preview width`: the most columns a picture takes, or full.
+  // `/iui width`: the most columns a picture takes, or full.
   width: DEFAULT_WIDTH as Width,
-  // `/md-preview height`: the most rows an image or a Typst drawing takes (half, full or a number).
+  // `/iui height`: the most rows an image or a Typst drawing takes (half, full or a number).
   height: DEFAULT_HEIGHT as Height,
   // The height setting of the pictures on screen: `height` once its epoch
   // committed (with `shown`), so an image box changes in one step.
@@ -149,9 +149,9 @@ export const S = {
   // Over ssh (set in setUp): the terminal's config and the OS appearance here
   // are the remote computer's, not those of the user's screen.
   isRemote: false,
-  // MD_PREVIEW_DEBUG is set (setUp): trace lines go to the debug log.
+  // IUI_DEBUG is set (setUp): trace lines go to the debug log.
   debug: false,
-  // iTerm2 with the engine's pictures off at start: /md-preview setup can help
+  // iTerm2 with the engine's pictures off at start: /iui setup can help
   // (`setupNeeded`); the question is asked once per load (`setupAsked`).
   setupNeeded: false,
   setupAsked: false,
@@ -160,7 +160,7 @@ export const S = {
   // Streaming: model requests of the main loop in flight.
   stepsLive: 0,
   // The plan (plan.tsx): the main loop's running turn (`turn.start`), the
-  // verdict md-preview's question gave for the PermissionRequest that follows
+  // verdict the mod's question gave for the PermissionRequest that follows
   // (null: none, the engine's dialog asks), the question asked now ('': none),
   // and the `code` command's path (null: not looked up yet; '': none).
   mainTurnId: '',
@@ -206,7 +206,7 @@ export const converted = new Map<string, string | null>()
 export const converting = new Map<string, Promise<string | null>>()
 export const lastConverted = new Map<string, { stamp: string; png: string }>()
 export const sentTexts = new Map<string, { stamp: string; text: string | null }>()
-// The plan: the text edited in md-preview's flow, by the call's tool_use_id
+// The plan: the text edited in Intelligent UI's flow, by the call's tool_use_id
 // (its rows draw it), and the ExitPlanMode calls of subagents (drawn as the
 // engine draws them).
 export const editedPlans = new Map<string, string>()

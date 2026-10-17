@@ -8,7 +8,7 @@ A theme is a folder with a `theme.json`. Intelligent UI ships three:
 | `vscode-modern` | VS Code Modern | VS Code's Markdown preview, Dark Modern / Light Modern |
 | `vscode` | VS Code | the same, with the Dark+ / Light+ colours; every theme merges over this one |
 
-Your own themes go in `~/.claude/md-preview/themes/<name>/theme.json`. A theme there with the same folder name as a built-in one is used in its place. It is still merged over the built-in `vscode`, like every theme. Choose a theme with `/md-preview theme <name>`.
+Your own themes go in `~/.claude/intelligent-ui/themes/<name>/theme.json`. A theme there with the same folder name as a built-in one is used in its place. It is still merged over the built-in `vscode`, like every theme. Choose a theme with `/iui theme <name>`.
 
 ## Merging
 
@@ -36,7 +36,7 @@ Example: pink inline code, rounder boxes.
 
 | Key | vscode default | What it does |
 |---|---|---|
-| `name`, `description`, `source` | | Shown by `/md-preview theme` |
+| `name`, `description`, `source` | | Shown by `/iui theme` |
 | `syntax.dark`, `syntax.light` | `dark.tmTheme`, `light.tmTheme` | Code colours: a TextMate theme file in this folder. If you leave this out, the vscode files are used. If you name a file, it must exist. |
 | `fonts.body` | SF Pro Text, Helvetica Neue, Helvetica, Arial, … | Body font list (first installed one wins, per character) |
 | `fonts.code` | Menlo, SF Mono, DejaVu Sans Mono, … | Code font list |

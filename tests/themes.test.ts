@@ -1,9 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 // A theme tree in memory: built-in themes under the mod's render/themes, user
-// themes under $HOME/.claude/md-preview/themes.
+// themes under $HOME/.claude/intelligent-ui/themes.
 const HOME = '/fake-home'
-const USER = `${HOME}/.claude/md-preview/themes`
+const USER = `${HOME}/.claude/intelligent-ui/themes`
 const files: Record<string, string> = {
   'render/themes/vscode/theme.json': '{"name":"VS Code","description":"built-in look"}',
   'render/themes/vscode-modern/theme.json': '{"name":"VS Code Modern","description":"modern look"}',
@@ -45,9 +45,9 @@ const withThemes = (on: any, stored: Record<string, unknown> = {}) => {
   return kept
 }
 
-test('/md-preview theme lists built-in and user themes; a user theme wins and a broken one is reported', async ($, on) => {
+test('/iui theme lists built-in and user themes; a user theme wins and a broken one is reported', async ($, on) => {
   withThemes(on)
-  const ran = await $.command.run({ command: 'md-preview', args: 'theme' } as any)
+  const ran = await $.command.run({ command: 'iui', args: 'theme' } as any)
   expect(ran.text).toContain('* claude-code (built-in): default look')
   expect(ran.text).toContain('- vscode-modern (built-in): modern look')
   expect(ran.text).toContain('- vscode (built-in): built-in look')
@@ -59,17 +59,17 @@ test('/md-preview theme lists built-in and user themes; a user theme wins and a 
   expect(ran.text).toContain('- Own (user): own colours')
 })
 
-test('/md-preview theme <name> switches and stores the name as typed; an unknown one is refused', async ($, on) => {
+test('/iui theme <name> switches and stores the name as typed; an unknown one is refused', async ($, on) => {
   const store = withThemes(on)
-  const set = await $.command.run({ command: 'md-preview', args: 'theme Sun.Light' } as any)
-  expect(set.text).toContain('md-preview uses the theme Sun.Light.')
+  const set = await $.command.run({ command: 'iui', args: 'theme Sun.Light' } as any)
+  expect(set.text).toContain('Intelligent UI uses the theme Sun.Light.')
   expect(set.text).toContain('* Sun.Light (user)')
   expect(store['theme-name']).toBe('Sun.Light')
-  const shown = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const shown = await $.command.run({ command: 'iui', args: '' } as any)
   expect(shown.text).toContain('theme Sun.Light')
-  const bad = await $.command.run({ command: 'md-preview', args: 'theme sun.light' } as any)
+  const bad = await $.command.run({ command: 'iui', args: 'theme sun.light' } as any)
   expect(bad.text).toContain('No usable theme named sun.light.')
-  const broken = await $.command.run({ command: 'md-preview', args: 'theme Broken' } as any)
+  const broken = await $.command.run({ command: 'iui', args: 'theme Broken' } as any)
   expect(broken.text).toContain('No usable theme named Broken.')
   expect(store['theme-name']).toBe('Sun.Light')
 })
@@ -81,7 +81,7 @@ test('a stored theme that is gone falls back to claude-code, with one toast', as
     toasts.push(String(e.text ?? e.message ?? JSON.stringify(e)))
     return { value: undefined }
   })
-  const ran = await $.command.run({ command: 'md-preview', args: 'theme' } as any)
+  const ran = await $.command.run({ command: 'iui', args: 'theme' } as any)
   expect(ran.text).toContain('* claude-code (built-in)')
-  expect(toasts.filter(t => t.includes('md-preview: theme gone not found, using claude-code')).length).toBe(1)
+  expect(toasts.filter(t => t.includes('Intelligent UI: theme gone not found, using claude-code')).length).toBe(1)
 })

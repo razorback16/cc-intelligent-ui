@@ -1,0 +1,71 @@
+# Usage
+
+← Back to the [README](../README.md)
+
+Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the drawing changes. The saved answer stays Markdown.
+
+## What it draws
+
+- Headings, lists, task lists, tables, block quotes, links, footnotes and horizontal rules
+- Code blocks with syntax colours, in your terminal's font (found for iTerm2, Ghostty, kitty and Rio; else Menlo, SF Mono or DejaVu Sans Mono)
+- Math (`$…$` and `$$…$$`, LaTeX syntax, through mitex)
+- Images from `![alt](path)`. A relative path starts from the session's folder. Remote images show as an alt-text box.
+- Live Typst: a fenced block with the language `typst` (or `typ`) is rendered, not shown as code. These packages are in the mod and work offline:
+
+  ```
+  #import "@preview/cetz:0.5.2"
+  #import "@preview/cetz-plot:0.1.4": plot, chart
+  #import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge
+  ```
+
+  A `theme` dictionary (`theme.fg`, `theme.muted`, `theme.blue`, `theme.palette`, `theme.width`, …) is in scope, so drawings match the terminal's colours. The mod tells Claude about this in a short part of the system prompt. `theme.width` and `theme.height` give the space for a drawing. The mod keeps the size that a message had when it was drawn the first time. When the terminal size changes, the mod makes the drawings larger or smaller by the same amount.
+- Files that Claude sends to you (the SendUserFile tool). The mod draws each file under the row that shows the files, in the same order:
+  - PNG, JPEG and WebP images. Typst changes a JPEG or WebP image into a PNG image in the cache folder. The PNG image is the size of the space for the picture in the transcript, or smaller. Typst does this one time for each version of the file and each size of the space. When the space changes, the mod shows the old PNG image until Typst makes the new one.
+  - Markdown files (`.md` or `.markdown`, 256 KiB or less). The mod draws the file as rendered pictures, the same as an answer. A relative image path in the file starts from the folder of the file.
+
+  Other files stay as the normal row. JPEG images, WebP images and Markdown files need Typst.
+- Images that you paste into the prompt (`[Image #N]`). The mod draws each image under your prompt.
+
+  These pictures are not larger than the image. They are not wider than the transcript. The height setting (`/iui height`) sets the most rows that they can use (Typst drawings use it too): by default, half the screen and not more than 24 rows. The mod draws PNG, JPEG and WebP images only. Other image types (for example GIF and SVG) stay as the normal row.
+- The plan in plan mode (the ExitPlanMode tool). The mod draws the plan as a picture in the transcript, the same as an answer. Then the mod asks you to approve the plan. Refer to [Plan approval](#plan-approval).
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/iui` | Shows the state, the theme, the text size, the width and the image height, and a problem that keeps pictures away |
+| `/iui details` | Shows all that the mod found: where the mode comes from, the terminal font, the Typst path and why the terminal can or cannot show pictures |
+| `/iui on` / `off` | Turns the pictures on or off (kept for later sessions) |
+| `/iui setup` / `setup remove` | iTerm2: adds or removes the shell line that turns pictures on (then close the tab and open a new one) |
+| `/iui size <80–200>` | Text size in percent. 100 is the same visual size as your terminal text. |
+| `/iui width` | Shows the width: the most columns that a picture can use |
+| `/iui width <40–400>` | Sets the most columns that a picture can use (kept for later sessions) |
+| `/iui width full` | Pictures use the full width of the terminal, the same as the text of Claude Code (kept for later sessions). This is the default. A picture is never wider than 255 columns. |
+| `/iui height` | Shows the image height: the most rows that an image can use. This applies to images (sent or pasted) and to Typst drawings in answers. |
+| `/iui height half` | An image uses half the terminal height, from 6 to 24 rows (kept for later sessions). This is the default. |
+| `/iui height full` | An image uses the terminal height less 16 rows (kept for later sessions). The 16 rows are for the row of the file, the text around it and the prompt. |
+| `/iui height <6–200>` | Sets the most rows that an image can use (kept for later sessions). An image is never taller than with `full`. |
+| `/iui theme` | Lists the themes, shows which one is in use, and shows the folder for your own themes |
+| `/iui theme <name>` | Changes to that theme (kept for later sessions) |
+| `/iui probe` | Asks the terminal for its background colour with OSC 11 and shows the raw answers. Refer to [How `auto` is resolved](how-it-works.md#how-auto-is-resolved). |
+
+## Plan approval
+
+When Claude exits plan mode, the mod draws the plan as a picture in the transcript. Under the picture, the mod shows its own question, "Approve this plan?", in place of the Claude Code dialog. A dim line above the question tells you that the rendered plan is above. The question has these options:
+
+| Option | What it does |
+|---|---|
+| Yes, auto-accept edits | Approves the plan. Claude Code then accepts file edits with no question (`acceptEdits` mode). |
+| Yes, manually approve edits | Approves the plan. Claude Code then asks you before each file edit (`default` mode). |
+| Yes, clear context + auto-accept | Approves the plan, stops the turn and runs `/clear`. Then the mod sends "Implement this plan:" and the plan as a new prompt, in `acceptEdits` mode. |
+| Edit the plan | Opens the plan file in an editor. The mod waits until you close the file (10 minutes at most). Then it asks "Approve the edited plan?". When you approve, Claude gets the edited plan. |
+| Type something | Sends your text to Claude as changes to the plan. Claude stays in plan mode and writes a new plan. |
+| Esc | Rejects the plan and stops the turn. |
+
+The editor is VS Code (`code --wait`) when the `code` command is on your PATH. If `code` is not on the PATH, macOS uses TextEdit (`open -W -t`). In that case, quit TextEdit when you complete the edit. Over ssh and on Linux with no `code` command, the "Edit the plan" option does not show.
+
+The mod shows the plan file as it is when the question opens. Claude can write the plan file and exit plan mode in the same message. Then Claude Code sends the plan from before that write. In this case, the mod waits for the write to complete (5 seconds at most) and reads the file again. You approve the plan that you see, and Claude gets that plan.
+
+The mod uses this flow only when it can draw the plan: the mod is on, Typst is installed, the terminal draws pictures, and the plan is from the main conversation (not from a subagent). In all other conditions, Claude Code shows its own dialog, as with no mod. If the flow fails, Claude Code also shows its own dialog.
+
+For the limits of this flow, refer to [Limitations](limitations.md).

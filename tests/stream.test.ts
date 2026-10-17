@@ -30,7 +30,7 @@ function world(on: any, o: { fail?: boolean; slow?: Promise<void>; tall?: boolea
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (/md-preview-/.test(cmd)) return ok('/c\nDarwin\n')
+    if (/intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (cmd.includes('command -v typst')) return ok('/usr/bin/typst\n')
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
     if (argv[0] === 'kill') return ok('')
@@ -73,7 +73,7 @@ function world(on: any, o: { fail?: boolean; slow?: Promise<void>; tall?: boolea
 
 const message = (requestId: string, text: string) =>
   ({
-    plugin: 'md-preview', surface: 'terminal', component: 'AssistantMessage', requestId,
+    plugin: 'intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId,
     props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40 },
   }) as any
 const props = (text: string) => ({ text, isFirstOfReply: true }) as any
@@ -101,7 +101,7 @@ test('a block draws nothing while it streams, and its picture once the request e
   on('ui.render', () => ENGINE as any)
   const end = request(on)
   // Ready the mod (setUp) before the stream starts.
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const stream = ($ as any).turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 })
   await stream.next()
   const ui = await $.ui.mount(message('live-1', '# Ti'))
@@ -124,7 +124,7 @@ test('a block draws nothing while it streams, and its picture once the request e
 test('a block whose compile fails draws as text', async ($, on) => {
   const { clock } = world(on, { fail: true })
   on('ui.render', () => ENGINE as any)
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(message('fail-1', 'Some **bold** text.'))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -134,7 +134,7 @@ test('a block whose compile fails draws as text', async ($, on) => {
 test('with no request seen, a changing block is final after 400 ms still', async ($, on) => {
   const { clock, compiled } = world(on)
   on('ui.render', () => ENGINE as any)
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(message('reload-1', 'One'))
   await clock.settle()
   // Seen once (resumed, so final at once); a change outside a request is live.
@@ -155,7 +155,7 @@ test('a resumed block compiles at once, blank for at most 1 s, then its text unt
   const slow = new Promise<void>(r => (finish = r))
   const { clock, compiled } = world(on, { slow })
   on('ui.render', () => ENGINE as any)
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(message('old-1', 'An old answer.'))
   expect(isBlank(await ui.drawn())).toBe(true)
   await clock.settle()
@@ -173,7 +173,7 @@ test('a text block is final when its request moves on to a tool call, before the
   const { clock, compiled } = world(on)
   on('ui.render', () => ENGINE as any)
   const end = request(on, [{ kind: 'tool', index: 1, id: 'toolu_1', name: 'Write' }])
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const stream = ($ as any).turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 })
   await stream.next()
   const ui = await $.ui.mount(message('tool-1', 'Let me write the file.'))
@@ -192,7 +192,7 @@ test('a diagram keeps its design only after its final text compiled, never while
   const { clock, compiled, designs } = world(on)
   on('ui.render', () => ENGINE as any)
   const end = request(on)
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const stream = ($ as any).turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 })
   await stream.next()
   const text = '# Title\n\n```typst\n#rect(width: theme.width)\n```'
@@ -212,7 +212,7 @@ test('a diagram keeps its design only after its final text compiled, never while
 test('a page over 255 rows: its segment is cut in two and compiled once more', async ($, on) => {
   const { clock, counts } = world(on, { tall: true })
   on('ui.render', () => ENGINE as any)
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const text = Array.from({ length: 12 }, (_, i) => `Paragraph ${i} ${'word '.repeat(40)}`.trim()).join('\n\n')
   const ui = await $.ui.mount(message('tall-1', text))
   await clock.settle()

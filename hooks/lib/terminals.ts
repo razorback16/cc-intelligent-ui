@@ -1,7 +1,7 @@
 // The terminals' own settings (iTerm2, Ghostty, kitty, Rio, cmux): their
 // backgrounds and fonts from their config files and profiles (pure; the
 // reads on the host are in host.ts).
-import type { MdPreviewTheme } from '../../types'
+import type { IuiTheme } from '../../types'
 import { luminanceOf, modeOfLuminance, type Rgb } from './mode'
 
 // An iTerm2 profile ("New Bookmarks" entry): the one named as ITERM_PROFILE
@@ -15,7 +15,7 @@ export function pickProfile(marks: readonly unknown[], profile: string | undefin
 // iTerm2's own appearance (Settings > Appearance > Theme, the
 // TabStyleWithAutomaticOption default): 0 and 2 light, 1 and 3 dark;
 // Automatic (4), Minimal (5), Compact (6) or no value follow the OS (null).
-export function itermAppearanceOf(stdout: string): MdPreviewTheme | null {
+export function itermAppearanceOf(stdout: string): IuiTheme | null {
   const v = stdout.trim()
   if (v === '0' || v === '2') return 'light'
   if (v === '1' || v === '3') return 'dark'
@@ -35,7 +35,7 @@ function itermColorOf(value: unknown): Rgb | null {
 // for light and dark mode uses the set `appearance` gives (the OS's when
 // iTerm2 follows it; null when that is not known). `bookmarks` is the JSON of
 // the plist's "New Bookmarks" array.
-export function itermModeOf(bookmarks: string, profile: string | undefined, defaultGuid: string, appearance: MdPreviewTheme | null): MdPreviewTheme | null {
+export function itermModeOf(bookmarks: string, profile: string | undefined, defaultGuid: string, appearance: IuiTheme | null): IuiTheme | null {
   let list: unknown
   try {
     list = JSON.parse(bookmarks)
@@ -123,7 +123,7 @@ export function ghosttyThemePaths(name: string, o: { xdgConfig?: string; home: s
 // `appearance` is taken from `themeBg` (each theme file's background) unless
 // the config sets a background of its own (it then matches neither theme).
 // Null when the appearance is needed but not known.
-export function ghosttyBackgroundOf(config: string, appearance: MdPreviewTheme | null, themeBg: { light?: string; dark?: string }): string | null {
+export function ghosttyBackgroundOf(config: string, appearance: IuiTheme | null, themeBg: { light?: string; dark?: string }): string | null {
   const shown = ghosttyValueOf(config, 'background')
   const pair = ghosttyThemesOf(ghosttyValueOf(config, 'theme'))
   if (!pair) return shown || GHOSTTY_DEFAULT_BG
@@ -314,7 +314,7 @@ export function rioThemeNamesOf(config: Readonly<Record<string, string>>): strin
 }
 
 // Rio's `force-theme`, when it is dark or light.
-export const rioForcedOf = (config: Readonly<Record<string, string>>): MdPreviewTheme | null => {
+export const rioForcedOf = (config: Readonly<Record<string, string>>): IuiTheme | null => {
   const v = config['force-theme']
   return v === 'dark' || v === 'light' ? v : null
 }
@@ -323,7 +323,7 @@ export const rioForcedOf = (config: Readonly<Record<string, string>>): MdPreview
 // for `force-theme`, else for `appearance` (the OS); else the `theme` file's;
 // else the config's `[colors] background`. A theme file replaces all the
 // config's colours. `themes` holds each file's text by name (null: not found).
-export function rioBackgroundOf(config: Readonly<Record<string, string>>, appearance: MdPreviewTheme | null, themes: Readonly<Record<string, string | null>>): { bg: string; detail: string } {
+export function rioBackgroundOf(config: Readonly<Record<string, string>>, appearance: IuiTheme | null, themes: Readonly<Record<string, string | null>>): { bg: string; detail: string } {
   // #rrggbbaa: the alpha is dropped.
   const opaque = (bg: string) => bg.replace(/^(#?[0-9a-f]{6})[0-9a-f]{2}$/i, '$1')
   const has = (name: string | undefined): name is string => !!name && typeof themes[name] === 'string'
@@ -365,7 +365,7 @@ export function jsoncOf(text: string): unknown {
 }
 
 export type CmuxAppearance = 'system' | 'light' | 'dark'
-// The cmux settings md-preview needs, from cmux.json: `app.appearance` and
+// The cmux settings Intelligent UI needs, from cmux.json: `app.appearance` and
 // `terminal.adaptiveDefaultTheme` (nested objects, or dotted keys).
 export function cmuxSettingsOf(json: unknown): { appearance?: CmuxAppearance; adaptive?: boolean } {
   const at = (path: string): unknown => {

@@ -1,4 +1,4 @@
-// Markdown as md-preview reads it: blocks, fences, the segments an answer is
+// Markdown as the mod reads it: blocks, fences, the segments an answer is
 // cut into, the images it names, and a plain text of it for an Image's alt.
 import { ALT_CHARS, SEGMENT_ROWS } from './settings'
 
@@ -59,7 +59,7 @@ export function blocksOf(md: string): Block[] {
 }
 
 // A rough count of the rows a block takes once drawn `columns` wide, its
-// text at `size` percent (/md-preview size): fewer characters a row, and
+// text at `size` percent (/iui size): fewer characters a row, and
 // taller lines.
 export function rowsOfBlock(block: Block, columns: number, size = 100): number {
   const isCode = !!block.fence

@@ -12,27 +12,27 @@ const at = (text: string) => {
 }
 
 test('the first word completes as a subcommand', () => {
-  expect(at('/md-preview t').map(r => r.text)).toEqual(['theme'])
-  expect(at('/md-preview w').map(r => r.text)).toEqual(['width'])
-  expect(at('/md-preview h').map(r => r.text)).toEqual(['height'])
-  expect(at('/md-preview o').map(r => r.text)).toEqual(['on', 'off'])
-  expect(at('/md-preview S').map(r => r.text)).toEqual(['size', 'setup'])
-  expect(at('/md-preview x')).toEqual([])
-  expect(at('/md-preview t')[0]!.description).toBe('list the themes, or switch to one')
+  expect(at('/iui t').map(r => r.text)).toEqual(['theme'])
+  expect(at('/iui w').map(r => r.text)).toEqual(['width'])
+  expect(at('/iui h').map(r => r.text)).toEqual(['height'])
+  expect(at('/iui o').map(r => r.text)).toEqual(['on', 'off'])
+  expect(at('/iui S').map(r => r.text)).toEqual(['size', 'setup'])
+  expect(at('/iui x')).toEqual([])
+  expect(at('/iui t')[0]!.description).toBe('list the themes, or switch to one')
 })
 
 test('right after theme or size, rows hold the word and its argument', () => {
-  const rows = at('/md-preview theme')
+  const rows = at('/iui theme')
   expect(rows.map(r => r.text)).toEqual(['theme github-light', 'theme nord', 'theme vscode', 'theme vscode-modern'])
   expect(rows.map(r => r.label)).toEqual(['github-light', 'nord', 'vscode', 'vscode-modern'])
   expect(rows[3]!.description).toBe('built-in, active: default look')
   expect(rows[1]!.description).toBe('user: my nord')
-  expect(at('/md-preview size').map(r => r.text)).toContain('size 150')
-  const widths = at('/md-preview width')
+  expect(at('/iui size').map(r => r.text)).toContain('size 150')
+  const widths = at('/iui width')
   expect(widths.map(r => r.text)).toEqual(['width 80', 'width 100', 'width 120', 'width 160', 'width 200', 'width full'])
   // full is the default; with no width given, it is current.
   expect(widths.at(-1)!.description).toBe('current')
-  const heights = at('/md-preview height')
+  const heights = at('/iui height')
   expect(heights.map(r => r.text)).toEqual(['height half', 'height full', 'height 12', 'height 24', 'height 36'])
   expect(heights.map(r => r.label)).toEqual(['half', 'full', '12 rows', '24 rows', '36 rows'])
   // half is the default; with no height given, it is current.
@@ -41,27 +41,27 @@ test('right after theme or size, rows hold the word and its argument', () => {
 })
 
 test('a theme name or size completes after its word', () => {
-  expect(at('/md-preview theme vs').map(r => r.text)).toEqual(['vscode', 'vscode-modern'])
-  expect(at('/md-preview theme N').map(r => r.text)).toEqual(['nord'])
-  expect(at('/md-preview size 1').map(r => r.text)).toEqual(['100', '110', '120', '125', '150', '175'])
-  expect(at('/md-preview size 10')[0]!.description).toBe('current')
-  expect(at('/md-preview theme nord extra')).toEqual([])
-  expect(at('/md-preview width 1').map(r => r.text)).toEqual(['100', '120', '160'])
-  expect(at('/md-preview width f').map(r => r.label)).toEqual(['full'])
+  expect(at('/iui theme vs').map(r => r.text)).toEqual(['vscode', 'vscode-modern'])
+  expect(at('/iui theme N').map(r => r.text)).toEqual(['nord'])
+  expect(at('/iui size 1').map(r => r.text)).toEqual(['100', '110', '120', '125', '150', '175'])
+  expect(at('/iui size 10')[0]!.description).toBe('current')
+  expect(at('/iui theme nord extra')).toEqual([])
+  expect(at('/iui width 1').map(r => r.text)).toEqual(['100', '120', '160'])
+  expect(at('/iui width f').map(r => r.label)).toEqual(['full'])
   const set = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, width: 160 })
-  expect(set('/md-preview width 16')[0]!.description).toBe('current')
-  expect(set('/md-preview width f')[0]!.description).toBe('the default')
-  expect(at('/md-preview height f').map(r => r.text)).toEqual(['full'])
-  expect(at('/md-preview height 2').map(r => r.text)).toEqual(['24'])
+  expect(set('/iui width 16')[0]!.description).toBe('current')
+  expect(set('/iui width f')[0]!.description).toBe('the default')
+  expect(at('/iui height f').map(r => r.text)).toEqual(['full'])
+  expect(at('/iui height 2').map(r => r.text)).toEqual(['24'])
   const tall = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, height: 24 })
-  expect(tall('/md-preview height 2')[0]!.description).toBe('current')
-  expect(tall('/md-preview height h')[0]!.description).toBe('the default: half the terminal')
+  expect(tall('/iui height 2')[0]!.description).toBe('current')
+  expect(tall('/iui height h')[0]!.description).toBe('the default: half the terminal')
 })
 
 test('other prompts and the command name itself get no rows', () => {
-  expect(at('/md-preview')).toEqual([])
-  expect(at('/md-previewx t')).toEqual([])
-  expect(at('tell me about /md-preview t')).toEqual([])
+  expect(at('/iui')).toEqual([])
+  expect(at('/iuix t')).toEqual([])
+  expect(at('tell me about /iui t')).toEqual([])
   expect(at('/other theme')).toEqual([])
 })
 
@@ -74,7 +74,7 @@ test('the hook adds theme rows from the themes found at start', async ($, on) =>
     e.path.endsWith('/render/themes') ? { value: ['vscode', 'vscode-modern', 'nord'].map(name => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) } : next(e))
   on('fs.read', async ($: any, e: any, next: any) =>
     /\/render\/themes\/[^/]+\/theme\.json$/.test(e.path) ? { value: '{"description":"d"}' } : next(e))
-  const text = '/md-preview theme n'
+  const text = '/iui theme n'
   const got = await ($ as any).prompt.autocomplete({ text, cursor: text.length, token: 'n', start: text.length - 1 })
   expect(got.suggestions.map((r: any) => r.text)).toEqual(['nord'])
   const other = await ($ as any).prompt.autocomplete({ text: 'hello', cursor: 5, token: 'hello', start: 0 })

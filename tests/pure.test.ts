@@ -446,22 +446,22 @@ test('a theme folder is usable only with a theme.json object', () => {
 
 test('a user theme replaces the built-in one of its name; a broken one is only reported', () => {
   const found = [
-    themeEntry('nord', '/home/.claude/md-preview/themes/nord', true, '{"description":"mine"}'),
+    themeEntry('nord', '/home/.claude/intelligent-ui/themes/nord', true, '{"description":"mine"}'),
     themeEntry('vscode', '/mod/render/themes/vscode', false, '{"name":"VS Code"}'),
     themeEntry('nord', '/mod/render/themes/nord', false, '{"description":"built-in"}'),
-    themeEntry('vscode', '/home/.claude/md-preview/themes/vscode', true, '{not json'),
-    themeEntry('solar', '/home/.claude/md-preview/themes/solar', true, '[1]'),
+    themeEntry('vscode', '/home/.claude/intelligent-ui/themes/vscode', true, '{not json'),
+    themeEntry('solar', '/home/.claude/intelligent-ui/themes/solar', true, '[1]'),
   ]
   const { themes, problems } = pickThemes(found)
   expect([...themes.keys()].sort()).toEqual(['nord', 'vscode'])
   expect(themes.get('nord')).toMatchObject({ isUser: true, description: 'mine' })
   expect(themes.get('vscode')).toMatchObject({ isUser: false, dir: '/mod/render/themes/vscode' })
   expect(problems.map(p => p.name).sort()).toEqual(['solar', 'vscode'])
-  const listing = themeListing(themes, problems, 'nord', '/home/.claude/md-preview/themes')
+  const listing = themeListing(themes, problems, 'nord', '/home/.claude/intelligent-ui/themes')
   expect(listing).toContain('* nord (user): mine')
   expect(listing).toContain('- vscode (built-in)')
   expect(listing).toContain('skipped solar (user)')
-  expect(listing).toContain('/home/.claude/md-preview/themes/<name>/theme.json')
+  expect(listing).toContain('/home/.claude/intelligent-ui/themes/<name>/theme.json')
 })
 
 test('a missing theme falls back to the base theme, even before it is on disk', () => {

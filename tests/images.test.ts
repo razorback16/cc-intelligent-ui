@@ -164,14 +164,14 @@ test('the [Image #N] marks of a prompt, each once', () => {
 })
 
 test('the pasted-image path follows Claude Code folder names', () => {
-  expect(projectSlug('/Users/subhagato/Development/apps/claude-md-preview')).toBe('-Users-subhagato-Development-apps-claude-md-preview')
+  expect(projectSlug('/Users/subhagato/Development/apps/claude-intelligent-ui')).toBe('-Users-subhagato-Development-apps-claude-intelligent-ui')
   expect(projectSlug('/home/me/my_app.v2')).toBe('-home-me-my-app-v2')
   expect(claudeTmpOf({ uid: '501\n', isMac: true })).toBe('/private/tmp/claude-501')
   expect(claudeTmpOf({ uid: '1000', isMac: false })).toBe('/tmp/claude-1000')
   expect(claudeTmpOf({ tmpdir: '/scratch/', uid: '1000', isMac: false })).toBe('/scratch/claude-1000')
   expect(claudeTmpOf({ uid: '', isMac: true })).toBe('')
-  const dir = pasteDirOf('/private/tmp/claude-501', '/Users/subhagato/Development/apps/claude-md-preview', 'f8bb4b84-0e51-456a-9e49-8e5db49500ae')
-  expect(pastedImagePath(dir, 5)).toBe('/private/tmp/claude-501/-Users-subhagato-Development-apps-claude-md-preview/f8bb4b84-0e51-456a-9e49-8e5db49500ae/images/5.png')
+  const dir = pasteDirOf('/private/tmp/claude-501', '/Users/subhagato/Development/apps/claude-intelligent-ui', 'f8bb4b84-0e51-456a-9e49-8e5db49500ae')
+  expect(pastedImagePath(dir, 5)).toBe('/private/tmp/claude-501/-Users-subhagato-Development-apps-claude-intelligent-ui/f8bb4b84-0e51-456a-9e49-8e5db49500ae/images/5.png')
 })
 
 // ---- The render hooks -------------------------------------------------------
@@ -201,7 +201,7 @@ const TALL = '89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52 00 00 02 80 00 00 
 // ends only when this settles.
 function world(on: any, o: {
   vars?: Record<string, string>
-  // What md-preview kept in its store before (a setting).
+  // What Intelligent UI kept in its store before (a setting).
   stored?: Record<string, unknown>
   files?: Record<string, string>
   texts?: Record<string, string>
@@ -216,7 +216,7 @@ function world(on: any, o: {
   holdRun?: { at: number; until: Promise<void> }
   holdCompile?: Promise<void>
 } = {}) {
-  // md-preview's store in memory (as mock.store), and its writes by key;
+  // Intelligent UI's store in memory (as mock.store), and its writes by key;
   // `redrawsAt`: by key, the `done` writes (redraws) made when its write ended.
   const store = new Map(Object.entries(o.stored ?? {}))
   const kept: Record<string, unknown> = {}
@@ -257,7 +257,7 @@ function world(on: any, o: {
       w.done()
     }
   }
-  // The children md-preview spawns: the Frame watcher (it exits 1: no tty)
+  // The children Intelligent UI spawns: the Frame watcher (it exits 1: no tty)
   // and a Markdown compile through the PID wrapper (typst.ts wrapPid).
   let pids = 4242
   on('process.spawn', async function* ($: any, e: any) {
@@ -275,7 +275,7 @@ function world(on: any, o: {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
     if (argv[0] === 'kill') return ok('')
-    if (/md-preview-/.test(cmd)) return ok('/c\nDarwin\n')
+    if (/intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (argv[0] === 'id' && argv[1] === '-u') return ok('501\n')
     if (cmd.includes('command -v typst')) return o.typst ? ok('/usr/bin/typst\n') : ok('', 1)
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
@@ -342,7 +342,7 @@ function world(on: any, o: {
 
 const sent = (output: unknown, isErrored = false, id = 'tu-1') =>
   ({
-    plugin: 'md-preview', surface: 'terminal', component: 'ToolResult', requestId: id,
+    plugin: 'intelligent-ui', surface: 'terminal', component: 'ToolResult', requestId: id,
     props: { tool_use_id: id, tool: 'SendUserFile', output, isErrored }, viewport: { columns: 100, rows: 40 },
   }) as any
 const attach = (path: string, isImage = true) => ({ attachments: [{ path, size: 1000, isImage, ...(isImage ? { media_type: 'image/png' } : {}) }] })
@@ -350,13 +350,13 @@ const attach = (path: string, isImage = true) => ({ attachments: [{ path, size: 
 const attachAll = (...paths: string[]) => ({ attachments: paths.map(path => ({ path, size: 1000, isImage: /\.(png|jpe?g|webp)$/i.test(path) })) })
 const prompt = (text: string, origin: any = { kind: 'composer' }, id = 'u-1') =>
   ({
-    plugin: 'md-preview', surface: 'terminal', component: 'UserMessage', requestId: id,
+    plugin: 'intelligent-ui', surface: 'terminal', component: 'UserMessage', requestId: id,
     props: { text, origin, isExpanded: true }, viewport: { columns: 100, rows: 40 },
   }) as any
 const images = (tree: any): any[] =>
   tree && typeof tree === 'object' ? [...(tree.type === 'Image' ? [tree] : []), ...(tree.children ?? []).flatMap(images)] : []
 // Sets the mod up (as the first answer would) before a row draws.
-const ready = ($: any) => $.command.run({ command: 'md-preview', args: '' } as any)
+const ready = ($: any) => $.command.run({ command: 'iui', args: '' } as any)
 
 test('a PNG Claude sends draws under its row, at its own size', async ($, on) => {
   const { heads } = world(on, { files: { '/t/icon.png': HEAD } })
@@ -576,7 +576,7 @@ test('the same Markdown in two folders compiles twice; an answer still uses the 
   await a.redraw(sent(attachAll('/t/a/n.md'), false, 'tu-a').props)
   await b.redraw(sent(attachAll('/t/b/n.md'), false, 'tu-b').props)
   expect(images(await a.drawn())[0].props.source.file).not.toBe(images(await b.drawn())[0].props.source.file)
-  const answer = { plugin: 'md-preview', surface: 'terminal', component: 'AssistantMessage', requestId: 'r-1', props: { text: '# Same', isFirstOfReply: true }, viewport: { columns: 100, rows: 40 } } as any
+  const answer = { plugin: 'intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId: 'r-1', props: { text: '# Same', isFirstOfReply: true }, viewport: { columns: 100, rows: 40 } } as any
   await $.ui.mount(answer)
   await clock.settle()
   expect(docs.map(d => d.base)).toEqual(['/t/a', '/t/b', '/w/app'])
@@ -681,7 +681,7 @@ test('a Markdown file is read again only when its stat changes, seen at the next
   await clock.settle()
   expect(reads).toEqual(['/t/n.md'])
   // A refresh (here a setting) draws the row anew: the new stat is seen.
-  await $.command.run({ command: 'md-preview', args: 'size 100' } as any)
+  await $.command.run({ command: 'iui', args: 'size 100' } as any)
   await clock.settle()
   await ui.redraw(sent(attachAll('/t/n.md')).props)
   await clock.settle()
@@ -731,10 +731,10 @@ test('a message from another agent or a notification is not changed', async ($, 
   }
 })
 
-test('with md-preview off, rows stay as they are', async ($, on) => {
+test('with Intelligent UI off, rows stay as they are', async ($, on) => {
   world(on, { files: { '/t/icon.png': HEAD, [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED] })
   await ready($)
-  await $.command.run({ command: 'md-preview', args: 'off' } as any)
+  await $.command.run({ command: 'iui', args: 'off' } as any)
   expect(await (await $.ui.mount(sent(attach('/t/icon.png')))).drawn()).toMatchObject(ENGINE)
   expect(await (await $.ui.mount(prompt('[Image #5] hi'))).drawn()).toMatchObject(ENGINE)
 })
@@ -757,7 +757,7 @@ test('a kept height caps sent and pasted images; height full draws them taller a
   expect(images(await ui.drawn())[0].props.rows).toBe(12)
   const pasted = await $.ui.mount(prompt('[Image #5] tall'))
   expect(images(await pasted.drawn())[0].props.rows).toBe(12)
-  const set = await $.command.run({ command: 'md-preview', args: 'height full' } as any)
+  const set = await $.command.run({ command: 'iui', args: 'height full' } as any)
   expect(set.text).toContain('full (the terminal height less 16 rows)')
   expect(kept.height).toBe('full')
   // The epoch is open: the box on screen stays.
@@ -770,13 +770,13 @@ test('a kept height caps sent and pasted images; height full draws them taller a
   await pasted.redraw(prompt('[Image #5] tall').props)
   expect(images(await pasted.drawn())[0].props.rows).toBe(24)
   // A number is never more than full.
-  await $.command.run({ command: 'md-preview', args: 'height 36' } as any)
+  await $.command.run({ command: 'iui', args: 'height 36' } as any)
   expect(kept.height).toBe(36)
   await clock.advance(COMMIT_MIN_MS)
   await ui.redraw(sent(attach('/t/tall.png')).props)
   expect(images(await ui.drawn())[0].props.rows).toBe(24)
   // Half, the default: half of 40 rows.
-  await $.command.run({ command: 'md-preview', args: 'height half' } as any)
+  await $.command.run({ command: 'iui', args: 'height half' } as any)
   await clock.advance(COMMIT_MIN_MS)
   await ui.redraw(sent(attach('/t/tall.png')).props)
   expect(images(await ui.drawn())[0].props.rows).toBe(20)
@@ -792,8 +792,8 @@ test('a height command while an epoch is open keeps the image box until the comm
   const ui = await $.ui.mount(sent(output))
   expect(images(await ui.drawn()).map(i => i.props.rows)).toEqual([12, 10])
   // An epoch is open (a new text size), then the height changes.
-  await $.command.run({ command: 'md-preview', args: 'size 90' } as any)
-  await $.command.run({ command: 'md-preview', args: 'height full' } as any)
+  await $.command.run({ command: 'iui', args: 'size 90' } as any)
+  await $.command.run({ command: 'iui', args: 'height full' } as any)
   await ui.redraw(sent(output).props)
   expect(images(await ui.drawn())[0].props.rows).toBe(12)
   expect(converts[1]).toContain('maxh=768')
@@ -815,7 +815,7 @@ test('in an open epoch a JPEG with no PNG made in this load (a resumed session) 
   const until = new Promise<void>(done => (release = done))
   const { clock, converts } = world(on, { typst: true, holdRun: { at: 1, until }, files: { '/t/photo.jpg': JPEG } })
   await ready($)
-  await $.command.run({ command: 'md-preview', args: 'height full' } as any)
+  await $.command.run({ command: 'iui', args: 'height full' } as any)
   const ui = await $.ui.mount(sent(attachAll('/t/photo.jpg')))
   // Nothing under the row for it until the commit; only the target's PNG is made.
   expect(images(await ui.drawn()).length).toBe(0)
@@ -836,7 +836,7 @@ test('a size, width or height command begins its epoch (one redraw) before the s
   await ready($)
   for (const [args, key] of [['size 90', 'size'], ['width 80', 'width'], ['height full', 'height']] as const) {
     const before = redraws()
-    await $.command.run({ command: 'md-preview', args } as any)
+    await $.command.run({ command: 'iui', args } as any)
     expect(redrawsAt[key]).toBe(before + 1)
   }
 })
@@ -849,7 +849,7 @@ test('a new height makes a new PNG of a JPEG in the background; the last one dra
   const ui = await $.ui.mount(sent(attachAll('/t/photo.jpg')))
   const first = images(await ui.drawn())[0].props.source.file
   expect(converts[0]).toContain('maxh=640')
-  await $.command.run({ command: 'md-preview', args: 'height full' } as any)
+  await $.command.run({ command: 'iui', args: 'height full' } as any)
   await ui.redraw(sent(attachAll('/t/photo.jpg')).props)
   expect(images(await ui.drawn())[0].props.source.file).toBe(first)
   // 24 rows of 32 px.
@@ -866,7 +866,7 @@ test('a background run that ends while the row draws still draws its PNG', async
   await ready($)
   const ui = await $.ui.mount(sent(attachAll('/t/photo.jpg')))
   const first = images(await ui.drawn())[0].props.source.file
-  await $.command.run({ command: 'md-preview', args: 'height full' } as any)
+  await $.command.run({ command: 'iui', args: 'height full' } as any)
   await ui.redraw(sent(attachAll('/t/photo.jpg')).props)
   expect(converts.length).toBe(2)
   await clock.settle()
@@ -878,12 +878,12 @@ test('a background run that ends while the row draws still draws its PNG', async
 
 test('height with no value shows it; a bad value is refused; a bad kept value is the default', async ($, on) => {
   const { kept } = world(on, { stored: { height: 3 } })
-  const shown = await $.command.run({ command: 'md-preview', args: 'height' } as any)
+  const shown = await $.command.run({ command: 'iui', args: 'height' } as any)
   expect(shown.text).toContain('The most rows an image or a Typst drawing takes: half (half the terminal, 6 to 24 rows)')
   expect(shown.text).toContain('This applies to images (sent or pasted) and to Typst drawings in answers.')
-  const bad = await $.command.run({ command: 'md-preview', args: 'height 5' } as any)
+  const bad = await $.command.run({ command: 'iui', args: 'height 5' } as any)
   expect(bad.text).toContain('Not understood: "height 5"')
   expect(kept.height).toBe(undefined)
-  await $.command.run({ command: 'md-preview', args: 'height 200' } as any)
+  await $.command.run({ command: 'iui', args: 'height 200' } as any)
   expect(kept.height).toBe(200)
 })

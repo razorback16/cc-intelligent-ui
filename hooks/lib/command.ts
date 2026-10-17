@@ -1,4 +1,4 @@
-// The /md-preview command: its arguments, the typeahead rows for them, and
+// The /iui command: its arguments, the typeahead rows for them, and
 // its registration.
 import type { EngineInterface } from 'claude-code'
 
@@ -8,8 +8,8 @@ import {
 } from './settings'
 import { isThemeName, type ThemeInfo } from './themes'
 
-// `/md-preview` arguments: on, off, size <80-200>, width [40-400|full],
-// height [6-200|half|full], details (all md-preview found), or nothing (show state). A `width` or `height`
+// `/iui` arguments: on, off, size <80-200>, width [40-400|full],
+// height [6-200|half|full], details (all Intelligent UI found), or nothing (show state). A `width` or `height`
 // with no value shows it.
 export type Command =
   | { kind: 'on' | 'off' | 'show' | 'details' | 'probe' }
@@ -50,7 +50,7 @@ export function parseCommand(args: string): Command {
   return { kind: 'bad' }
 }
 
-// The /md-preview arguments, and the sizes, widths and heights the typeahead offers.
+// The /iui arguments, and the sizes, widths and heights the typeahead offers.
 const SUBCOMMANDS = [
   { name: 'on', description: 'draw answers as pictures' },
   { name: 'off', description: 'show answers as text' },
@@ -65,7 +65,7 @@ const SIZES = [80, 90, 100, 110, 120, 125, 150, 175, 200]
 const WIDTHS: readonly Width[] = [80, 100, 120, 160, 200, 'full']
 const HEIGHTS: readonly Height[] = ['half', 'full', 12, 24, 36]
 
-// Typeahead rows for `/md-preview` arguments: the word at the cursor (`token`,
+// Typeahead rows for `/iui` arguments: the word at the cursor (`token`,
 // starting at `start` in `text`) completed as a subcommand, a theme name, a
 // size, a width or a height. Right after `theme`, `size`, `width` or
 // `height`, rows hold the word and its argument, since the typeahead asks
@@ -75,7 +75,7 @@ export function commandSuggestions(
   text: string, token: string, start: number,
   o: { themes: readonly ThemeInfo[]; active: string; size: number; width?: Width; height?: Height },
 ): Suggestion[] {
-  const head = /^\s*\/md-preview\s+/.exec(text)
+  const head = /^\s*\/iui\s+/.exec(text)
   if (!head || start < head[0].length) return []
   const before = text.slice(head[0].length, start).trim().split(/\s+/).filter(Boolean).map(w => w.toLowerCase())
   const word = token.toLowerCase()
@@ -121,11 +121,11 @@ export function commandSuggestions(
   return []
 }
 
-// /md-preview; registered at session start and again in setUp, so it is
+// /iui; registered at session start and again in setUp, so it is
 // there after a hot reload too.
 export async function registerCommand($: EngineInterface) {
   await $.command.register({
-    name: 'md-preview',
+    name: 'iui',
     description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image or a Typst drawing takes), theme [name] (list or switch themes)",
     argumentHint: '[on|off|size <percent>|width [columns|full]|height [rows|half|full]|theme [name]]',
   }).catch(() => undefined)

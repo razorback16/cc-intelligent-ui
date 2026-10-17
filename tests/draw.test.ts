@@ -8,14 +8,14 @@ import {
 
 const base = { program: '', term: 'xterm-256color', kitty: false, tmux: false, ssh: false, background: false, engineForced: false, modForced: false }
 
-test('tmux and screen draw no pictures, even with the engine forced; only MD_PREVIEW_FORCE tries', () => {
+test('tmux and screen draw no pictures, even with the engine forced; only IUI_FORCE tries', () => {
   expect(canDrawIn({ ...base, term: 'xterm-kitty', tmux: true })).toBe(false)
   expect(canDrawIn({ ...base, program: 'ghostty', tmux: true, engineForced: true })).toBe(false)
   expect(canDrawIn({ ...base, term: 'screen-256color', tmux: true, engineForced: true })).toBe(false)
   expect(canDrawIn({ ...base, tmux: true, modForced: true })).toBe(true)
 })
 
-test('a background session never draws pictures, not even with MD_PREVIEW_FORCE', () => {
+test('a background session never draws pictures, not even with IUI_FORCE', () => {
   expect(canDrawIn({ ...base, program: 'ghostty', background: true })).toBe(false)
   expect(canDrawIn({ ...base, term: 'xterm-kitty', background: true, engineForced: true, modForced: true })).toBe(false)
 })
@@ -78,13 +78,13 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAABkAAAABACAYAAAAAAAAA'
 // With no tty, the watcher exits 1 at once.
 type Tty = { line?: string; watcher?: number; metrics?: (n: number) => string }
 
-// The PID wrapper md-preview runs Typst through (typst.ts wrapPid).
+// The PID wrapper Intelligent UI runs Typst through (typst.ts wrapPid).
 const WRAP = 'echo $$; exec "$@"'
 
-// `stored`: what md-preview kept in its store before (a setting); `design`:
+// `stored`: what Intelligent UI kept in its store before (a setting); `design`:
 // the text of every design file (none: they are missing).
 function world(on: any, vars: Record<string, string>, head = HEAD, stored: Record<string, unknown> = {}, design?: string, tty?: Tty) {
-  // md-preview's store in memory (as mock.store), and its writes by key.
+  // Intelligent UI's store in memory (as mock.store), and its writes by key.
   const store = new Map(Object.entries(stored))
   const kept: Record<string, unknown> = {}
   on('store.get', async ($: any, e: any) => ({ value: store.get(e.key) }))
@@ -116,7 +116,7 @@ function world(on: any, vars: Record<string, string>, head = HEAD, stored: Recor
   const logs: string[] = []
   const killers = new Map<string, () => void>()
   let pids = 4242
-  // Every call md-preview makes to a process or a file (counted by kind).
+  // Every call Intelligent UI makes to a process or a file (counted by kind).
   const calls: string[] = []
   // The tty: its size reads (each one's time), and a new size.
   const sizeReads: number[] = []
@@ -175,7 +175,7 @@ function world(on: any, vars: Record<string, string>, head = HEAD, stored: Recor
       logs.push(e.init?.stdin ?? '')
       return ok('')
     }
-    if (/md-preview-/.test(cmd)) return ok('/c\nDarwin\n')
+    if (/intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (cmd.includes('command -v typst')) return ok('/usr/bin/typst\n')
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
     if (cmd.includes('od -An')) return ok(`${head}\n@\n`)
@@ -215,7 +215,7 @@ function world(on: any, vars: Record<string, string>, head = HEAD, stored: Recor
 const ENGINE = { type: 'Text', props: {}, children: ['engine drawing'] }
 const message = (requestId: string, text: string) =>
   ({
-    plugin: 'md-preview', surface: 'terminal', component: 'AssistantMessage', requestId,
+    plugin: 'intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId,
     props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40 },
   }) as any
 const props = (text: string) => ({ text, isFirstOfReply: true }) as any
@@ -224,7 +224,7 @@ const images = (tree: any): any[] =>
 
 test('over ssh in kitty, a page goes as PNG bytes, read once', async ($, on) => {
   const { clock, reads } = world(on, { SSH_CONNECTION: '10.0.0.2 50000 10.0.0.1 22', TERM: 'xterm-kitty' })
-  const ran = await $.command.run({ command: 'md-preview', args: 'details' } as any)
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(ran.text).toContain('over ssh, sent as bytes')
   const ui = await $.ui.mount(message('ssh-1', 'Some **bold** text.'))
   await clock.settle()
@@ -239,7 +239,7 @@ test('over ssh in kitty, a page goes as PNG bytes, read once', async ($, on) => 
 
 test('over ssh, a page over 4096 px tall draws as text', async ($, on) => {
   const { clock, reads } = world(on, { SSH_TTY: '/dev/pts/1', TERM: 'xterm-ghostty' }, TALL)
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(message('ssh-2', 'Some **bold** text.'))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -249,7 +249,7 @@ test('over ssh, a page over 4096 px tall draws as text', async ($, on) => {
 
 test('locally, a page goes as a file name', async ($, on) => {
   const { clock, reads } = world(on, { TERM: 'xterm-kitty' })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(message('local-1', 'Some **bold** text.'))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -261,7 +261,7 @@ test('locally, a page goes as a file name', async ($, on) => {
 
 test('in tmux with the engine forced, answers stay text', async ($, on) => {
   const { clock } = world(on, { TMUX: '/tmp/tmux-501/default,1,0', TERM: 'tmux-256color', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
-  const ran = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const ran = await $.command.run({ command: 'iui', args: '' } as any)
   expect(ran.text).toContain('This terminal shows no pictures')
   const ui = await $.ui.mount(message('tmux-1', 'Some **bold** text.'))
   await clock.settle()
@@ -275,14 +275,14 @@ const wide = (requestId: string, text: string) => ({ ...message(requestId, text)
 
 test('a kept width caps the pictures; width full draws at the terminal width once its epoch commits, 255 columns at most', async ($, on) => {
   const { clock, kept } = world(on, { TERM: 'xterm-kitty' }, HEAD, { width: 160 })
-  const ran = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const ran = await $.command.run({ command: 'iui', args: '' } as any)
   expect(ran.text).toContain('width 160 columns')
   const ui = await $.ui.mount(wide('w-1', 'Some **bold** text.'))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
   const [first] = images(await ui.drawn())
   expect(first.props.columns).toBe(160)
-  const set = await $.command.run({ command: 'md-preview', args: 'width full' } as any)
+  const set = await $.command.run({ command: 'iui', args: 'width full' } as any)
   expect(set.text).toContain('full (the terminal width)')
   expect(kept.width).toBe('full')
   // Another key (the columns are in it): compiled again, then drawn wider
@@ -297,12 +297,12 @@ test('a kept width caps the pictures; width full draws at the terminal width onc
 
 test('width with no value shows it; a bad value is refused; a bad kept value is the default', async ($, on) => {
   const { kept } = world(on, { TERM: 'xterm-kitty' }, HEAD, { width: 20 })
-  const shown = await $.command.run({ command: 'md-preview', args: 'width' } as any)
+  const shown = await $.command.run({ command: 'iui', args: 'width' } as any)
   expect(shown.text).toContain('The most columns a picture takes: full (the terminal width)')
-  const bad = await $.command.run({ command: 'md-preview', args: 'width 39' } as any)
+  const bad = await $.command.run({ command: 'iui', args: 'width 39' } as any)
   expect(bad.text).toContain('Not understood: "width 39"')
   expect(kept.width).toBe(undefined)
-  const set = await $.command.run({ command: 'md-preview', args: 'width 400' } as any)
+  const set = await $.command.run({ command: 'iui', args: 'width 400' } as any)
   expect(set.text).toContain('400 columns (a picture is 255 columns at most)')
   expect(kept.width).toBe(400)
 })
@@ -311,7 +311,7 @@ test('width with no value shows it; a bad value is refused; a bad kept value is 
 
 test('while a new size compiles, the old picture draws at its own box, never stretched', async ($, on) => {
   const { clock, hold, release } = world(on, { TERM: 'xterm-kitty' }, HEAD, { width: 160 })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(wide('box-1', 'Some **bold** text.'))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -319,7 +319,7 @@ test('while a new size compiles, the old picture draws at its own box, never str
   expect(first.props.columns).toBe(160)
   expect(first.props.source.generation).toBe(undefined)
   hold()
-  await $.command.run({ command: 'md-preview', args: 'width full' } as any)
+  await $.command.run({ command: 'iui', args: 'width full' } as any)
   await clock.settle()
   await clock.advance(COMMIT_MIN_MS)
   await ui.redraw(props('Some **bold** text.'))
@@ -337,7 +337,7 @@ test('while a new size compiles, the old picture draws at its own box, never str
 
 test('the pages column never shrinks: the layout never squeezes a page (fitBox sizes it)', async ($, on) => {
   const { clock } = world(on, { TERM: 'xterm-kitty' })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(message('shrink-1', 'Some **bold** text.'))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -355,7 +355,7 @@ const sized = (requestId: string, text: string, columns: number, rows = 40) => (
 
 test('after the viewport gets narrower, nothing compiles until it is quiet; meanwhile the old picture fits the room, its aspect kept', async ($, on) => {
   const { clock, compiles } = world(on, { TERM: 'xterm-kitty' }, HEAD, {}, undefined, { line: TTY })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(sized('f-1', 'Some **bold** text.', 120))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -390,7 +390,7 @@ const bulletOf = (tree: any): number => tree.children.find((c: any) => c.type ==
 
 test('an old page wider than the room after a narrowing draws at the room, its aspect kept and its bullet scaled', async ($, on) => {
   const { clock, hold } = world(on, { TERM: 'xterm-kitty' }, HEAD, {}, undefined, { line: '40 213 3408 1360' })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const text = '# A title\n\nSome **bold** text.'
   const ui = await $.ui.mount(sized('room-1', text, 213))
   await clock.settle()
@@ -419,7 +419,7 @@ test('an old page wider than the room after a narrowing draws at the room, its a
 
 test('an old page narrower than the room draws at its own box', async ($, on) => {
   const { clock, hold } = world(on, { TERM: 'xterm-kitty' }, HEAD, { width: 160 })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(wide('own-1', 'Some **bold** text.'))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -435,7 +435,7 @@ test('an old page narrower than the room draws at its own box', async ($, on) =>
 
 test('the row memo misses when the viewport columns change, and hits when only onScreen changes', async ($, on) => {
   const { clock, calls } = world(on, { TERM: 'xterm-kitty' })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(message('memo-1', 'Some **bold** text.'))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -458,31 +458,31 @@ test('the row memo misses when the viewport columns change, and hits when only o
 // The epoch trace lines a size change writes to the debug log.
 async function traceOf($: any, on: any, vars: Record<string, string>): Promise<string[]> {
   const { clock, logs } = world(on, vars)
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(message('trace-1', 'Some **bold** text.'))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
-  await $.command.run({ command: 'md-preview', args: 'size 120' } as any)
+  await $.command.run({ command: 'iui', args: 'size 120' } as any)
   await ui.redraw(props('Some **bold** text.'))
   await clock.settle()
   await clock.advance(COMMIT_MIN_MS)
   return logs.filter(l => / epoch \d+ /.test(l))
 }
 
-test('with MD_PREVIEW_DEBUG, an epoch writes one trace line at its begin and one at its commit', async ($, on) => {
-  const trace = await traceOf($, on, { TERM: 'xterm-kitty', MD_PREVIEW_DEBUG: '1' })
+test('with IUI_DEBUG, an epoch writes one trace line at its begin and one at its commit', async ($, on) => {
+  const trace = await traceOf($, on, { TERM: 'xterm-kitty', IUI_DEBUG: '1' })
   expect(trace.length).toBe(2)
   expect(trace[0]).toMatch(/epoch \d+ begin: target 100x40 cell \d+(\.\d+)?x\d+(\.\d+)?; cancelled 0 running, dropped 0 queued/)
   expect(trace[1]).toMatch(/epoch \d+ commit after \d+ ms \(ready\): 1 jobs queued, 0 waiting, 0 running, 0 converting/)
 })
 
-test('with no MD_PREVIEW_DEBUG, an epoch writes no trace line', async ($, on) => {
+test('with no IUI_DEBUG, an epoch writes no trace line', async ($, on) => {
   expect(await traceOf($, on, { TERM: 'xterm-kitty' })).toEqual([])
 })
 
 test('a drag (5 watcher lines in a row) compiles nothing and reads no tty until it is quiet, then once', async ($, on) => {
   const { clock, compiles, emit, sizeReads } = world(on, { TERM: 'xterm-kitty' }, HEAD, {}, undefined, { line: TTY })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(sized('drag-1', 'Some **bold** text.', 200))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -515,7 +515,7 @@ test('two rows, one compile held: both keep the old picture, then both swap in o
     if (e.key === 'done') redraws++
     return next(e)
   })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const a = await $.ui.mount(wide('two-a', 'First **answer**.'))
   const b = await $.ui.mount(wide('two-b', 'Second **answer**.'))
   await clock.settle()
@@ -526,7 +526,7 @@ test('two rows, one compile held: both keep the old picture, then both swap in o
   expect(compiles.length).toBe(2)
   redraws = 0
   hold('Second')
-  await $.command.run({ command: 'md-preview', args: 'width full' } as any)
+  await $.command.run({ command: 'iui', args: 'width full' } as any)
   await clock.settle()
   await clock.advance(COMMIT_MIN_MS)
   await a.redraw(props('First **answer**.'))
@@ -549,7 +549,7 @@ test('two rows, one compile held: both keep the old picture, then both swap in o
 
 test('a redraw with a new onScreen makes no file or process call and draws the same picture', async ($, on) => {
   const { clock, calls } = world(on, { TERM: 'xterm-kitty' })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(message('scroll-1', 'Some **bold** text.'))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -564,7 +564,7 @@ test('a redraw with a new onScreen makes no file or process call and draws the s
 
 test('a font size change with the same columns compiles once, with a new key', async ($, on) => {
   const { clock, compiles, emit } = world(on, { TERM: 'xterm-kitty' }, HEAD, {}, undefined, { line: TTY })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(sized('f-2', 'Some **bold** text.', 120))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -590,7 +590,7 @@ test('a font size change with the same columns compiles once, with a new key', a
 test('a font size change that changes the font metrics is still one compile wave, with the new metrics', async ($, on) => {
   const other = '{"term":null,"menlo":{"adv":0.6,"xh":0.5,"avg":0.6},"body":{"adv":0.6,"xh":0.5,"avg":0.5}}'
   const { clock, compiles, emit } = world(on, { TERM: 'xterm-kitty' }, HEAD, {}, undefined, { line: TTY, metrics: n => (n === 1 ? '{}' : other) })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(sized('f-3', 'Some **bold** text.', 120))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -607,7 +607,7 @@ test('a font size change that changes the font metrics is still one compile wave
 
 test('a height change only compiles a message with a Typst block again, not a plain one', async ($, on) => {
   const { clock, compiles, emit } = world(on, { TERM: 'xterm-kitty' }, HEAD, {}, undefined, { line: TTY })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const diagram = await $.ui.mount(sized('h-1', DIAGRAM, 120))
   const plain = await $.ui.mount(sized('h-2', 'Some **bold** text.', 120))
   await clock.settle()
@@ -628,7 +628,7 @@ test('a height change only compiles a message with a Typst block again, not a pl
 
 test('a watcher that exits 1 (no tty) starts no reads', async ($, on) => {
   const { clock, sizeReads } = world(on, { TERM: 'xterm-kitty' }, HEAD, {}, undefined, { watcher: 1 })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   await clock.advance(30000)
   expect(sizeReads.length).toBe(1)
 })
@@ -639,7 +639,7 @@ const DIAGRAM = 'A plot:\n\n```typst\n#rect(width: theme.width, height: theme.he
 
 test('a first render of a diagram: the design is the space now (factor 1), kept once the compile ends', async ($, on) => {
   const { clock, compiles, files } = world(on, { TERM: 'xterm-kitty' })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(message('room-1', DIAGRAM))
   await clock.settle()
   await ui.redraw(props(DIAGRAM))
@@ -661,7 +661,7 @@ test('a first render of a diagram: the design is the space now (factor 1), kept 
 
 test('a first render at any width sends design-w equal to width (factor exactly 1)', async ($, on) => {
   const { clock, compiles } = world(on, { TERM: 'xterm-kitty' })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   for (const [i, columns] of [117, 83, 251].entries()) {
     // A plain row settles the new viewport first (it has no design).
     const settle = await $.ui.mount({ ...message(`room-pre-${i}`, `Plain ${i}.`), viewport: { columns, rows: 37 } })
@@ -681,7 +681,7 @@ test('a first render at any width sends design-w equal to width (factor exactly 
 
 test('a resize while the first compile runs: the compile is killed, the next uses the same design, one design file', async ($, on) => {
   const { clock, compiles, files, hold, release, kills } = world(on, { TERM: 'xterm-kitty' })
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   hold()
   const ui = await $.ui.mount(sized('race-1', DIAGRAM, 100))
   await clock.settle()
@@ -707,7 +707,7 @@ test('a resize while the first compile runs: the compile is killed, the next use
 
 test('a diagram with a kept design scales from it, and the design is not written again', async ($, on) => {
   const { clock, compiles, files } = world(on, { TERM: 'xterm-kitty' }, HEAD, {}, '500 200')
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(message('room-3', DIAGRAM))
   await clock.settle()
   await ui.redraw(props(DIAGRAM))

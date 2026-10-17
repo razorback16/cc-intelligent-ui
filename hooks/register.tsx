@@ -1,5 +1,5 @@
-// md-preview: draws Claude's answers (AssistantMessage blocks) as pictures of
-// rendered Markdown, made by Typst from the template in ../render/md.typ.
+// Intelligent UI: draws Claude's answers (AssistantMessage blocks) as pictures
+// of rendered Markdown, made by Typst from the template in ../render/md.typ.
 // The stored message never changes; only its drawing does.
 //
 // Flow: the render hook makes a key from the text, the width, the cell size,
@@ -79,12 +79,12 @@ export {
 } from './lib/plan'
 
 // The atoms the hooks read and write (a copy of each in this file: see state.ts).
-const isOn = atom({ plugin: 'md-preview', key: 'isOn' } as const, true)
-const done = atom({ plugin: 'md-preview', key: 'done' } as const, 0)
+const isOn = atom({ plugin: 'intelligent-ui', key: 'isOn' } as const, true)
+const done = atom({ plugin: 'intelligent-ui', key: 'done' } as const, 0)
 
 // ---- Pictures under rows ----------------------------------------------------
 
-// The env to draw pictures with: md-preview on, in a terminal that draws;
+// The env to draw pictures with: Intelligent UI on, in a terminal that draws;
 // null otherwise (no Typst needed), with the `done` value read. Here and not
 // in pictures.tsx, as it reads the atoms. The sizes come from the Frame
 // (frameFor, shownFor); the viewport is noted for it (a change is settled
@@ -168,8 +168,8 @@ async function planDrawing(
   return drawing
 }
 
-// md-preview's own plan question: only on the main loop of a session drawn
-// in a terminal, with md-preview on, Typst found and a terminal that draws
+// Intelligent UI's own plan question: only on the main loop of a session drawn
+// in a terminal, with Intelligent UI on, Typst found and a terminal that draws
 // (the plan's pictures need all of them). Null otherwise: the engine's
 // dialog asks, as with no mod.
 async function planEnv($: EngineInterface): Promise<Env | null> {
@@ -189,21 +189,21 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Typeahead for /md-preview arguments; the theme list is the last scan's.
+  // Typeahead for /iui arguments; the theme list is the last scan's.
   on('prompt.autocomplete', async ($, e, next) => {
     const got = await next(e)
-    if (!/^\s*\/md-preview\s/.test(e.text)) return got
+    if (!/^\s*\/iui\s/.test(e.text)) return got
     if (!S.themeChoices.length) await setUp($).catch(() => null)
     const mine = commandSuggestions(e.text, e.token, e.start, { themes: S.themeChoices, active: S.look?.name ?? DEFAULT_THEME, size: S.size, width: S.width, height: S.height })
     return mine.length ? { suggestions: [...got.suggestions, ...mine] } : got
   })
 
-  on('command.run', { command: 'md-preview' }, async ($, e) => {
+  on('command.run', { command: 'iui' }, async ($, e) => {
     const asked = parseCommand(e.args)
     if (asked.kind === 'on' || asked.kind === 'off') {
       await update($, isOn, () => asked.kind === 'on')
       await $.store.set('enabled', asked.kind === 'on')
-      return { text: `md-preview is ${asked.kind}.` }
+      return { text: `Intelligent UI is ${asked.kind}.` }
     }
     if (asked.kind === 'size') {
       // The epoch begins with the setting, so no row draws it with no epoch
@@ -211,7 +211,7 @@ export const register: Register = on => {
       S.size = asked.percent
       beginEpoch($)
       await $.store.set('size', S.size)
-      return { text: `md-preview draws text at ${S.size}% of the terminal's text size (100% matches it).` }
+      return { text: `Intelligent UI draws text at ${S.size}% of the terminal's text size (100% matches it).` }
     }
     if (asked.kind === 'width') {
       if (asked.width === undefined) await setUp($).catch(() => null)
@@ -221,8 +221,8 @@ export const register: Register = on => {
         await $.store.set('width', S.width)
       }
       const most = typeof S.width === 'number' && S.width > IMAGE_MAX_COLUMNS ? ` (a picture is ${IMAGE_MAX_COLUMNS} columns at most)` : ''
-      const head = asked.width === undefined ? 'The most columns a picture takes' : 'md-preview pictures now take at most'
-      return { text: `${head}: ${widthText(S.width)}${most}. Use /md-preview width <${MIN_WIDTH}-${MAX_WIDTH}> for a cap, or /md-preview width full (the default) for no cap.` }
+      const head = asked.width === undefined ? 'The most columns a picture takes' : 'Intelligent UI pictures now take at most'
+      return { text: `${head}: ${widthText(S.width)}${most}. Use /iui width <${MIN_WIDTH}-${MAX_WIDTH}> for a cap, or /iui width full (the default) for no cap.` }
     }
     if (asked.kind === 'height') {
       if (asked.height === undefined) await setUp($).catch(() => null)
@@ -231,8 +231,8 @@ export const register: Register = on => {
         beginEpoch($)
         await $.store.set('height', S.height)
       }
-      const head = asked.height === undefined ? 'The most rows an image or a Typst drawing takes' : 'md-preview images and Typst drawings now take at most'
-      return { text: `${head}: ${heightText(S.height)}. This applies to images (sent or pasted) and to Typst drawings in answers. Use /md-preview height half (the default), /md-preview height full, or /md-preview height <${MIN_HEIGHT}-${MAX_HEIGHT}> (never more than full).` }
+      const head = asked.height === undefined ? 'The most rows an image or a Typst drawing takes' : 'Intelligent UI images and Typst drawings now take at most'
+      return { text: `${head}: ${heightText(S.height)}. This applies to images (sent or pasted) and to Typst drawings in answers. Use /iui height half (the default), /iui height full, or /iui height <${MIN_HEIGHT}-${MAX_HEIGHT}> (never more than full).` }
     }
     if (asked.kind === 'setup') {
       await setUp($).catch(() => null)
@@ -266,7 +266,7 @@ export const register: Register = on => {
         beginEpoch($)
       }
       if (asked.name) await $.store.set('theme-name', chosen.name)
-      const head = asked.name ? `md-preview uses the theme ${chosen.name}.\n` : ''
+      const head = asked.name ? `Intelligent UI uses the theme ${chosen.name}.\n` : ''
       return { text: `${head}${themeListing(themes, problems, chosen.name, userThemesOf(ready.home))}` }
     }
     const state = (await read($, isOn)) ? 'on' : 'off'
@@ -279,15 +279,15 @@ export const register: Register = on => {
       const terminal = ready.canDraw
         ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
         : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+ and Rio 0.5.27+ with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
-      return { text: `md-preview is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, ${font}. ${typst}; ${terminal}.` }
+      return { text: `Intelligent UI is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, ${font}. ${typst}; ${terminal}.` }
     }
     // The short state: what is set, and only the problems that keep pictures away.
     const sized = (v: number | 'full' | 'half', unit: string) => (typeof v === 'number' ? `${v} ${unit}` : v)
-    const lines = [`md-preview is ${state}: theme ${theme}, ${S.theme}, text ${S.size}%, width ${sized(S.width, 'columns')}, height ${sized(S.height, 'rows')}.`]
-    if (S.setupNeeded) lines.push('In iTerm2, run /md-preview setup once to show pictures.')
+    const lines = [`Intelligent UI is ${state}: theme ${theme}, ${S.theme}, text ${S.size}%, width ${sized(S.width, 'columns')}, height ${sized(S.height, 'rows')}.`]
+    if (S.setupNeeded) lines.push('In iTerm2, run /iui setup once to show pictures.')
     else if (!ready.canDraw) lines.push('This terminal shows no pictures, so answers stay text. Pictures show in kitty, Ghostty and iTerm2 3.6+.')
     if (!ready.typst) lines.push('Typst is not installed, so answers stay text. Install it: brew install typst')
-    lines.push('Change: /md-preview on | off | size | width | height | theme. More: /md-preview details')
+    lines.push('Change: /iui on | off | size | width | height | theme. More: /iui details')
     return { text: bad + lines.join('\n') }
   })
 
@@ -308,7 +308,7 @@ export const register: Register = on => {
     if (!e.surfaces.includes('terminal') || !(await read($, isOn))) return composed
     const ready = S.env ?? (await setUp($).catch(() => null))
     if (!ready?.typst || !ready.canDraw) return composed
-    return { sections: [...composed.sections, { id: 'md-preview:typst', text: TYPST_PROMPT, scope: 'session' as const }] }
+    return { sections: [...composed.sections, { id: 'intelligent-ui:typst', text: TYPST_PROMPT, scope: 'session' as const }] }
   })
 
   // A main-loop model request: its text blocks are final when the next block
@@ -319,7 +319,7 @@ export const register: Register = on => {
     S.stepsLive++
     let textIndex = -1
     let isDone = false
-    // Never let md-preview's own work break Claude's stream.
+    // Never let Intelligent UI's own work break Claude's stream.
     const settleAll = () => {
       try {
         finalizeAll($)
@@ -463,7 +463,7 @@ export const register: Register = on => {
 
   // The ExitPlanMode row, above the question: the engine's row, then the plan
   // as pictures, through the answers' pipeline at an answer's width (the
-  // edited text once edited in md-preview's flow). A rejected, aborted or
+  // edited text once edited in Intelligent UI's flow). A rejected, aborted or
   // subagent call, and a plan that fails to compile, stay as the engine draws.
   on('ui.render', { component: 'ToolUse', props: { tool: 'ExitPlanMode' } }, async ($, e, next) => {
     const row = await next(e)
@@ -498,7 +498,7 @@ export const register: Register = on => {
     return drawn ?? next(e)
   })
 
-  // One dim line above md-preview's own question (the dialog takes at most 12
+  // One dim line above the mod's own question (the dialog takes at most 12
   // rows around it, so the plan is in the row above). Any other question
   // stays as the engine draws it.
   on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
@@ -526,7 +526,7 @@ export const register: Register = on => {
     }
   }).catch(($, e, next) => next(e))
 
-  // The main loop's ExitPlanMode: md-preview asks first (the engine shows its
+  // The main loop's ExitPlanMode: the mod asks first (the engine shows its
   // dialog while PermissionRequest hooks run, so a question asked there waits
   // behind it). The person's words deny the call (Claude revises the plan);
   // a verdict waits for the PermissionRequest below, and is dropped once the
@@ -578,7 +578,7 @@ export const register: Register = on => {
     return got
   }).catch(($, e, next) => next(e))
 
-  // The PermissionRequest of that call: md-preview's verdict at once (the
+  // The PermissionRequest of that call: Intelligent UI's verdict at once (the
   // engine's dialog never shows), else the engine's flow.
   on('classic.PermissionRequest', async ($, e, next) => {
     if (e.tool_name !== 'ExitPlanMode' || e.agent_id || !S.planVerdict) return next(e)

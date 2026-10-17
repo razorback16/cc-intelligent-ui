@@ -1,9 +1,9 @@
-// The values md-preview keeps in $.state.
-export type MdPreviewTheme = 'dark' | 'light'
+// The values Intelligent UI keeps in $.state.
+export type IuiTheme = 'dark' | 'light'
 
 declare module 'claude-code' {
   interface PluginState {
-    'md-preview': {
+    'intelligent-ui': {
       // Whether answers are drawn as pictures (also kept in $.store as `enabled`).
       isOn: boolean
       // Goes up each time a render finishes or the setup changes, so the

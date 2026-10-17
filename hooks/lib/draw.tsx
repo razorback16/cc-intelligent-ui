@@ -3,7 +3,7 @@
 // drawing of its pages beside the reply bullet.
 import type { EngineInterface, RenderComponent, RenderViewport, ResolveInput } from 'claude-code'
 
-import type { MdPreviewTheme } from '../../types'
+import type { IuiTheme } from '../../types'
 import { BODY_PT, bulletOf, GUTTER, MARGIN_TOP, TEMPLATE_VERSION } from './settings'
 import { INLINE_KEPT, inlined, S, type Cell, type Look, type Metrics, type Result, type Room } from './state'
 import { FENCE } from './markdown'
@@ -56,7 +56,7 @@ export function renderKey(o: {
   columns: number
   cell: Cell
   size: number
-  mode: MdPreviewTheme
+  mode: IuiTheme
   termFont: string
   columnPt: number
   templateStamp: string

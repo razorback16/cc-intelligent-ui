@@ -62,7 +62,7 @@ export function shownFor(view?: View): Frame {
 }
 
 // The columns a Markdown picture (an answer, a plan, a sent file) takes in
-// `frame`: columnsFor with /md-preview width; over ssh (`inline`) also at
+// `frame`: columnsFor with /iui width; over ssh (`inline`) also at
 // most what a `{ png }` source can be wide in its cell.
 export const pictureColumns = (frame: Frame, inline: boolean): number =>
   columnsFor(frame.columns, S.width, inline ? frame.cell : null)

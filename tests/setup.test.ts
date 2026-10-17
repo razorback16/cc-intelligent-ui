@@ -7,7 +7,7 @@ test('the setup writes the start file of the login shell', () => {
   expect(shellRcOf({ shell: '/bin/zsh', home: '/h', zdotdir: '/z', isMac: true })!.path).toBe('/z/.zshrc')
   expect(shellRcOf({ shell: '/bin/bash', home: '/h', isMac: true })!.path).toBe('/h/.bash_profile')
   expect(shellRcOf({ shell: '/bin/bash', home: '/h', isMac: false })!.path).toBe('/h/.bashrc')
-  expect(shellRcOf({ shell: '/opt/homebrew/bin/fish', home: '/h', isMac: true })).toEqual({ path: '/h/.config/fish/conf.d/md-preview.fish', kind: 'fish' })
+  expect(shellRcOf({ shell: '/opt/homebrew/bin/fish', home: '/h', isMac: true })).toEqual({ path: '/h/.config/fish/conf.d/intelligent-ui.fish', kind: 'fish' })
   expect(shellRcOf({ shell: '/bin/tcsh', home: '/h', isMac: true })).toBe(null)
 })
 
@@ -31,7 +31,7 @@ test('adding the block twice keeps one; removing it gives the file back', () => 
   expect(withoutSetup(`a\n${SETUP_START}\nb`)).toBe(`a\n${SETUP_START}\nb`)
 })
 
-test('/md-preview setup and setup remove are commands', () => {
+test('/iui setup and setup remove are commands', () => {
   expect(parseCommand('setup')).toEqual({ kind: 'setup', remove: false })
   expect(parseCommand('Setup Remove')).toEqual({ kind: 'setup', remove: true })
   expect(parseCommand('setup now')).toEqual({ kind: 'bad' })
@@ -55,7 +55,7 @@ const iterm = (on: any, files: Record<string, string>, answer: string | null) =>
   on('ui.toast', async ($: any, e: any) => (toasts.push(e.text), { value: undefined }))
   on('ui.log', async ($: any, e: any) => (logs.push(e.text), { value: undefined }))
   on('process.run', async ($: any, e: any, next: any) =>
-    e.argv[0] === 'sh' && /md-preview-/.test(e.argv.join(' '))
+    e.argv[0] === 'sh' && /intelligent-ui-/.test(e.argv.join(' '))
       ? { value: { exitCode: 0, stdout: '/tmp/mdp\nDarwin\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
       : next(e))
   on('fs.read', async ($: any, e: any, next: any) => (e.path in files ? { value: files[e.path] } : e.path.startsWith('/h/') ? { deny: 'no such file' } : next(e)))
@@ -71,27 +71,27 @@ const iterm = (on: any, files: Record<string, string>, answer: string | null) =>
 test('in iTerm2 with pictures off, the plugin asks once and adds the block on yes', async ($, on) => {
   const files: Record<string, string> = { '/h/.zshrc': 'export A=1\n' }
   const { asked, clock, toasts, logs } = iterm(on, files, 'Add the line')
-  const shown = await $.command.run({ command: 'md-preview', args: '' } as any)
-  expect(shown.text).toContain('run /md-preview setup once')
+  const shown = await $.command.run({ command: 'iui', args: '' } as any)
+  expect(shown.text).toContain('run /iui setup once')
   await clock.settle()
   expect(asked.length).toBe(1)
   expect(asked[0]).toContain('~/.zshrc')
   expect(hasSetup(files['/h/.zshrc']!)).toBe(true)
   expect(Object.keys(files)).toEqual(['/h/.zshrc'])
   expect(toasts.filter(t => /tab/.test(t))).toEqual(['Close this tab and open a new iTerm2 tab to see pictures.'])
-  expect(logs.some(l => l.includes('Added the md-preview block to /h/.zshrc') && l.includes('Close this tab'))).toBe(true)
-  const again = await $.command.run({ command: 'md-preview', args: 'setup' } as any)
-  expect(again.text).toContain('already has the md-preview block')
+  expect(logs.some(l => l.includes('Added the Intelligent UI block to /h/.zshrc') && l.includes('Close this tab'))).toBe(true)
+  const again = await $.command.run({ command: 'iui', args: 'setup' } as any)
+  expect(again.text).toContain('already has the Intelligent UI block')
   expect(again.text).toContain('Close this tab, open a new iTerm2 tab')
-  const removed = await $.command.run({ command: 'md-preview', args: 'setup remove' } as any)
-  expect(removed.text).toContain('Removed the md-preview block from /h/.zshrc')
+  const removed = await $.command.run({ command: 'iui', args: 'setup remove' } as any)
+  expect(removed.text).toContain('Removed the Intelligent UI block from /h/.zshrc')
   expect(files['/h/.zshrc']).toBe('export A=1\n')
 })
 
 test('a dismissed question changes no file', async ($, on) => {
   const files: Record<string, string> = { '/h/.zshrc': 'export A=1\n' }
   const { asked, clock } = iterm(on, files, null)
-  await $.command.run({ command: 'md-preview', args: '' } as any)
+  await $.command.run({ command: 'iui', args: '' } as any)
   await clock.settle()
   expect(asked.length).toBe(1)
   expect(files['/h/.zshrc']).toBe('export A=1\n')

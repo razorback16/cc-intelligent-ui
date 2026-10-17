@@ -1,4 +1,4 @@
-// md-preview: draws Markdown segments like VS Code's Markdown preview
+// Intelligent UI: draws Markdown segments like VS Code's Markdown preview
 // (the colours come from the theme). One segment = one page = one PNG.
 //
 // typst compile --root / --package-path <render>/packages --format png --ppi <ppi>
@@ -70,7 +70,7 @@
 }
 #let design-h = pt-in("design-h", room-h)
 #let doc = if "doc" in inp { json(inp.doc) } else {
-  (base: "", segments: ("*md-preview:* no `doc` input given.",))
+  (base: "", segments: ("*Intelligent UI:* no `doc` input given.",))
 }
 #let base = str(doc.at("base", default: ""))
 #let allow = doc.at("images", default: none)
@@ -138,7 +138,7 @@
 )
 
 // ---------- page and text ----------
-#set document(title: "md-preview")
+#set document(title: "Intelligent UI")
 #set page(width: page-w, height: auto, margin: (left: margin-left, right: margin-right, y: margin-y), fill: none)
 // CSS-like line boxes: line-height 22px at 14px.
 #set text(

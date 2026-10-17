@@ -1,10 +1,10 @@
-// md-preview's settings: sizes, limits, timings and the text it adds to
+// Intelligent UI's settings: sizes, limits, timings and the text it adds to
 // Claude's system prompt.
 import type { Cell } from './state'
 
 // ---- Settings -------------------------------------------------------------
 
-// `/md-preview width`: the most columns a picture takes (in this range), or
+// `/iui width`: the most columns a picture takes (in this range), or
 // `full`, the default: the terminal width less the bullet, as Claude Code's
 // own text. An Image is at most IMAGE_MAX_COLUMNS wide, so no width goes
 // past it.
@@ -24,7 +24,7 @@ export const MARGIN_TOP = 1
 // The template's body text size in pt; the page width is chosen so that this
 // text looks as big as the terminal's own (see fontFit).
 export const BODY_PT = 11
-// `/md-preview size`: a percent on top of that match.
+// `/iui size`: a percent on top of that match.
 export const DEFAULT_SIZE = 100
 export const MIN_SIZE = 80
 export const MAX_SIZE = 200
@@ -56,7 +56,7 @@ export const COMPILE_TIMEOUT_MS = 20000
 export const ALT_CHARS = 200
 // Where Typst is when the login shell's PATH does not find it. `~` is $HOME.
 export const TYPST_FALLBACKS = ['/opt/homebrew/bin/typst', '/usr/local/bin/typst', '/usr/bin/typst', '/snap/bin/typst', '~/.cargo/bin/typst', '~/.local/bin/typst']
-export const NO_TYPST = 'md-preview: install Typst (brew install typst) to see rendered answers'
+export const NO_TYPST = 'Intelligent UI: install Typst (brew install typst) to see rendered answers'
 // Typst downloads a package it doesn't find under --package-path; a proxy
 // nobody listens on makes that fail at once, so a live block never fetches.
 export const NO_NETWORK = 'http://127.0.0.1:9'
@@ -75,7 +75,7 @@ export const MODES = ['dark', 'light'] as const
 // terminal's rows.
 export const PICTURE_MAX_ROWS = 24
 export const PICTURE_MIN_ROWS = 6
-// `/md-preview height`: the most rows an image (sent or pasted) or a Typst
+// `/iui height`: the most rows an image (sent or pasted) or a Typst
 // drawing (the room of a live block or a local image in Markdown; not a
 // whole Markdown page) takes. `half`, the default: as above. `full`: the
 // terminal's rows less PICTURE_ROOM_ROWS. A number: that many rows, at most
@@ -124,7 +124,7 @@ Packages available offline:
 #import "@preview/cetz-plot:0.1.4": plot, chart
 #import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge
 A \`theme\` dictionary is in scope: theme.fg, theme.muted, theme.link, theme.border, theme.accent, theme.bg, theme.code-bg, theme.red/green/blue/yellow/orange/purple, theme.palette (6 colours), theme.width (content width), theme.height (the height a drawing should fit in), theme.dark (bool).
-Default strokes in cetz, fletcher and cetz-plot are black and invisible on a dark theme, so always pass theme colours: cetz \`set-style(stroke: theme.fg)\`; fletcher \`diagram(node-stroke: theme.fg, edge-stroke: theme.fg, ...)\`; cetz-plot \`set-style(axes: (stroke: theme.fg, tick: (stroke: theme.fg)), legend: (fill: theme.bg, stroke: theme.border))\`; fills like \`theme.blue.transparentize(70%)\`; size drawings to fit theme.width × theme.height; md-preview scales them when the terminal changes.
+Default strokes in cetz, fletcher and cetz-plot are black and invisible on a dark theme, so always pass theme colours: cetz \`set-style(stroke: theme.fg)\`; fletcher \`diagram(node-stroke: theme.fg, edge-stroke: theme.fg, ...)\`; cetz-plot \`set-style(axes: (stroke: theme.fg, tick: (stroke: theme.fg)), legend: (fill: theme.bg, stroke: theme.border))\`; fills like \`theme.blue.transparentize(70%)\`; size drawings to fit theme.width × theme.height; Intelligent UI scales them when the terminal changes.
 Inside a typst block, #page, #pagebreak and #set page are errors. If a block fails to compile, it is shown as code instead.
 A plan (the plan file you write in plan mode) is drawn the same way when ExitPlanMode asks for approval, so the same Markdown, $math$ and typst blocks work there.
 The stored text stays Markdown, so keep replies readable as plain text too.`

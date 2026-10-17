@@ -4,7 +4,7 @@ Intelligent UI is MIT licensed (see `LICENSE`). It includes the work of others, 
 
 ## Typst packages (in `render/packages/preview/`)
 
-These are copies of the published packages from [Typst Universe](https://typst.app/universe), so the mod works offline.
+These are copies of the published packages from [Typst Universe](https://typst.app/universe), so Intelligent UI works offline.
 
 | Package | Version | Licence |
 |---|---|---|

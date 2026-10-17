@@ -5,7 +5,7 @@ const ENGINE = { type: 'Text', props: {}, children: ['engine drawing'] }
 
 const message = (requestId: string, props: Record<string, unknown>) =>
   ({
-    plugin: 'md-preview',
+    plugin: 'intelligent-ui',
     surface: 'terminal',
     component: 'AssistantMessage',
     requestId,
@@ -16,8 +16,8 @@ const message = (requestId: string, props: Record<string, unknown>) =>
 test('with the mod off, an answer draws as the engine draws it', async ($, on) => {
   mock.store(on)
   on('ui.render', () => ENGINE as any)
-  const ran = await $.command.run({ command: 'md-preview', args: 'off' } as any)
-  expect(ran.text).toBe('md-preview is off.')
+  const ran = await $.command.run({ command: 'iui', args: 'off' } as any)
+  expect(ran.text).toBe('Intelligent UI is off.')
   const mounted = await $.ui.mount(message('off-1', {}))
   expect(await mounted.drawn()).toMatchObject(ENGINE)
 })

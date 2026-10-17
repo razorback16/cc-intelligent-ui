@@ -7,7 +7,7 @@ import { CONVERT_MAX_SIDE, MAX_IMAGE_ROWS, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, P
 import { hashOf } from './draw'
 
 // The most rows a picture under a row (or a drawing's room) takes in a
-// terminal of `terminalRows` rows (frameFor(...).rows), by `height` (/md-preview
+// terminal of `terminalRows` rows (frameFor(...).rows), by `height` (/iui
 // height): half the rows within PICTURE_MIN_ROWS to PICTURE_MAX_ROWS
 // (half); the rows less PICTURE_ROOM_ROWS (full); or a number, at most as
 // much as full. Never under PICTURE_MIN_ROWS or over MAX_IMAGE_ROWS.

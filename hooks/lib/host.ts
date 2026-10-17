@@ -1,9 +1,9 @@
-// Work on the host: the shell snippets md-preview runs, the tty size (one
+// Work on the host: the shell snippets Intelligent UI runs, the tty size (one
 // read, and the Frame watcher's loop), the terminal's font, and light or dark for auto (the terminal's settings, then
 // COLORFGBG, then the OS appearance), read again by a poll.
 import type { EngineInterface } from 'claude-code'
 
-import type { MdPreviewTheme } from '../../types'
+import type { IuiTheme } from '../../types'
 import { HOST_CHECK_MS, HOST_POLL_MS, MODES } from './settings'
 import { S } from './state'
 import { beginEpoch } from './epoch'
@@ -67,7 +67,7 @@ export const OSC11_PL = [
   '}',
   'print $r;',
 ].join(' ')
-// Off until /md-preview probe shows the answer reaches the mod: the poll
+// Off until /iui probe shows the answer reaches the mod: the poll
 // then asks the terminal (source 1 of auto) every period.
 export const USE_OSC11 = false
 export const PROBE_RUNS = 5
@@ -169,7 +169,7 @@ async function readGhosttyMode($: EngineInterface): Promise<HostMode | null> {
   }
   const pair = ghosttyThemesOf(ghosttyValueOf(got.stdout, 'theme'))
   const themeBg: { light?: string; dark?: string } = {}
-  let appearance: MdPreviewTheme | null = null
+  let appearance: IuiTheme | null = null
   if (pair) {
     appearance = (await readOsMode($).catch(() => null))?.mode ?? null
     const where = {

@@ -4,7 +4,7 @@ import { S, type Cell } from './state'
 import { GUTTER, IMAGE_MAX_COLUMNS, SEGMENT_ROWS, type Width } from './settings'
 
 // The columns a picture takes: the viewport less the bullet, at most `width`
-// (`/md-preview width`; full: no cap) and IMAGE_MAX_COLUMNS, at least 20.
+// (`/iui width`; full: no cap) and IMAGE_MAX_COLUMNS, at least 20.
 // `inlineCell`: over ssh, the cell, so a page stays INLINE_MAX_SIDE pixels
 // wide at most (a wider page can not go as bytes).
 export function columnsFor(viewportColumns: number | undefined, width: Width, inlineCell?: Cell | null): number {
@@ -50,7 +50,7 @@ export const isSet = (value: string | undefined) => !!value && !/^(0|false|no|of
 // only for kitty and Ghostty; any other terminal draws only when
 // CLAUDE_CODE_FORCE_TERMINAL_IMAGES is set. A background session never
 // draws. In tmux or screen the engine draws none even when forced (it does
-// not wrap them for passthrough), so only MD_PREVIEW_FORCE tries. Over ssh
+// not wrap them for passthrough), so only IUI_FORCE tries. Over ssh
 // TERM_PROGRAM and KITTY_WINDOW_ID do not come through, so TERM tells; the
 // pictures then go as bytes (Env.inline), as the terminal can't read our files.
 export function canDrawIn(env: { program: string; term: string; kitty: boolean; tmux: boolean; ssh: boolean; background: boolean; engineForced: boolean; modForced: boolean }): boolean {

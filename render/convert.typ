@@ -1,4 +1,4 @@
-// md-preview: makes a PNG of a JPEG or WebP (the engine's Image draws PNG
+// Intelligent UI: makes a PNG of a JPEG or WebP (the engine's Image draws PNG
 // only). Compiled at 72 ppi, where 1 pt is 1 pixel.
 //
 // Inputs: f = the image's absolute path (with --root /); maxw, maxh = the

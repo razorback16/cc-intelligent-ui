@@ -1,11 +1,11 @@
 #!/bin/sh
-# Renders the sample answers with md-preview's own template, then frames them.
+# Renders the sample answers with the mod's own template, then frames them.
 # Usage: outcomes/build.sh   (needs typst 0.15)
 #
 # The template gets the inputs the mod gives it (hooks/lib/typst.ts runTypst,
 # draw.tsx sizing/fontFit/alignFirstLine, answer.ts roomOf) for a terminal of
 # COLS picture columns and ROWS rows, with CELL_W x CELL_H px cells (2x
-# Retina), MesloLGS NF as the terminal font and `/md-preview height` on half.
+# Retina), MesloLGS NF as the terminal font and `/iui height` on half.
 # Only the PNG resolution (PPI) is higher than the mod's, for crisp images.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)

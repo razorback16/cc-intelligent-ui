@@ -1,4 +1,4 @@
-// Outcome frame: md-preview renders in terminal windows, with a headline.
+// Outcome frame: Intelligent UI renders in terminal windows, with a headline.
 // One window:  --input img=<abs png> --input mode=dark|light --input ask=..
 // Hero (two):  --input layout=hero --input img-dark=.. --input img-light=.. --input ask=..
 // Both:        --input title=..   (typst compile --root / frame.typ out.png)
@@ -20,7 +20,7 @@
 })
 
 // A terminal window with Claude Code in it: the header, the prompt, the
-// answer (the md-preview picture beside the bullet), the input box and the
+// answer (the Intelligent UI picture beside the bullet), the input box and the
 // mode line. Colours are from a screenshot of Claude Code 2.1.301.
 #let window(img, dark, ask) = {
   let c = if dark { (
