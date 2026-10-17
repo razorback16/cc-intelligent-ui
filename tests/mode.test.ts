@@ -219,10 +219,11 @@ for (const colorFgBg of [undefined, '0;15']) {
 
 // cmux (Ghostty inside) with no colours in the Ghostty config: its adaptive
 // default theme follows cmux's appearance; turned off, Ghostty's dark default.
+// A theme in cmux's own config (its themes picker) wins.
 test('with the theme on auto, cmux draws as its appearance is', async ($, on) => {
   mock.store(on)
   const clock = mock.clock(on)
-  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'ghostty', TERM: 'xterm-ghostty', CMUX_SURFACE_ID: 'S1' })
+  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'ghostty', TERM: 'xterm-ghostty', CMUX_SURFACE_ID: 'S1', GHOSTTY_RESOURCES_DIR: '/r' })
   on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
   let saved = 'system\n'
   const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
@@ -236,7 +237,15 @@ test('with the theme on auto, cmux draws as its appearance is', async ($, on) =>
     return next(e)
   })
   let cmuxJson: string | null = null
-  on('fs.read', async ($: any, e: any, next: any) => (e.path === '/h/.config/cmux/cmux.json' ? (cmuxJson === null ? ({ deny: 'no such file' } as any) : { value: cmuxJson }) : next(e)))
+  let cmuxConfig: string | null = null
+  const files: Record<string, string> = { '/r/themes/Paper': 'background = #fafafa\n', '/r/themes/Ink': 'background = #101010\n' }
+  on('fs.read', async ($: any, e: any, next: any) => {
+    if (e.path === '/h/.config/cmux/cmux.json') return cmuxJson === null ? ({ deny: 'no such file' } as any) : { value: cmuxJson }
+    if (e.path === '/h/Library/Application Support/com.cmuxterm.app/config.ghostty') return cmuxConfig === null ? ({ deny: 'no such file' } as any) : { value: cmuxConfig }
+    if (e.path in files) return { value: files[e.path] }
+    if (e.path.startsWith('/h/') || e.path.startsWith('/r/')) return { deny: 'no such file' } as any
+    return next(e)
+  })
   const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(ran.text).toContain('mode light (auto, from cmux: adaptive default theme, appearance system)')
   saved = 'dark\n'
@@ -246,6 +255,18 @@ test('with the theme on auto, cmux draws as its appearance is', async ($, on) =>
   cmuxJson = '{\n  // off\n  "terminal": { "adaptiveDefaultTheme": false, },\n}'
   await clock.advance(3000)
   expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode dark (auto, from Ghostty: default background)')
+  // The cmux themes picker writes cmux's own config: one theme, then a
+  // light:dark pair that follows cmux's appearance (system: the OS, light).
+  cmuxJson = null
+  cmuxConfig = '# cmux themes start\ntheme = Paper\n# cmux themes end\n'
+  await clock.advance(3000)
+  expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode light (auto, from cmux: theme Paper background)')
+  cmuxConfig = '# cmux themes start\ntheme = light:Ink,dark:Paper\n# cmux themes end\n'
+  await clock.advance(3000)
+  expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode dark (auto, from cmux: theme Ink background)')
+  saved = 'dark\n'
+  await clock.advance(3000)
+  expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode light (auto, from cmux: theme Paper background)')
 })
 
 // iTerm2 whose TERM_PROGRAM did not come through: ITERM_PROFILE says iTerm2.

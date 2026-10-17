@@ -9,10 +9,10 @@ import { S } from './state'
 import { beginEpoch } from './epoch'
 import { luminanceOf, modeOfColorFgBg, modeOfGnome, modeOfLuminance, modeOfMacAppearance, parseOsc11, resolveMode, type HostMode } from './mode'
 import {
-  cmuxAppearanceOf, cmuxSettingsOf, ghosttyBackgroundOf, ghosttyFontOf, ghosttyHasColors, ghosttyThemePaths, ghosttyThemesOf,
+  cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, ghosttyBackgroundOf, ghosttyFontOf, ghosttyHasColors, ghosttyThemePaths, ghosttyThemesOf,
   ghosttyValueOf, hexColorOf, itermAppearanceOf, itermFontOf, itermModeOf, jsoncOf, kittyAutoFileOf, kittyBackgroundOf,
   kittyConfigDirsOf, kittyEntriesOf, kittyFontOf, kittySchemeOfGnome, kittyValueOf, parseFontSpec, rioBackgroundOf,
-  rioConfigDirOf, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf, type KittyEntries,
+  rioConfigDirOf, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf, type CmuxAppearance, type KittyEntries,
 } from './terminals'
 import { firstLine } from './markdown'
 
@@ -180,23 +180,27 @@ export async function probeOsc11($: EngineInterface): Promise<{ reply: string } 
   return got && got.exitCode === 0 ? { reply: got.stdout } : null
 }
 
-// The background of Ghostty's config. A `light:A,dark:B` theme follows the OS.
+// The background of Ghostty's config. A `light:A,dark:B` theme follows the OS
+// (in cmux, cmux's appearance). In cmux, cmux's own config is read as well.
 async function readGhosttyMode($: EngineInterface): Promise<HostMode | null> {
   if (!/ghostty/i.test(S.termProgram + S.termName)) return null
   const got = await $.process.run(['sh', '-c', GHOSTTY_SH], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
   if (!got || got.exitCode !== 0) return null
-  if (S.isCmux && !ghosttyHasColors(got.stdout)) {
+  const home = (await $.env.get('HOME')) ?? ''
+  const own = S.isCmux ? ((await readText($, cmuxGhosttyConfigPath(home))) ?? '') : ''
+  const config = cmuxConfigOf(got.stdout, own)
+  if (S.isCmux && !ghosttyHasColors(config)) {
     const adaptive = await readCmuxMode($).catch(() => null)
     if (adaptive) return adaptive
   }
-  const pair = ghosttyThemesOf(ghosttyValueOf(got.stdout, 'theme'))
+  const pair = ghosttyThemesOf(ghosttyValueOf(config, 'theme'))
   const themeBg: { light?: string; dark?: string } = {}
   let appearance: IuiTheme | null = null
   if (pair) {
-    appearance = (await readOsMode($).catch(() => null))?.mode ?? null
+    appearance = S.isCmux ? ((await readCmuxAppearance($).catch(() => null))?.mode ?? null) : ((await readOsMode($).catch(() => null))?.mode ?? null)
     const where = {
       xdgConfig: (await $.env.get('XDG_CONFIG_HOME')) || undefined,
-      home: (await $.env.get('HOME')) ?? '',
+      home,
       resources: (await $.env.get('GHOSTTY_RESOURCES_DIR')) || undefined,
     }
     for (const mode of MODES) {
@@ -208,11 +212,11 @@ async function readGhosttyMode($: EngineInterface): Promise<HostMode | null> {
       }
     }
   }
-  const bg = hexColorOf(ghosttyBackgroundOf(got.stdout, appearance, themeBg) ?? '')
+  const bg = hexColorOf(ghosttyBackgroundOf(config, appearance, themeBg) ?? '')
   if (!bg) return null
-  const shown = ghosttyValueOf(got.stdout, 'background')
-  const detail = `${!shown ? 'default' : pair && appearance ? `theme ${pair[appearance]}` : 'config'} background`
-  return { mode: modeOfLuminance(luminanceOf(bg)), source: 'Ghostty', detail }
+  const shown = ghosttyValueOf(config, 'background')
+  const detail = `${pair && appearance ? `theme ${pair[appearance]}` : !shown ? 'default' : 'config'} background`
+  return { mode: modeOfLuminance(luminanceOf(bg)), source: ghosttyValueOf(own, 'theme') ? 'cmux' : 'Ghostty', detail }
 }
 
 // cmux with no colours in the Ghostty config: its adaptive default theme
@@ -222,14 +226,25 @@ async function readCmuxMode($: EngineInterface): Promise<HostMode | null> {
   const home = (await $.env.get('HOME')) ?? ''
   const settings = cmuxSettingsOf(jsoncOf((await readText($, `${home}/.config/cmux/cmux.json`)) ?? ''))
   if (settings.adaptive === false) return null
+  const seen = await readCmuxAppearance($, settings.appearance)
+  return seen ? { mode: seen.mode, source: 'cmux', detail: `adaptive default theme, appearance ${seen.appearance}` } : null
+}
+
+// cmux's appearance (cmux.json's, else the one saved in Settings) and the
+// mode it gives: the OS's when it is system. Null when that is not known.
+async function readCmuxAppearance($: EngineInterface, file?: CmuxAppearance): Promise<{ mode: IuiTheme; appearance: CmuxAppearance } | null> {
+  if (file === undefined) {
+    const home = (await $.env.get('HOME')) ?? ''
+    file = cmuxSettingsOf(jsoncOf((await readText($, `${home}/.config/cmux/cmux.json`)) ?? '')).appearance
+  }
   let saved = ''
-  if (!settings.appearance && S.hostOs === 'Darwin') {
+  if (!file && S.hostOs === 'Darwin') {
     const got = await $.process.run(['defaults', 'read', 'com.cmuxterm.app', 'appearanceMode'], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
     saved = got?.exitCode === 0 ? got.stdout : ''
   }
-  const appearance = cmuxAppearanceOf(settings.appearance, saved)
+  const appearance = cmuxAppearanceOf(file, saved)
   const mode = appearance === 'system' ? ((await readOsMode($).catch(() => null))?.mode ?? null) : appearance
-  return mode ? { mode, source: 'cmux', detail: `adaptive default theme, appearance ${appearance}` } : null
+  return mode ? { mode, appearance } : null
 }
 
 // Rio sets TERM_PROGRAM=rio, and TERM=rio when its terminfo is installed.

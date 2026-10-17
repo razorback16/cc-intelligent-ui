@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
-  cmuxAppearanceOf, cmuxSettingsOf, ghosttyHasColors, isItermIn, jsoncOf,
+  cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, ghosttyBackgroundOf, ghosttyHasColors, ghosttyThemesOf, ghosttyValueOf, isItermIn, jsoncOf,
   KITTY_DEFAULT_BG, kittyAutoFileOf, kittyBackgroundOf, kittyConfigDirsOf, kittyEntriesOf, kittyFontOf, kittyIncludePath, kittyLinesOf,
   kittySchemeOfGnome, kittyValueOf,
   RIO_DEFAULT_BG, RIO_DEFAULT_FONT, rioBackgroundOf, rioConfigDirOf, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf,
@@ -200,4 +200,25 @@ test('Ghostty colours of your own: a theme, background, foreground or palette', 
   expect(ghosttyHasColors('background = #ffffff\n')).toBe(true)
   expect(ghosttyHasColors('foreground = #000000\n')).toBe(true)
   expect(ghosttyHasColors('palette = 0=#000000\n')).toBe(true)
+})
+
+test("cmux's own Ghostty config: its theme wins; one theme name becomes a light:dark pair", () => {
+  expect(cmuxGhosttyConfigPath('/Users/me')).toBe('/Users/me/Library/Application Support/com.cmuxterm.app/config.ghostty')
+  const shown = 'font-family = Menlo\n'
+  expect(cmuxConfigOf(shown, '')).toBe(shown)
+  expect(cmuxConfigOf(shown, '  \n')).toBe(shown)
+  const block = (theme: string) => `# cmux themes start\ntheme = ${theme}\n# cmux themes end\n`
+  // A pair as written.
+  const pair = cmuxConfigOf(shown, block('light:Apple System Colors Light,dark:Dracula'))
+  expect(ghosttyThemesOf(ghosttyValueOf(pair, 'theme'))).toEqual({ light: 'Apple System Colors Light', dark: 'Dracula' })
+  expect(ghosttyHasColors(pair)).toBe(true)
+  // One name: both modes, so the background comes from the theme file.
+  const one = cmuxConfigOf(shown, block('Dracula'))
+  expect(ghosttyThemesOf(ghosttyValueOf(one, 'theme'))).toEqual({ light: 'Dracula', dark: 'Dracula' })
+  expect(ghosttyBackgroundOf(one, 'light', { light: '#282a36', dark: '#282a36' })).toBe('#282a36')
+  // Over the Ghostty config's theme.
+  const over = cmuxConfigOf('theme = Night\nbackground = #000000\n', block('light:A,dark:B'))
+  expect(ghosttyValueOf(over, 'theme')).toBe('light:A,dark:B')
+  // No theme there: the Ghostty config as shown, with its other values.
+  expect(ghosttyHasColors(cmuxConfigOf(shown, 'font-size = 13\n'))).toBe(false)
 })

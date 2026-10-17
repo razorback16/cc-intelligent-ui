@@ -391,6 +391,22 @@ export function cmuxAppearanceOf(file: CmuxAppearance | undefined, saved: string
   return file ?? (v === 'light' || v === 'dark' ? v : 'system')
 }
 
+// cmux's own Ghostty config: its themes picker (Settings > Themes, `cmux
+// themes`) writes `theme = …` there, and cmux loads it after the Ghostty
+// config files. `ghostty +show-config` does not read it.
+export const cmuxGhosttyConfigPath = (home: string) => `${home}/Library/Application Support/com.cmuxterm.app/config.ghostty`
+
+// The config cmux draws with: `ghostty +show-config`, then cmux's own config
+// (its values win, as the last value of a key does). One theme name there
+// becomes `light:X,dark:X`: +show-config did not merge its colours in, so
+// ghosttyBackgroundOf reads its background from the theme file.
+export function cmuxConfigOf(shown: string, own: string): string {
+  if (!own.trim()) return shown
+  const theme = ghosttyValueOf(own, 'theme')
+  if (!theme || ghosttyThemesOf(theme)) return `${shown}\n${own}`
+  return `${shown}\n${own}\ntheme = light:${theme},dark:${theme}`
+}
+
 // Whether `ghostty +show-config` shows colours of the user's own (a theme,
 // a background, a foreground or a palette). cmux then uses them; else its
 // adaptive default theme follows cmux's appearance.
