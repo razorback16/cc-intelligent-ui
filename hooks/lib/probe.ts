@@ -10,13 +10,15 @@ import { PROBED_KEPT } from './settings'
 import { clip, DRAWN_KEPT, drawnAnswers, keep, lastKey, results, type Job, type Result } from './state'
 import { fitBox } from './terminal'
 import { isSafePage, probePage } from './typst'
-import type { Drawn, DrawnPage, Item, TextBlock } from './copy'
+import { screenOf, type Drawn, type DrawnPage, type Item, type TextBlock } from './copy'
 
 // Notes the pages of `id` as drawn now, each at fitBox(page, room), as
 // drawPages draws it, with the Job of the key the row drew last (lastKey:
 // the result drawn is that key's). A redraw with the same pages at the same
-// boxes keeps its place, so `seq` is when it was first drawn so.
-export function noteDrawn(id: string, result: Result, room: number) {
+// boxes keeps its place, so `seq` is when it was first drawn so. `at`: the
+// rows above the pages in their message when the layout says (`top`), and
+// the rows drawn under them besides a Typst error line (`after`); see Place.
+export function noteDrawn(id: string, result: Result, room: number, at: { top?: number; after?: number } = {}) {
   const pages: DrawnPage[] = result.pages.map(p => ({ file: p.file, width: p.width, height: p.height, ...fitBox(p, room) }))
   const dir = result.pages[0]?.file.replace(/\/[^/]*$/, '') ?? ''
   const was = drawnAnswers.get(id)
@@ -24,18 +26,29 @@ export function noteDrawn(id: string, result: Result, room: number) {
     const now = pages[i]
     return !!now && p.file === now.file && p.columns === now.columns && p.rows === now.rows
   }
-  if (was && was.dir === dir && was.pages.length === pages.length && was.pages.every(same)) return
+  const place = { ...(at.top !== undefined ? { top: at.top } : {}), below: (result.note ? 1 : 0) + (at.after ?? 0) }
+  if (was && was.dir === dir && was.pages.length === pages.length && was.pages.every(same)) {
+    was.place = place
+    return
+  }
   const last = lastKey.get(id)
   const job = last && `${last.job.env.cache}/${last.key}` === dir ? last.job : undefined
-  keep(drawnAnswers, id, { id, seq: ++clip.seq, dir, pages, ...(job ? { job } : {}) }, DRAWN_KEPT)
+  keep(drawnAnswers, id, { id, seq: ++clip.seq, dir, pages, place, ...(job ? { job } : {}) }, DRAWN_KEPT)
 }
 
 // A memo hit (the same drawing as before): noted again only when it went
 // past DRAWN_KEPT, from the result the row last drew (lastKey).
-export function noteDrawnAgain(id: string, room: number) {
+export function noteDrawnAgain(id: string, room: number, at: { top?: number; after?: number } = {}) {
   if (drawnAnswers.has(id)) return
   const result = results.get(lastKey.get(id)?.key ?? '')
-  if (result && result !== 'failed') noteDrawn(id, result, room)
+  if (result && result !== 'failed') noteDrawn(id, result, room, at)
+}
+
+// The rows of its message on screen (e.props.onScreen) of a drawing noted,
+// at each draw of its row: no redraw, nothing kept changes.
+export function noteOnScreen(id: string, onScreen: unknown) {
+  const d = drawnAnswers.get(id)
+  if (d) d.onScreen = screenOf(onScreen)
 }
 
 // ---- Positions ----------------------------------------------------------------

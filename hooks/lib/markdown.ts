@@ -1,6 +1,6 @@
 // Markdown as the mod reads it: blocks, fences, the segments an answer is
 // cut into, the images it names, and a plain text of it for an Image's alt.
-import { ALT_CHARS, SEGMENT_ROWS } from './settings'
+import { ALT_CHARS, DRAWING_ROWS, SEGMENT_ROWS } from './settings'
 
 export const FENCE = /^( {0,3})(`{3,}|~{3,})\s*([^\s`]*)/
 export const isTypstInfo = (info: string) => /^(typst|typ)$/i.test(info)
@@ -60,17 +60,19 @@ export function blocksOf(md: string): Block[] {
 
 // A rough count of the rows a block takes once drawn `columns` wide, its
 // text at `size` percent (/iui size): fewer characters a row, and
-// taller lines.
-export function rowsOfBlock(block: Block, columns: number, size = 100): number {
+// taller lines. A typst fence is its drawing, not its source: `roomRows`
+// (the room height in terminal rows; it does not follow `size`) and its
+// margins (1.2em above and below: about 2 rows, at `size`).
+export function rowsOfBlock(block: Block, columns: number, size = 100, roomRows = DRAWING_ROWS): number {
   const isCode = !!block.fence
   const scale = size / 100
+  if (block.fence && isTypstInfo(block.fence.info)) return roomRows + 2 * scale
   const perRow = (columns / scale) * (isCode ? 1.0 : 1.15)
   let rows = 1
   for (const line of block.lines) {
     rows += Math.ceil(Math.max(1, line.length) / perRow) * (isCode ? 1.1 : 1.3) * scale
     if (/^#{1,2}\s/.test(line)) rows += 1.5 * scale
   }
-  if (block.fence && isTypstInfo(block.fence.info)) rows += 20
   return rows
 }
 
@@ -82,8 +84,9 @@ const FOOTNOTE_DEF = /^ {0,3}\[\^[^\]]+\]:/
 // fences of the same language; a typst fence always stays whole. A block that
 // starts indented (a list item's continuation) never starts a segment. Text
 // with footnotes stays one segment; link definitions go into every segment.
-// `size`: the text size percent the rows are counted at.
-export function splitSegments(md: string, columns: number, budget = SEGMENT_ROWS, size = 100): string[] {
+// `size`: the text size percent the rows are counted at; `roomRows`: the
+// room height of a drawing in terminal rows.
+export function splitSegments(md: string, columns: number, budget = SEGMENT_ROWS, size = 100, roomRows = DRAWING_ROWS): string[] {
   const blocks = blocksOf(md)
   if (!blocks.length) return []
   const outside = blocks.filter(b => !b.fence).flatMap(b => b.lines)
@@ -105,7 +108,7 @@ export function splitSegments(md: string, columns: number, budget = SEGMENT_ROWS
   const segments: Block[][] = [[]]
   let used = 0
   for (const piece of pieces) {
-    const need = rowsOfBlock(piece, columns, size)
+    const need = rowsOfBlock(piece, columns, size, roomRows)
     const canCut = !/^\s/.test(piece.lines[0] ?? '')
     if (used + need > budget && segments.at(-1)!.length && canCut) {
       segments.push([])
@@ -121,9 +124,9 @@ export function splitSegments(md: string, columns: number, budget = SEGMENT_ROWS
 
 // A segment whose page came out taller than an Image can be, cut in two by
 // the same rules (at half its rows); one piece when it can not be cut.
-export function splitInTwo(md: string, columns: number, size = 100): string[] {
-  const rows = blocksOf(md).reduce((n, block) => n + rowsOfBlock(block, columns, size), 0)
-  return splitSegments(md, columns, Math.max(1, Math.ceil(rows / 2)), size)
+export function splitInTwo(md: string, columns: number, size = 100, roomRows = DRAWING_ROWS): string[] {
+  const rows = blocksOf(md).reduce((n, block) => n + rowsOfBlock(block, columns, size, roomRows), 0)
+  return splitSegments(md, columns, Math.max(1, Math.ceil(rows / 2)), size, roomRows)
 }
 
 // Whether a text needs the room height (it is then in its key): it has a

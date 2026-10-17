@@ -1,10 +1,12 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import {
-  codePointsOf, commandSuggestions, decodeSelection, DIACRITICS, hasPlaceholders, isDrawnIn, joinSegments, parseCommand, pickPages, placeholderCell,
-  isSafePage, positionsOf, textOfRun, WATCH_PL, type Drawn, type TextBlock, type Item, type Mark,
+  codePointsOf, commandSuggestions, decodeSelection, DIACRITICS, hasPlaceholders, isDrawnIn, joinSegments, pageTopsOf, parseCommand, pickPages,
+  placeholderCell, isSafePage, positionsOf, screenOf, textOfRun, WATCH_PL, type Drawn, type TextBlock, type Item, type Mark, type OnScreen,
+  type Place,
 } from '../hooks/register'
 import { WATCH_RESTART_MS } from '../hooks/lib/frame'
+import { rowsAfter, type Under } from '../hooks/lib/pictures'
 import { READING_TOAST_MS } from '../hooks/lib/settings'
 import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI } from './copy-fixture'
 
@@ -145,6 +147,89 @@ test('a page drawn smaller than it was compiled for fits by its drawn box', () =
   expect(pickPages(decodeSelection(cells(7, 0, 48)), [small])).toEqual([{ id: 's', page: 0 }])
   expect(pickPages(decodeSelection(cells(2, 0, 60)), [small])).toEqual([null])
   expect(pickPages(decodeSelection(cells(9, 0, 10)), [small])).toEqual([null])
+})
+
+// ---- Which page: the rows on screen ----------------------------------------------
+
+// An answer under its top margin (1 row), with its message's rows on screen.
+const seen = (d: Drawn, onScreen: OnScreen | null | undefined, place: Place = { top: 1, below: 0 }): Drawn => ({ ...d, place, onScreen })
+// The answer of the bug: 2 pages of 40 and 42 rows at 212 columns (83 rows
+// with the margin); rows 5 and 6 fit both pages.
+const BUG = drawn('ans', 1, [40, 42], 212)
+const ROWS_5_6 = decodeSelection([cells(5, 0, 50), cells(6, 0, 50)].join('\n'))
+
+test('the rows on screen say which page a run is: the one of the two that is on screen', () => {
+  expect(pageTopsOf(seen(BUG, { first: 41, last: 82, of: 83 }))).toEqual([1, 41])
+  // Page 2 on screen (its rows 5 and 6 are message rows 46 and 47).
+  expect(pickPages(ROWS_5_6, [seen(BUG, { first: 41, last: 82, of: 83 })])).toEqual([{ id: 'ans', page: 1 }])
+  expect(pickPages(ROWS_5_6, [seen(BUG, { first: 30, last: 70, of: 83 })])).toEqual([{ id: 'ans', page: 1 }])
+  // Page 1 on screen.
+  expect(pickPages(ROWS_5_6, [seen(BUG, { first: 0, last: 40, of: 83 })])).toEqual([{ id: 'ans', page: 0 }])
+  // One selected row on screen is enough.
+  expect(pickPages(ROWS_5_6, [seen(BUG, { first: 47, last: 82, of: 83 })])).toEqual([{ id: 'ans', page: 1 }])
+  // The root's margin outside the rows counted: the pages from row 0.
+  expect(pageTopsOf(seen(BUG, { first: 40, last: 81, of: 82 }))).toEqual([0, 40])
+  expect(pickPages(ROWS_5_6, [seen(BUG, { first: 40, last: 81, of: 82 })])).toEqual([{ id: 'ans', page: 1 }])
+  // A Typst error line under the pages, and a plan or a sent file with the
+  // engine's row above (no top): the top from the bottom.
+  expect(pageTopsOf(seen(BUG, { first: 0, last: 9, of: 84 }, { top: 1, below: 1 }))).toEqual([1, 41])
+  expect(pageTopsOf(seen(BUG, { first: 0, last: 9, of: 90 }, { below: 0 }))).toEqual([8, 48])
+})
+
+test('with no rows on screen known, or of another layout, a run goes to the first page that fits, as before', () => {
+  expect(pickPages(ROWS_5_6, [BUG])).toEqual([{ id: 'ans', page: 0 }])
+  expect(pickPages(ROWS_5_6, [seen(BUG, undefined)])).toEqual([{ id: 'ans', page: 0 }])
+  // `of` of the row drawn as text before (too short or too tall for these pages).
+  for (const onScreen of [{ first: 10, last: 19, of: 20 }, { first: 41, last: 89, of: 90 }]) {
+    expect(pageTopsOf(seen(BUG, onScreen))).toBeUndefined()
+    expect(pickPages(ROWS_5_6, [seen(BUG, onScreen)])).toEqual([{ id: 'ans', page: 0 }])
+  }
+  // Rows on screen out of date (no page on screen fits): as before.
+  expect(pickPages(decodeSelection(cells(41, 0, 50)), [seen(BUG, { first: 0, last: 20, of: 83 })])).toEqual([{ id: 'ans', page: 1 }])
+  expect(pickPages(ROWS_5_6, [seen(BUG, null)])).toEqual([{ id: 'ans', page: 0 }])
+  expect(screenOf({ first: 1, last: 2, of: 3 })).toEqual({ first: 1, last: 2, of: 3 })
+  expect(screenOf(null)).toBeNull()
+  expect(screenOf(undefined)).toBeUndefined()
+  expect(screenOf({ first: 1 })).toBeUndefined()
+})
+
+test('a chain over the page break still goes to the two pages, with either part on screen', () => {
+  const chain = decodeSelection([cells(38, 0, 50), cells(39, 0, 50), cells(0, 0, 50), cells(1, 0, 50)].join('\n'))
+  const pages = [{ id: 'ans', page: 0 }, { id: 'ans', page: 1 }]
+  expect(pickPages(chain, [seen(BUG, { first: 20, last: 60, of: 83 })])).toEqual(pages)
+  expect(pickPages(chain, [seen(BUG, { first: 41, last: 82, of: 83 })])).toEqual(pages)
+  expect(pickPages(chain, [seen(BUG, { first: 0, last: 39, of: 83 })])).toEqual(pages)
+})
+
+test('two placements on screen (pages shorter than the viewport): the first is taken', () => {
+  const short = drawn('ans', 1, [10, 12])
+  expect(pickPages(decodeSelection([cells(2, 0, 50), cells(3, 0, 50)].join('\n')), [seen(short, { first: 0, last: 22, of: 23 })])).toEqual([
+    { id: 'ans', page: 0 },
+  ])
+})
+
+test('among placements on screen, the selection row first, then the newest', () => {
+  const page2 = { first: 41, last: 82, of: 83 }
+  const old = seen(drawn('old', 1, [40, 42], 212), page2)
+  const now = seen(drawn('new', 2, [40, 42], 212), page2)
+  expect(pickPages(ROWS_5_6, [old, now])).toEqual([{ id: 'new', page: 1 }])
+  expect(pickPages(ROWS_5_6, [old, now], 'old')).toEqual([{ id: 'old', page: 1 }])
+  // The newest off screen: the older one on screen.
+  expect(pickPages(ROWS_5_6, [old, seen(now, null)])).toEqual([{ id: 'old', page: 1 }])
+  // The newest with no rows on screen known keeps its first page, as before.
+  expect(pickPages(ROWS_5_6, [old, seen(now, undefined)])).toEqual([{ id: 'new', page: 0 }])
+  // The selection's row wins even off screen (its rows on screen out of date).
+  expect(pickPages(ROWS_5_6, [old, seen(now, null)], 'new')).toEqual([{ id: 'new', page: 0 }])
+})
+
+test("a sent file's pages have the rows of the pictures and files after it under them", () => {
+  const picture = { source: { file: '/p.png' }, columns: 20, rows: 7, alt: '' } as Under
+  const result = { pages: [{ file: '/a-1.png', width: 1600, height: 640, alt: '', columns: 100, rows: 20 }], bulletRow: 0, note: 'boom' }
+  const pages = { id: 'file:t:a.md', drawing: { kind: 'pages', result } } as Under
+  const blank = { id: 'file:t:b.md', drawing: { kind: 'blank' } } as Under
+  // At 50 columns the page draws 10 rows, and its error line 1.
+  expect(rowsAfter([pages, picture, blank, pages], 0, 50)).toBe(7 + 10 + 1)
+  expect(rowsAfter([pages, picture], 1, 50)).toBe(0)
 })
 
 // ---- A real probe -----------------------------------------------------------
@@ -427,6 +512,35 @@ test('a copy over two pages of a long answer probes those two pages only', async
   expect(w.queries.map(q => q.page)).toEqual(['1', '2'])
   expect(w.copies.length).toBe(1)
   expect(w.copies[0]).toContain('Copy test')
+})
+
+test('a copy goes to the page on screen: the rows on screen of the last draw (a memo hit) reach the pick and dump', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const long = Array.from({ length: 240 }, (_, i) => `Paragraph ${i} with a few words in it.`).join('\n\n')
+  const ui = await drawAnswer($, w, 'ans-1', long)
+  const pages = (JSON.parse(w.files.get([...w.files.keys()].find(k => k.endsWith('/doc.json'))!)!) as { segments: string[] }).segments.length
+  expect(pages).toBeGreaterThan(2)
+  // 16 rows a page under the top margin: page 2 is rows 17 to 32.
+  const of = 1 + 16 * pages
+  const compiles = w.compiles.length
+  await ui.redraw({ ...props(long), onScreen: { first: 17, last: 32, of } })
+  await w.clock.settle()
+  expect(w.compiles.length).toBe(compiles)
+  const rows = [cells(2, 0, 97), cells(3, 0, 97)].join('\n')
+  w.copy(rows)
+  await w.clock.settle()
+  expect(w.queries.map(q => q.page)).toEqual(['2'])
+  expect(w.copies.length).toBe(1)
+  const dumped = await $.command.run({ command: 'iui', args: 'dump' } as any)
+  expect(dumped.text).toContain(`-> answer ans-1 page 1 (rows 17-32 of ${of} on screen, page top 17)`)
+  // Scrolled up to page 1: the same rows are page 1's.
+  await ui.redraw({ ...props(long), onScreen: { first: 0, last: 16, of } })
+  await w.clock.settle()
+  w.copy(rows)
+  await w.clock.settle()
+  expect(w.queries.map(q => q.page)).toEqual(['2', '1'])
+  expect(w.copies.length).toBe(2)
 })
 
 test('positions are kept in memory: copies of the same page share one probe run, and a later copy runs none', async ($, on) => {

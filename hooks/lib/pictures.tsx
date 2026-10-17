@@ -250,6 +250,18 @@ export async function sentOf(
 const boxOf = (frame: Frame, inline: boolean, height: Height): PixelBox =>
   convertBox(pictureColumns(frame, inline), pictureRowsFor(frame.rows, height), frame.cell)
 
+// The rows underRow draws after `under[i]`: a picture its rows, a Markdown
+// file its pages at their drawn box (fitBox in `room`, as drawPages) and a
+// Typst error line, a blank none.
+export function rowsAfter(under: readonly Under[], i: number, room: number): number {
+  return under.slice(i + 1).reduce((sum, u) => {
+    if ('source' in u) return sum + u.rows
+    if (u.drawing.kind !== 'pages') return sum
+    const { pages, note } = u.drawing.result
+    return sum + pages.reduce((n, p) => n + fitBox(p, room).rows, 0) + (note ? 1 : 0)
+  }, 0)
+}
+
 // The engine's row, then the pictures under it.
 export function underRow($: EngineInterface, e: RowInput, row: RenderElement, under: readonly Under[]) {
   const { Box, Image } = $.ui.resolve(e)

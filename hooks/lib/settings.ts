@@ -41,6 +41,9 @@ export const BLANK_RESUMED_MS = 1000
 export const MAX_RUNNING = 2
 // A segment is cut to be about this many rows; an Image is 255 rows at most.
 export const SEGMENT_ROWS = 160
+// The rows a live Typst block is counted as when its room is not known: the
+// largest room of the default height (PICTURE_MAX_ROWS).
+export const DRAWING_ROWS = 24
 export const MAX_IMAGE_ROWS = 255
 // The cell in device pixels when the tty reports none (tmux, a relay): an
 // 8 x 16 point cell at Retina scale 2. A reported cell outside 4 to 64 px

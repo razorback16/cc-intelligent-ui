@@ -8,9 +8,10 @@ import {
   GHOSTTY_DEFAULT_BG, ghosttyBackgroundOf, ghosttyThemePaths, ghosttyThemesOf, ghosttyValueOf, hexColorOf,
   modeLine, modeOfColorFgBg, modeOfGnome, modeOfMacAppearance, resolveMode, settingOf,
   BASE_THEME, DEFAULT_THEME, chooseTheme, isSyntaxPath, isThemeName, measureCall, pickThemes, renderKey, themeEntry, themeFiles, themeListing,
-  needsRoom, nextJob, pageRowsOf, resultOf, roomInputs, splitInTwo,
+  needsRoom, nextJob, pageRowsOf, resultOf, roomInputs, rowsOfBlock, splitInTwo,
   composeFrame, fitBox, pictureColumns, roomColumns, scaledBulletRow,
 } from '../hooks/register'
+import { DRAWING_ROWS } from '../hooks/lib/settings'
 import { wrapPid } from '../hooks/lib/typst'
 
 const para = (i: number) => `Paragraph ${i} ${'word '.repeat(40)}`.trim()
@@ -68,6 +69,32 @@ test('a typst fence with blank lines inside stays whole', () => {
   const md = `${Array.from({ length: 60 }, (_, i) => para(i)).join('\n\n')}\n\n${body}\n\n${para(99)}`
   const segments = splitSegments(md, 80)
   expect(segments.some(s => s.includes(body))).toBe(true)
+})
+
+test('a typst fence counts as its room rows, not its source lines', () => {
+  const md = `Before\n\n${fence('typst', 200)}\n\nAfter`
+  expect(splitSegments(md, 80, undefined, 100, 24)).toEqual([md])
+  // Four drawings with text between them: one page, as they are drawn.
+  const four = Array.from({ length: 4 }, (_, i) => `${para(i)}\n\n${fence('typst', 60)}`).join('\n\n')
+  expect(splitSegments(four, 80, undefined, 100, 24)).toEqual([four])
+})
+
+test('the room rows given are used for a typst fence', () => {
+  const block = blocksOf(fence('typst', 200))[0]!
+  expect(rowsOfBlock(block, 80, 100, 40)).toBe(42)
+  // The margins follow the text size; the drawing does not.
+  expect(rowsOfBlock(block, 80, 200, 40)).toBe(44)
+  const md = `${fence('typst', 5)}\n\n${fence('typst', 5)}`
+  expect(splitSegments(md, 80, undefined, 100, 100).length).toBe(2)
+  expect(splitSegments(md, 80, undefined, 100, 24).length).toBe(1)
+})
+
+test('a typst fence without a room counts as DRAWING_ROWS', () => {
+  const block = blocksOf(fence('typst', 200))[0]!
+  expect(rowsOfBlock(block, 80)).toBe(DRAWING_ROWS + 2)
+  const md = `Before\n\n${fence('typst', 200)}\n\nAfter`
+  expect(splitSegments(md, 80)).toEqual(splitSegments(md, 80, undefined, 100, DRAWING_ROWS))
+  expect(splitInTwo(md, 80)).toEqual(splitInTwo(md, 80, 100, DRAWING_ROWS))
 })
 
 test('an indented continuation never starts a segment', () => {

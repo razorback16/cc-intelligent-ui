@@ -21,7 +21,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderViewport } from 'claude-code'
 
 import {
-  DEFAULT_THEME, heightText, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, READING_TOAST_MS, RESULTS_KEPT, TYPST_PROMPT, widthText,
+  DEFAULT_THEME, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, READING_TOAST_MS, RESULTS_KEPT, TYPST_PROMPT,
+  widthText,
 } from './lib/settings'
 import { clip, drawnAnswers, editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env } from './lib/state'
 import { beginEpoch } from './lib/epoch'
@@ -33,14 +34,14 @@ import { pollHost, PROBE_RUNS, probeOsc11, showMode, USE_OSC11, watchHost } from
 import { measureFonts } from './lib/typst'
 import { drawPages } from './lib/draw'
 import { finalizeAll } from './lib/stream'
-import { isProbed, noteDrawn, noteDrawnAgain, wordsOf } from './lib/probe'
-import { codePointsOf, decodeSelection, hasPlaceholders, joinSegments, pickPages, textOfRun, type Pick, type Segment } from './lib/copy'
+import { isProbed, noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf } from './lib/probe'
+import { codePointsOf, decodeSelection, hasPlaceholders, joinSegments, pageTopsOf, pickPages, textOfRun, type Pick, type Segment } from './lib/copy'
 import { pagesOf, type Drawing } from './lib/answer'
 import { setUp } from './lib/env'
 import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/frame'
 import { roomColumns } from './lib/terminal'
 import { onScreenOf, pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
-import { pasteDir, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
+import { pasteDir, rowsAfter, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
 import {
   currentPlan, decidePlan, decisionOf, drawAskLine, drawPlanResult, drawPlanUse, isPlanQuestion, planFileOf, planInputOf, planOf,
   planShownOf, scheduleClear, type PlanVerdict,
@@ -368,6 +369,17 @@ async function grab($: EngineInterface): Promise<string> {
     : `Intelligent UI: the copy failed: ${copied.reason}.`
 }
 
+// For dump: the rows of a pick's message on screen and its page's top row
+// there (pageTopsOf), which chose the page.
+function screenText(pick: { id: string; page: number }): string {
+  const d = drawnAnswers.get(pick.id)
+  if (!d || d.onScreen === undefined) return ' (rows on screen not known)'
+  if (d.onScreen === null) return ' (off screen)'
+  const tops = pageTopsOf(d)
+  const top = tops ? `page top ${tops[pick.page]}` : 'page tops not known'
+  return ` (rows ${d.onScreen.first}-${d.onScreen.last} of ${d.onScreen.of} on screen, ${top})`
+}
+
 // /iui dump: the last placeholder text seen, as code points, how it was
 // read, and the same in full in <cache>/copy-debug.json. `on`: Intelligent
 // UI is on.
@@ -380,7 +392,7 @@ async function dump($: EngineInterface, on: boolean): Promise<string> {
       if (seg.kind === 'text') return `text: ${JSON.stringify(seg.text.slice(0, 60))}`
       const rows = seg.lines.map(l => `${l.row}:${l.colStart}-${l.colEnd}`).join(' ')
       const pick = read.picks[i]
-      return `run rows ${rows} -> ${pick ? `answer ${pick.id} page ${pick.page}` : 'no page fits'}`
+      return `run rows ${rows} -> ${pick ? `answer ${pick.id} page ${pick.page}${screenText(pick)}` : 'no page fits'}`
     })
     .join('\n')
   const cache = S.env?.cache ?? ''
@@ -620,15 +632,24 @@ export const register: Register = on => {
     const onScreen = onScreenOf(e.props.onScreen)
     const k = { text: e.props.text, extra: bullet ? 'bullet' : '', stamp: stampOf(ready, e.viewport), onScreen }
     const kept = memoOf(answers, e.requestId, k)
+    // Its pages are under the top margin (drawPages); the rows on screen at
+    // each draw, a memo hit too.
+    const at = { top: MARGIN_TOP }
     if (kept) {
-      noteCopy($, () => noteDrawnAgain(e.requestId, roomColumns(e.viewport)))
+      noteCopy($, () => {
+        noteDrawnAgain(e.requestId, roomColumns(e.viewport), at)
+        noteOnScreen(e.requestId, e.props.onScreen)
+      })
       return kept
     }
     const drawing = await pagesOf($, { id: e.requestId, text: e.props.text, frame: frameFor(e.viewport), env: ready.env, canStream: true, onScreen })
     if (drawing.kind === 'pages') {
       const tree = drawPages($, e, drawing.result, drawing.bytes, { bullet })
       const { result } = drawing
-      noteCopy($, () => noteDrawn(e.requestId, result, roomColumns(e.viewport)))
+      noteCopy($, () => {
+        noteDrawn(e.requestId, result, roomColumns(e.viewport), at)
+        noteOnScreen(e.requestId, e.props.onScreen)
+      })
       memoSet(answers, e.requestId, k, tree)
       return tree
     }
@@ -656,18 +677,31 @@ export const register: Register = on => {
         const k = { text: files.map(f => `${f.kind}:${f.path}`).join('\n'), extra: '', stamp: stampOf(ready, e.viewport), onScreen }
         // Its jobs: one per Markdown file (pagesOf's id `file:<id>:<path>`).
         const kept = memoOf(unders, id, k, requestId => requestId.startsWith(`file:${id}:`))
+        // Each Markdown file's pages with the rows drawn after them (rowsAfter)
+        // and the row's rows on screen, at each draw.
+        const room = roomColumns(e.viewport)
         if (kept) {
           under = kept
-          for (const u of under) if ('drawing' in u) noteCopy($, () => noteDrawnAgain(u.id, roomColumns(e.viewport)))
+          kept.forEach((u, i) => {
+            if (!('drawing' in u)) return
+            noteCopy($, () => {
+              noteDrawnAgain(u.id, room, { after: rowsAfter(kept, i, room) })
+              noteOnScreen(u.id, e.props.onScreen)
+            })
+          })
         } else {
           under = await sentOf($, e, { ready: ready.env, markdown, files, id, at: { done: ready.done, row: e.requestId } })
           if (under.length && under.every(u => !('drawing' in u) || u.drawing.kind === 'pages')) memoSet(unders, id, k, under)
           else unders.delete(id)
-          for (const u of under) {
-            if (!('drawing' in u) || u.drawing.kind !== 'pages') continue
+          const drawn = under
+          drawn.forEach((u, i) => {
+            if (!('drawing' in u) || u.drawing.kind !== 'pages') return
             const { result } = u.drawing
-            noteCopy($, () => noteDrawn(u.id, result, roomColumns(e.viewport)))
-          }
+            noteCopy($, () => {
+              noteDrawn(u.id, result, room, { after: rowsAfter(drawn, i, room) })
+              noteOnScreen(u.id, e.props.onScreen)
+            })
+          })
         }
       }
     } catch {
@@ -735,10 +769,15 @@ export const register: Register = on => {
       if (!ready) return row
       const drawing = await planDrawing($, e, e.props.tool_use_id, plan, ready)
       // Its pages can be copied as an answer's, by the call's id (the row's
-      // requestId can be an answer's own).
+      // requestId can be an answer's own). The engine's row is above them:
+      // their place is read from the bottom (pageTopsOf).
       if (drawing.kind === 'pages') {
         const { result } = drawing
-        noteCopy($, () => noteDrawn(`plan:${e.props.tool_use_id}`, result, roomColumns(e.viewport)))
+        const id = `plan:${e.props.tool_use_id}`
+        noteCopy($, () => {
+          noteDrawn(id, result, roomColumns(e.viewport))
+          noteOnScreen(id, e.props.onScreen)
+        })
       }
       return drawPlanUse($, e, row, drawing)
     } catch {

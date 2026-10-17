@@ -388,7 +388,11 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
   }
   if (signal?.aborted) return 'cancelled'
 
-  let segments = splitSegments(job.text, job.columns, job.env.inline ? inlineBudget(job.cell) : SEGMENT_ROWS, job.size)
+  const { rowPt } = sizing(job.columns, job.cell, fontFit(job.env.metrics, job.size).columnPt)
+  // The room height of a drawing in rows (less the pt rounding); unknown
+  // without a room (the default applies).
+  const roomRows = job.room ? Math.ceil(job.room.heightPt / rowPt - 0.01) : undefined
+  let segments = splitSegments(job.text, job.columns, job.env.inline ? inlineBudget(job.cell) : SEGMENT_ROWS, job.size, roomRows)
   const base = job.base ?? job.env.cwd
   const images = await existingImages($, segments, base)
   await $.fs.write(`${dir}/doc.json`, JSON.stringify({ base, segments, images }))
@@ -419,7 +423,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
   // segment is cut in two and the whole text compiled once more. If that
   // fails, the first pages stay (drawn at most MAX_IMAGE_ROWS tall).
   if (pages.some(p => p.rows > MAX_IMAGE_ROWS)) {
-    const cut = segments.flatMap((seg, i) => (pages![i]!.rows > MAX_IMAGE_ROWS ? splitInTwo(seg, job.columns, job.size) : [seg]))
+    const cut = segments.flatMap((seg, i) => (pages![i]!.rows > MAX_IMAGE_ROWS ? splitInTwo(seg, job.columns, job.size, roomRows) : [seg]))
     if (cut.length > segments.length) {
       if (signal?.aborted) return 'cancelled'
       await $.fs.write(`${dir}/doc.json`, JSON.stringify({ base, segments: cut, images }))
@@ -433,7 +437,6 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     }
     pages = pages.map(p => ({ ...p, rows: Math.min(MAX_IMAGE_ROWS, p.rows) }))
   }
-  const { rowPt } = sizing(job.columns, job.cell, fontFit(job.env.metrics, job.size).columnPt)
   const { bulletRow } = alignFirstLine(firstLineOf(segments[0] ?? ''), rowPt)
   const result: Result = { pages, bulletRow, ...(note ? { note } : {}) }
   await $.fs.write(`${dir}/pages.json`, JSON.stringify(result))

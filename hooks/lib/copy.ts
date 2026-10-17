@@ -216,11 +216,47 @@ export function positionsOf(marks: readonly Mark[], ppi: number): Positions {
 // drawn (fitBox: an old page in an open epoch draws smaller than it was
 // compiled for). The placeholders count the cells of that box.
 export type DrawnPage = { file: string; width: number; height: number; columns: number; rows: number }
+// The rows of a drawing's transcript message on screen at its last draw
+// (e.props.onScreen on the terminal): rows `first` to `last` of its `of`,
+// from the first row of the tree the hook drew.
+export type OnScreen = { first: number; last: number; of: number }
+// Where a drawing's pages sit in their message: `below` the rows under the
+// last page (a Typst error line, a sent file's pictures after it); `top` the
+// rows the layout puts above the first page (an answer's top margin), absent
+// when the engine's row of its own height is above (a plan, a sent file).
+export type Place = { top?: number; below: number }
 // An answer drawn this session (`seq` grows with each new one); `dir` its
 // key folder. A plan is `plan:<tool_use_id>`, a Markdown file Claude sent
-// `file:<tool_use_id>:<path>`.
-export type Drawn = { id: string; seq: number; dir: string; pages: DrawnPage[] }
+// `file:<tool_use_id>:<path>`. `onScreen` its message's rows on screen
+// (null: drawn outside the viewport; absent: not known), `place` where its
+// pages are in them.
+export type Drawn = { id: string; seq: number; dir: string; pages: DrawnPage[]; place?: Place; onScreen?: OnScreen | null }
 export type Pick = { id: string; page: number } | null
+
+// e.props.onScreen as an OnScreen: null when drawn outside the viewport,
+// undefined when the surface does not say (or it is not one).
+export function screenOf(v: unknown): OnScreen | null | undefined {
+  if (v === null) return null
+  const o = v as Partial<OnScreen> | undefined
+  return o && typeof o.first === 'number' && typeof o.last === 'number' && typeof o.of === 'number' ? { first: o.first, last: o.last, of: o.of } : undefined
+}
+
+// The row of its message each page of `d` starts at, by its last onScreen.
+// The pages are the last rows of the tree but `below`, at their drawn rows
+// (DrawnPage.rows, as drawPages draws them), so the first page's top is
+// `of - below - (their rows)`: exact for the layout `of` was counted on,
+// with no row of tolerance needed. That top is under 0, or over place.top
+// (an answer's top margin; 0 is taken too, as the root Box's margin may be
+// outside the rows the engine counts), when `of` is of another layout (the
+// row drawn as text before, a page drawn at another size): not known then.
+// Undefined: not known; null: drawn outside the viewport.
+export function pageTopsOf(d: Drawn): number[] | null | undefined {
+  if (d.onScreen === null) return null
+  if (!d.onScreen || !d.place) return undefined
+  let at = d.onScreen.of - d.place.below - d.pages.reduce((sum, p) => sum + p.rows, 0)
+  if (at < 0 || (d.place.top !== undefined && at > d.place.top)) return undefined
+  return d.pages.map(p => (at += p.rows) - p.rows)
+}
 
 // Whether a drawing is the one of the transcript row `requestId` (a
 // selection's row): an answer by its own id, a plan or a sent file by the
@@ -231,16 +267,29 @@ export const isDrawnIn = (id: string, requestId: string) =>
 // For each segment, the drawn page its run is (null: text, or none fits).
 // Runs next to each other (no text between) are one picture after the other,
 // so consecutive pages of one answer: a run that goes on in the next must
-// end on its page's last row, and the next start at row 0. A chain is
-// matched to the drawing of `requestId` (the selection's transcript row,
-// isDrawnIn) when it fits, else to the newest drawing it fits. Ambiguous by nature: a
-// run inside one page of a many-page answer fits every page tall enough,
-// and the first such page is taken; an older answer drawn at the same width
-// fits as well as the newest.
+// end on its page's last row, and the next start at row 0.
+//
+// The clipboard has only the row and column of each cell, not the page: a
+// run inside one page of a many-page answer fits every page tall enough.
+// A mouse selection is on screen when it is copied, so a placement is kept
+// only when one of its runs' rows (its page's top, pageTopsOf, plus the
+// run's rows) is in its message's rows on screen; a drawing outside the
+// viewport has none. A drawing with no known rows on screen keeps all its
+// placements, as before. A chain goes to the drawing of `requestId` (the
+// selection's transcript row, isDrawnIn) when it fits there: its first
+// placement on screen, else its first (the row is surer than rows on
+// screen that can be out of date). Else to the newest drawing with a
+// placement on screen, else to the newest it fits, as before. Two
+// placements on screen at once are only possible with a page shorter than
+// the viewport (or two drawings at the same width on screen): the first by
+// that order (in a drawing, the first page) is taken.
 export function pickPages(segments: readonly Segment[], drawn: readonly Drawn[], requestId?: string): Pick[] {
   const picks: Pick[] = segments.map(() => null)
-  const mine = (d: Drawn) => (requestId !== undefined && isDrawnIn(d.id, requestId) ? 1 : 0)
-  const order = [...drawn].sort((a, b) => mine(b) - mine(a) || b.seq - a.seq)
+  const mine = (d: Drawn) => requestId !== undefined && isDrawnIn(d.id, requestId)
+  const newest = [...drawn].sort((a, b) => b.seq - a.seq)
+  const mineFirst = newest.filter(mine)
+  const others = newest.filter(d => !mine(d))
+  const tops = new Map(drawn.map(d => [d.id, pageTopsOf(d)]))
   let i = 0
   while (i < segments.length) {
     if (segments[i]!.kind !== 'image') {
@@ -261,13 +310,27 @@ export function pickPages(segments: readonly Segment[], drawn: readonly Drawn[],
         if (n > 0 && Math.min(...rows) !== 0) return false
         return n === runs.length - 1 || maxRow === page.rows - 1
       })
-    found: for (const d of order) {
-      for (let start = 0; start + runs.length <= d.pages.length; start++) {
-        if (!fits(d, start)) continue
-        runs.forEach((_, n) => (picks[i + n] = { id: d.id, page: start + n }))
-        break found
-      }
+    const onScreen = (d: Drawn, start: number) => {
+      const at = tops.get(d.id)
+      if (at === undefined) return true
+      const view = d.onScreen
+      if (!at || !view) return false
+      return runs.some((run, n) => {
+        const rows = run.lines.map(l => at[start + n]! + l.row)
+        return Math.min(...rows) <= view.last && Math.max(...rows) >= view.first
+      })
     }
+    const place = (order: readonly Drawn[], seen: boolean) => {
+      for (const d of order) {
+        for (let start = 0; start + runs.length <= d.pages.length; start++) {
+          if (!fits(d, start) || (seen && !onScreen(d, start))) continue
+          runs.forEach((_, n) => (picks[i + n] = { id: d.id, page: start + n }))
+          return true
+        }
+      }
+      return false
+    }
+    if (!place(mineFirst, true) && !place(mineFirst, false) && !place(others, true)) place(others, false)
     i = j
   }
   return picks
