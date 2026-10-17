@@ -1,13 +1,13 @@
 // The pictures of an answer: the key of its inputs, the page width and ppi
 // that match the terminal's text, where its first line sits, and the
 // drawing of its pages beside the reply bullet.
-import type { EngineInterface, RenderComponent, ResolveInput } from 'claude-code'
+import type { EngineInterface, RenderComponent, RenderViewport, ResolveInput } from 'claude-code'
 
-import type { MdPreviewTheme } from '../../types'
-import { BODY_PT, bulletOf, GUTTER, MARGIN_TOP, MAX_IMAGE_ROWS, TEMPLATE_VERSION } from './settings'
-import { INLINE_KEPT, inlined, S, type Cell, type Look, type Metrics, type Result } from './state'
+import type { IuiTheme } from '../../types'
+import { BODY_PT, bulletOf, GUTTER, MARGIN_TOP, TEMPLATE_VERSION } from './settings'
+import { INLINE_KEPT, inlined, S, type Cell, type Look, type Metrics, type Result, type Room } from './state'
 import { FENCE } from './markdown'
-import { fitsInline } from './terminal'
+import { fitBox, fitsInline, roomColumns } from './terminal'
 
 // FNV-1a over the parts, twice with different offsets: 16 hex digits.
 export function hashOf(parts: readonly (string | number)[]): string {
@@ -56,7 +56,7 @@ export function renderKey(o: {
   columns: number
   cell: Cell
   size: number
-  mode: MdPreviewTheme
+  mode: IuiTheme
   termFont: string
   columnPt: number
   templateStamp: string
@@ -66,11 +66,17 @@ export function renderKey(o: {
   // The folder relative images start from, when it is not the session's (a
   // Markdown file's): the same text there shows other images.
   base?: string
+  // Only for a text with a live Typst block or a local image (needsRoom):
+  // the room height and the design. A plain text's key does not change
+  // with the rows.
+  room?: Room
 }): string {
+  const { room } = o
   return hashOf([
     o.textHash, o.columns, o.cell.width, o.cell.height, o.size, o.mode, o.termFont, o.columnPt,
     o.templateStamp, o.look.name, o.look.dir, o.look.stamp, TEMPLATE_VERSION, ...(o.inline ? ['inline'] : []),
     ...(o.base ? ['base', o.base] : []),
+    ...(room ? ['room', room.heightPt, room.design.widthPt, room.design.heightPt] : []),
   ])
 }
 
@@ -109,13 +115,6 @@ export function alignFirstLine(kind: FirstLine, rowPt: number): { topPt: number;
   return { topPt: Math.round(((bulletRow + 0.5) * rowPt - centre) * 100) / 100, bulletRow }
 }
 
-// The rows an Image of this PNG takes when it is drawn `columns` wide. The
-// template pads each page to whole rows, so this rounds (no stretch).
-export function rowsFor(page: { width: number; height: number }, columns: number, px: Cell): number {
-  const scale = Math.min(1, (columns * px.width) / page.width)
-  return Math.max(1, Math.min(MAX_IMAGE_ROWS, Math.round((page.height * scale) / px.height)))
-}
-
 // Over ssh: every page's PNG as base64 for a `{ png }` source, or null when
 // a page cannot go (over INLINE_MAX_SIDE or INLINE_MAX_BYTES, or not read),
 // so the message shows as text.
@@ -147,26 +146,41 @@ export async function inlineOf($: EngineInterface, result: Result): Promise<stri
 // `keys` a prefix for its Images' keys (several sets in one tree).
 export type PagesLayout = { bullet?: boolean; gutter?: number; marginTop?: number; keys?: string }
 
-// `inline`: each page's PNG as base64 (over ssh); else the terminal reads the file.
-export function drawPages($: EngineInterface, e: ResolveInput<RenderComponent, 'terminal'>, result: Result, columns: number, px: Cell, inline?: readonly string[], layout: PagesLayout = {}) {
+// The bullet's row when the page is drawn `factor` as wide.
+export function scaledBulletRow(bulletRow: number, factor: number): number {
+  if (factor >= 1) return bulletRow
+  return Math.max(0, Math.round((bulletRow + 0.5) * factor - 0.5))
+}
+
+// `inline`: each page's PNG as base64 (over ssh); else the terminal reads the
+// file. Each page draws at its own box, never stretched. A page wider than
+// the room now (an old one in an open epoch) draws smaller to fit, the
+// bullet scaled too: the engine shifts a wider Image, it does not clip it.
+export function drawPages(
+  $: EngineInterface, e: ResolveInput<RenderComponent, 'terminal'> & { viewport?: RenderViewport }, result: Result, inline?: readonly string[], layout: PagesLayout = {},
+) {
   const { Box, Text, Image } = $.ui.resolve(e)
   const gutter = layout.gutter ?? GUTTER
+  const room = roomColumns(e.viewport)
+  const first = result.pages[0]
+  const factor = first && first.columns > room ? room / first.columns : 1
   return (
     <Box flexDirection="row" marginTop={layout.marginTop ?? MARGIN_TOP}>
       {gutter > 0 ? (
-        <Box width={gutter} flexShrink={0} marginTop={result.bulletRow}>
+        <Box width={gutter} flexShrink={0} marginTop={scaledBulletRow(result.bulletRow, factor)}>
           <Text>{layout.bullet ? bulletOf(S.env?.isMac ?? true) : ' '}</Text>
         </Box>
       ) : null}
-      <Box flexDirection="column">
+      <Box flexDirection="column" flexShrink={0}>
         {result.pages.map((page, i) => {
-          const rows = rowsFor(page, columns, px)
+          const box = fitBox(page, room)
+          const shrunk = box.columns !== page.columns
           return (
             <Image
               key={`${layout.keys ?? ''}p${i}`}
-              source={inline ? { png: inline[i]! } : { file: page.file, format: 'png', generation: columns * 1000 + rows }}
-              columns={columns}
-              rows={rows}
+              source={inline ? { png: inline[i]! } : { file: page.file, format: 'png', ...(shrunk ? { generation: box.columns * 1000 + box.rows } : {}) }}
+              columns={box.columns}
+              rows={box.rows}
               alt={page.alt}
             />
           )

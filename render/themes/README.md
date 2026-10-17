@@ -1,17 +1,18 @@
-# md-preview themes
+# Intelligent UI themes
 
-A theme is a folder with a `theme.json`. md-preview ships two:
+A theme is a folder with a `theme.json`. Intelligent UI ships three:
 
 | Folder | Name | Looks like |
 |---|---|---|
-| `vscode-modern` (default) | VS Code Modern | VS Code's Markdown preview, Dark Modern / Light Modern |
+| `claude-code` (default) | Claude Code | Claude Code's own Markdown in the terminal, with its dark and light themes |
+| `vscode-modern` | VS Code Modern | VS Code's Markdown preview, Dark Modern / Light Modern |
 | `vscode` | VS Code | the same, with the Dark+ / Light+ colours; every theme merges over this one |
 
-Your own themes go in `~/.claude/md-preview/themes/<name>/theme.json`. A theme there with the same folder name as a built-in one is used in its place. It is still merged over the built-in `vscode`, like every theme. Choose a theme with `/md-preview theme <name>`.
+Your own themes go in `~/.claude/intelligent-ui/themes/<name>/theme.json`. A theme there with the same folder name as a built-in one is used in its place. It is still merged over the built-in `vscode`, like every theme. Choose a theme with `/iui theme <name>`.
 
 ## Merging
 
-Every key is optional. The template merges your `theme.json` over `vscode/theme.json`, so you only write what you change. A value of the wrong type (for example a colour that is not `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`, or text where a number belongs) is ignored, and the vscode value is used. The file must be valid JSON; if it is not, md-preview uses the default theme, `vscode-modern`, and tells you.
+Every key is optional. The template merges your `theme.json` over `vscode/theme.json`, so you only write what you change. A value of the wrong type (for example a colour that is not `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`, or text where a number belongs) is ignored, and the vscode value is used. The file must be valid JSON; if it is not, Intelligent UI uses the default theme, `claude-code`, and tells you.
 
 Example: pink inline code, rounder boxes.
 
@@ -26,7 +27,7 @@ Example: pink inline code, rounder boxes.
 
 ## Units
 
-- `*-px`: CSS pixels of VS Code's preview. Its body text is 14px, so 1px = 11/14 pt (the body is always 11pt; md-preview scales the whole picture to your terminal).
+- `*-px`: CSS pixels of VS Code's preview. Its body text is 14px, so 1px = 11/14 pt (the body is always 11pt; Intelligent UI scales the whole picture to your terminal).
 - `*-em`: em of that element's own text.
 - `size`: a fraction of the body text size. For code, `"terminal"` means the size of your terminal's own text.
 - Colours: `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`. The page is transparent, so a translucent background (for example `#ffffff1a`) looks right on any terminal colour.
@@ -35,13 +36,14 @@ Example: pink inline code, rounder boxes.
 
 | Key | vscode default | What it does |
 |---|---|---|
-| `name`, `description`, `source` | | Shown by `/md-preview theme` |
+| `name`, `description`, `source` | | Shown by `/iui theme` |
 | `syntax.dark`, `syntax.light` | `dark.tmTheme`, `light.tmTheme` | Code colours: a TextMate theme file in this folder. If you leave this out, the vscode files are used. If you name a file, it must exist. |
 | `fonts.body` | SF Pro Text, Helvetica Neue, Helvetica, Arial, … | Body font list (first installed one wins, per character) |
 | `fonts.code` | Menlo, SF Mono, DejaVu Sans Mono, … | Code font list |
 | `fonts.use-terminal-font` | `true` | Put the terminal's own font first for code |
-| `dark.*`, `light.*` | see `vscode/theme.json` | Colours: `fg`, `muted`, `link`, `accent` (checked boxes), `bg` (the page colour that live Typst blocks get as `theme.bg`), `border` (h1/h2 rules, hr, table rows), `th-border`, `inline-code-fg`, `inline-code-bg`, `code-fg`, `code-bg`, `code-border`, `quote-bg`, `quote-border`, `check` (tick in a checked box), `red`, `green`, `blue`, `yellow`, `orange`, `purple` (for drawings) |
+| `dark.*`, `light.*` | see `vscode/theme.json` | Colours: `fg`, `muted`, `link`, `accent` (checked boxes), `bg` (the page colour that live Typst blocks get as `theme.bg`), `border` (h1/h2 rules, hr, table rows), `th-border`, `inline-code-fg`, `inline-code-bg`, `code-fg`, `code-plain-fg` (code blocks with no language; if you leave it out, `code-fg` is used), `code-bg`, `code-border`, `quote-bg`, `quote-border`, `check` (tick in a checked box), `red`, `green`, `blue`, `yellow`, `orange`, `purple` (for drawings) |
 | `text.leading-em` / `text.paragraph-em` | `0.38` / `1.2` | Gap between lines / between paragraphs |
+| `math-scale`, `math-inline-scale` | `1.2`, `1.1` | Size of display / inline LaTeX math, as a fraction of the text size. Live Typst blocks do not change. |
 | `heading.size-em` | `[2, 1.5, 1.25, 1, 0.875, 0.85]` | h1–h6 sizes |
 | `heading.weight` | `600` | |
 | `heading.leading-em`, `above-em`, `below-em` | `0.2`, `[1.4, 1.6, 1.5, …]`, `[1.0, 1.0, 0.9, …]` | Spacing (arrays are per level; the last entry repeats) |
@@ -50,6 +52,7 @@ Example: pink inline code, rounder boxes.
 | `list.indent-em`, `gap-em` | `1.9`, `0.55` | Bullet indent; gap from bullet to text |
 | `list.number-indent-em`, `number-gap-em` | `1.45`, `0.5` | The same for numbered lists |
 | `list.item-spacing-em` | `0.38` | Gap between items |
+| `list.numbering` | `"1."` | Numbers of numbered lists: a [Typst numbering pattern](https://typst.app/docs/reference/model/numbering/). Each counting symbol is one nesting level, and the last one repeats: `"1.a.i."` gives `1.`, `a.`, `i.`, `i.`. A pattern with no counting symbol is ignored. |
 | `inline-code.size` | `1.0` | Code size (VS Code: same as body) |
 | `inline-code.pad-x-px`, `pad-y-px`, `radius-px` | `3`, `1`, `4` | VS Code: `padding: 1px 3px; border-radius: 4px` |
 | `code-block.size`, `line-height` | `1.0`, `1.357` | |
@@ -61,3 +64,5 @@ Example: pink inline code, rounder boxes.
 ## Licence
 
 The `vscode` and `vscode-modern` values come from VS Code (MIT, Copyright (c) 2015 - present Microsoft Corporation). Each of those folders has the `LICENSE` file. Their `source` keys name the files the values come from.
+
+The `claude-code` colours come from Claude Code's theme palettes and its Markdown renderer. Claude Code writes links and code in ANSI colour names (`blue`, `cyan`, and so on), so the theme uses the ANSI colours of the VS Code terminal (`terminalColorRegistry.ts`, MIT) for them. Its syntax files keep the scopes of `vscode/*.tmTheme`. That folder has the `LICENSE` file too.

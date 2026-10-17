@@ -11,7 +11,7 @@ test('with the theme on auto, the mode comes from the OS appearance, read every 
   on('config.set', async ($: any, e: any) => ({ value: e.value }))
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
-    if (argv[0] === 'sh' && /md-preview-/.test(argv.join(' '))) return { value: { exitCode: 0, stdout: '/tmp/mdp\nDarwin\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (argv[0] === 'sh' && /intelligent-ui-/.test(argv.join(' '))) return { value: { exitCode: 0, stdout: '/tmp/mdp\nDarwin\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) {
       reads.push('macOS')
       return { value: osDark
@@ -20,14 +20,14 @@ test('with the theme on auto, the mode comes from the OS appearance, read every 
     }
     return next(e)
   })
-  const ran = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(ran.text).toContain('mode light (auto, from macOS)')
   expect(reads.length).toBe(1)
   // The OS goes dark: the next poll, 3 s on, sees it; one read per period.
   osDark = true
   await clock.advance(3000)
   expect(reads.length).toBe(2)
-  const later = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const later = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(later.text).toContain('mode dark (auto, from macOS)')
   await clock.advance(6000)
   expect(reads.length).toBe(4)
@@ -35,19 +35,19 @@ test('with the theme on auto, the mode comes from the OS appearance, read every 
   await $.config.set({ key: 'theme', value: 'light-daltonized' } as any)
   await clock.advance(9000)
   expect(reads.length).toBe(4)
-  const fixed = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const fixed = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(fixed.text).toContain('mode light (Claude Code theme light-daltonized)')
   await $.config.set({ key: 'theme', value: 'auto' } as any)
   await clock.settle()
   expect(reads.length).toBe(5)
   await clock.advance(3000)
   expect(reads.length).toBe(6)
-  const again = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const again = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(again.text).toContain('mode dark (auto, from macOS)')
 })
 
-// /md-preview probe asks the terminal 5 times and shows each raw answer.
-test('/md-preview probe shows the raw OSC 11 answers and the mode they give', async ($, on) => {
+// /iui probe asks the terminal 5 times and shows each raw answer.
+test('/iui probe shows the raw OSC 11 answers and the mode they give', async ($, on) => {
   mock.store(on)
   mock.env(on, { HOME: '/fake-home' })
   const answers = ['\x1b]11;rgb:ffff/ffff/ffff\x07', '', 'x', null, '\x1b]11;rgb:1d1d/2525/2a2a\x1b\\']
@@ -57,7 +57,7 @@ test('/md-preview probe shows the raw OSC 11 answers and the mode they give', as
     const a = answers[i++]
     return { value: { exitCode: a === null ? 1 : 0, stdout: a ?? '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  const ran = await $.command.run({ command: 'md-preview', args: 'probe' } as any)
+  const ran = await $.command.run({ command: 'iui', args: 'probe' } as any)
   expect(i).toBe(5)
   expect(ran.text).toContain('1: "\\e]11;rgb:ffff/ffff/ffff\\a" -> luminance 1.000, light')
   expect(ran.text).toContain('2: no answer in 300 ms')
@@ -83,17 +83,17 @@ test('with the theme on auto, a dark iTerm2 profile on a light Mac draws dark', 
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (argv[0] === 'sh' && /md-preview-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && /intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
     if (argv[0] === 'sh' && cmd.includes('TabStyleWithAutomaticOption')) return ok(`${style}@\nG1\n@\n${marks}\n`)
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
     return next(e)
   })
-  const ran = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(ran.text).toContain('mode dark (auto, from iTerm2: profile Default background)')
   // iTerm2 on Automatic follows the light Mac: the profile's light colours.
   style = '4\n'
   await clock.advance(3000)
-  const later = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const later = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(later.text).toContain('mode light (auto, from iTerm2: profile Default background)')
 })
 
@@ -110,21 +110,21 @@ test('with the theme on auto, Ghostty draws as its background is', async ($, on)
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (argv[0] === 'sh' && /md-preview-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && /intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
     if (argv[0] === 'sh' && cmd.includes('+show-config')) return ok(config)
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return osDark ? ok('Dark\n') : ok('', 1)
     return next(e)
   })
   const files: Record<string, string> = { '/R/themes/Day': 'background = #f7f7f7\n', '/h/.config/ghostty/themes/Night': 'background = #191724\n' }
   on('fs.read', async ($: any, e: any, next: any) => (e.path in files ? { value: files[e.path] } : e.path.includes('ghostty') || e.path.startsWith('/R/') ? { deny: 'no such file' } as any : next(e)))
-  const ran = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(ran.text).toContain('mode dark (auto, from Ghostty: default background)')
   config = 'theme = light:Day,dark:Night\nbackground = #f7f7f7\n'
   await clock.advance(3000)
-  expect((await $.command.run({ command: 'md-preview', args: '' } as any)).text).toContain('mode light (auto, from Ghostty: theme Day background)')
+  expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode light (auto, from Ghostty: theme Day background)')
   osDark = true
   await clock.advance(3000)
-  expect((await $.command.run({ command: 'md-preview', args: '' } as any)).text).toContain('mode dark (auto, from Ghostty: theme Night background)')
+  expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode dark (auto, from Ghostty: theme Night background)')
 })
 
 // kitty on a light Mac: kitty.conf's included theme is dark; once auto theme
@@ -138,7 +138,7 @@ test('with the theme on auto, kitty draws as its config or auto theme is', async
   const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
-    if (argv[0] === 'sh' && /md-preview-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && /intelligent-ui-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return osDark ? ok('Dark\n') : ok('', 1)
     return next(e)
   })
@@ -149,16 +149,16 @@ test('with the theme on auto, kitty draws as its config or auto theme is', async
   const inKitty = (path: string) => path.includes('kitty')
   on('fs.exists', async ($: any, e: any, next: any) => (inKitty(e.path) ? { value: e.path in files } : next(e)))
   on('fs.read', async ($: any, e: any, next: any) => (e.path in files ? { value: files[e.path] } : inKitty(e.path) ? ({ deny: 'no such file' } as any) : next(e)))
-  const ran = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(ran.text).toContain('mode dark (auto, from kitty: config background)')
   expect(ran.text).toContain('terminal font JetBrains Mono')
   files['/h/.config/kitty/dark-theme.auto.conf'] = 'background #191724\n'
   files['/h/.config/kitty/light-theme.auto.conf'] = 'background #fafafa\n'
   await clock.advance(3000)
-  expect((await $.command.run({ command: 'md-preview', args: '' } as any)).text).toContain('mode light (auto, from kitty: light-theme.auto.conf background)')
+  expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode light (auto, from kitty: light-theme.auto.conf background)')
   osDark = true
   await clock.advance(3000)
-  expect((await $.command.run({ command: 'md-preview', args: '' } as any)).text).toContain('mode dark (auto, from kitty: dark-theme.auto.conf background)')
+  expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode dark (auto, from kitty: dark-theme.auto.conf background)')
 })
 
 // Rio on a dark Mac with an [adaptive-theme]: the OS picks the theme file;
@@ -171,7 +171,7 @@ test('with the theme on auto, Rio draws as its adaptive theme is', async ($, on)
   const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
-    if (argv[0] === 'sh' && /md-preview-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && /intelligent-ui-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('Dark\n')
     return next(e)
   })
@@ -181,12 +181,12 @@ test('with the theme on auto, Rio draws as its adaptive theme is', async ($, on)
     '/h/.config/rio/themes/night.toml': '[colors]\nbackground = "#191724"\n',
   }
   on('fs.read', async ($: any, e: any, next: any) => (e.path in files ? { value: files[e.path] } : e.path.includes('/rio/') ? ({ deny: 'no such file' } as any) : next(e)))
-  const ran = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(ran.text).toContain('mode dark (auto, from Rio: theme night background)')
   expect(ran.text).toContain('terminal font Iosevka')
   files['/h/.config/rio/config.toml'] = 'force-theme = "light"\n' + files['/h/.config/rio/config.toml']
   await clock.advance(3000)
-  expect((await $.command.run({ command: 'md-preview', args: '' } as any)).text).toContain('mode light (auto, from Rio: theme day background)')
+  expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode light (auto, from Rio: theme day background)')
 })
 
 // Over ssh the configs and the OS here are the remote computer's: auto uses
@@ -201,7 +201,7 @@ for (const colorFgBg of [undefined, '0;15']) {
     const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     on('process.run', async ($: any, e: any, next: any) => {
       const argv: string[] = e.argv
-      if (argv[0] === 'sh' && /md-preview-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
+      if (argv[0] === 'sh' && /intelligent-ui-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
       if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) {
         asked.push('macOS')
         return ok('', 1)
@@ -210,7 +210,7 @@ for (const colorFgBg of [undefined, '0;15']) {
     })
     on('fs.exists', async ($: any, e: any, next: any) => (e.path.includes('kitty') ? (asked.push(e.path), { value: false }) : next(e)))
     on('fs.read', async ($: any, e: any, next: any) => (e.path.includes('kitty') ? (asked.push(e.path), { deny: 'no such file' } as any) : next(e)))
-    const ran = await $.command.run({ command: 'md-preview', args: '' } as any)
+    const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
     expect(ran.text).toContain(colorFgBg ? 'mode light (auto, from COLORFGBG)' : 'mode dark (auto, OS appearance not known, dark assumed)')
     expect(ran.text).toContain('terminal font not known (Menlo assumed)')
     expect(asked).toEqual([])
@@ -229,7 +229,7 @@ test('with the theme on auto, cmux draws as its appearance is', async ($, on) =>
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (argv[0] === 'sh' && /md-preview-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && /intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
     if (argv[0] === 'sh' && cmd.includes('+show-config')) return ok('font-family = Menlo\n')
     if (argv[0] === 'defaults' && argv.includes('com.cmuxterm.app')) return ok(saved)
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
@@ -237,15 +237,15 @@ test('with the theme on auto, cmux draws as its appearance is', async ($, on) =>
   })
   let cmuxJson: string | null = null
   on('fs.read', async ($: any, e: any, next: any) => (e.path === '/h/.config/cmux/cmux.json' ? (cmuxJson === null ? ({ deny: 'no such file' } as any) : { value: cmuxJson }) : next(e)))
-  const ran = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(ran.text).toContain('mode light (auto, from cmux: adaptive default theme, appearance system)')
   saved = 'dark\n'
   await clock.advance(3000)
-  expect((await $.command.run({ command: 'md-preview', args: '' } as any)).text).toContain('mode dark (auto, from cmux: adaptive default theme, appearance dark)')
+  expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode dark (auto, from cmux: adaptive default theme, appearance dark)')
   saved = 'system\n'
   cmuxJson = '{\n  // off\n  "terminal": { "adaptiveDefaultTheme": false, },\n}'
   await clock.advance(3000)
-  expect((await $.command.run({ command: 'md-preview', args: '' } as any)).text).toContain('mode dark (auto, from Ghostty: default background)')
+  expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode dark (auto, from Ghostty: default background)')
 })
 
 // iTerm2 whose TERM_PROGRAM did not come through: ITERM_PROFILE says iTerm2.
@@ -260,11 +260,11 @@ test('with the theme on auto, iTerm2 with no TERM_PROGRAM is found by ITERM_PROF
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (argv[0] === 'sh' && /md-preview-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && /intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
     if (argv[0] === 'sh' && cmd.includes('TabStyleWithAutomaticOption')) return ok(`1\n@\nG1\n@\n${marks}\n`)
     if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
     return next(e)
   })
-  const ran = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(ran.text).toContain('mode dark (auto, from iTerm2: profile Default background)')
 })

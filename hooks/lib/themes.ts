@@ -1,5 +1,5 @@
 // Themes: a theme folder's theme.json, the built-in and user themes, the one
-// to draw with, what `/md-preview theme` lists, and the scan on the host.
+// to draw with, what `/iui theme` lists, and the scan on the host.
 import type { EngineInterface } from 'claude-code'
 
 import { BASE_THEME, DEFAULT_THEME, MODES } from './settings'
@@ -86,7 +86,7 @@ export function chooseTheme(themes: ReadonlyMap<string, ThemeInfo>, wanted: stri
   return { name: BASE_THEME, dir: base?.dir ?? `${root}/render/themes/${BASE_THEME}`, isFallback: wanted !== BASE_THEME }
 }
 
-// What `/md-preview theme` lists.
+// What `/iui theme` lists.
 export function themeListing(themes: ReadonlyMap<string, ThemeInfo>, problems: readonly ThemeProblem[], active: string, userDir: string): string {
   const lines = [...themes.values()]
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -96,12 +96,12 @@ export function themeListing(themes: ReadonlyMap<string, ThemeInfo>, problems: r
     `Themes (* = active):`,
     ...(lines.length ? lines : ['- none found']),
     ...skipped,
-    `User themes go in ${userDir}/<name>/theme.json. Switch with /md-preview theme <name>.`,
+    `User themes go in ${userDir}/<name>/theme.json. Switch with /iui theme <name>.`,
   ].join('\n')
 }
 
 // The built-in themes under render/themes and the user's under
-// ~/.claude/md-preview/themes, read fresh each call.
+// ~/.claude/intelligent-ui/themes, read fresh each call.
 export async function scanThemes($: EngineInterface, root: string, home: string) {
   const found: (ThemeInfo | ThemeProblem)[] = []
   for (const [base, isUser] of [[`${root}/render/themes`, false], [userThemesOf(home), true]] as const) {
@@ -129,7 +129,7 @@ export async function missingSyntax($: EngineInterface, theme: ThemeInfo) {
   return lost
 }
 
-export const userThemesOf = (home: string) => `${home || '~'}/.claude/md-preview/themes`
+export const userThemesOf = (home: string) => `${home || '~'}/.claude/intelligent-ui/themes`
 
 // The mtimes of the files a theme's pictures depend on (themeFiles): a
 // change to any of them makes new keys.

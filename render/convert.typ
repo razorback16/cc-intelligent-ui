@@ -1,8 +1,8 @@
-// md-preview: makes a PNG of a JPEG or WebP (the engine's Image draws PNG
+// Intelligent UI: makes a PNG of a JPEG or WebP (the engine's Image draws PNG
 // only). Compiled at 72 ppi, where 1 pt is 1 pixel.
 //
-// Inputs: f = the image's absolute path (with --root /); max = the most
-// pixels of the long side (0 or absent: no cap).
+// Inputs: f = the image's absolute path (with --root /); maxw, maxh = the
+// box in pixels the PNG must fit (0 or absent: no limit on that side).
 //
 // Typst sizes an image by its own DPI (a 300 dpi JPEG is drawn at a quarter
 // of its pixels), so the pixel size is read from the file and set as the
@@ -43,14 +43,15 @@
 #let size = if has-tag(0, "RIFF") and has-tag(8, "WEBP") { webp-size() } else if at(0) == 0xff and at(1) == 0xd8 { jpeg-size() }
 
 // The sides as drawn: the pixel size, swapped when Typst turns the image by
-// its EXIF orientation; else Typst's own size. The long side is at most
-// `max` pixels (0: no cap); an image is never made larger.
+// its EXIF orientation; else Typst's own size. Then it fits the box, the
+// aspect kept; an image is never made larger.
 #context {
   let natural = measure(image(data))
   let (w, h) = if size == none or size.at(0) == 0 or size.at(1) == 0 { (natural.width / 1pt, natural.height / 1pt) } else { size }
   let turned = w != h and (natural.width > natural.height) != (w > h)
   let (dw, dh) = if turned { (h, w) } else { (w, h) }
-  let max = int(sys.inputs.at("max", default: "0"))
-  let scale = if max > 0 { calc.min(1, max / calc.max(dw, dh)) } else { 1 }
+  let side(key) = int(sys.inputs.at(key, default: "0"))
+  let (maxw, maxh) = (side("maxw"), side("maxh"))
+  let scale = calc.min(1, if maxw > 0 { maxw / dw } else { 1 }, if maxh > 0 { maxh / dh } else { 1 })
   image(data, width: dw * scale * 1pt)
 }

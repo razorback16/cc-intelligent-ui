@@ -1,10 +1,11 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import {
-  codePointsOf, decodeSelection, DIACRITICS, hasPlaceholders, joinSegments, parseCommand, pickPages, placeholderCell, positionsOf, textOfRun,
-  type Drawn, type TextBlock, type Item, type Mark,
+  codePointsOf, commandSuggestions, decodeSelection, DIACRITICS, hasPlaceholders, isDrawnIn, joinSegments, parseCommand, pickPages, placeholderCell,
+  positionsOf, probeCall, textOfRun, type Drawn, type TextBlock, type Item, type Mark,
 } from '../hooks/register'
-import { SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI } from './copy-fixture'
+import { PROBE_IDLE_MS } from '../hooks/lib/settings'
+import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI } from './copy-fixture'
 
 // One screen row of a picture as Claude Code draws it: `lead` (the gutter),
 // then the cells of `row` from `from` to `to`.
@@ -75,7 +76,7 @@ test('probe marks become pixel boxes; a list number is dropped and an item takes
 })
 
 // A hand-made page: 10 columns of 10 px, 4 rows of 20 px.
-const PAGE = { width: 100, height: 80, rows: 4 }
+const PAGE = { width: 100, height: 80, columns: 10, rows: 4 }
 const word = (i: number, text: string, x0: number, row: number, block: number): Item => ({ i, text, x0, x1: x0 + text.length * 6, y0: row * 20 + 2, y1: row * 20 + 18, block })
 const BLOCKS: TextBlock[] = [
   { kind: 'par', prefix: '', first: 0 },
@@ -94,30 +95,36 @@ const ITEMS: Item[] = [
 
 test('a word is in when its centre is in a selected cell; the first line from its column, the last to its column', () => {
   // "beta" spans x 40-64: centre 52, column 5.
-  expect(textOfRun([{ row: 0, colStart: 5, colEnd: 9 }], ITEMS, BLOCKS, PAGE, 10)).toBe('beta well-')
-  expect(textOfRun([{ row: 0, colStart: 6, colEnd: 9 }], ITEMS, BLOCKS, PAGE, 10)).toBe('well-')
+  expect(textOfRun([{ row: 0, colStart: 5, colEnd: 9 }], ITEMS, BLOCKS, PAGE)).toBe('beta well-')
+  expect(textOfRun([{ row: 0, colStart: 6, colEnd: 9 }], ITEMS, BLOCKS, PAGE)).toBe('well-')
   // A line broken after a hyphen joins with no space; a new block is a new line with its prefix.
-  expect(textOfRun([{ row: 0, colStart: 0, colEnd: 9 }, { row: 1, colStart: 0, colEnd: 9 }], ITEMS, BLOCKS, PAGE, 10)).toBe('alpha beta well-known\n- item')
+  expect(textOfRun([{ row: 0, colStart: 0, colEnd: 9 }, { row: 1, colStart: 0, colEnd: 9 }], ITEMS, BLOCKS, PAGE)).toBe('alpha beta well-known\n- item')
 })
 
 test('code lines are cut by characters; table cells join with a tab', () => {
-  expect(textOfRun([{ row: 2, colStart: 4, colEnd: 9 }], ITEMS, BLOCKS, PAGE, 10)).toBe('x = 1')
-  expect(textOfRun([{ row: 2, colStart: 0, colEnd: 9 }, { row: 3, colStart: 0, colEnd: 9 }], ITEMS, BLOCKS, PAGE, 10)).toBe('let x = 1\nx++\nk\tv')
+  expect(textOfRun([{ row: 2, colStart: 4, colEnd: 9 }], ITEMS, BLOCKS, PAGE)).toBe('x = 1')
+  expect(textOfRun([{ row: 2, colStart: 0, colEnd: 9 }, { row: 3, colStart: 0, colEnd: 9 }], ITEMS, BLOCKS, PAGE)).toBe('let x = 1\nx++\nk\tv')
   // The two code lines lie in one row (y centres 50 and 55): both, one per line.
-  expect(textOfRun([{ row: 2, colStart: 0, colEnd: 1 }], ITEMS, BLOCKS, PAGE, 10)).toBe('le\nx+')
+  expect(textOfRun([{ row: 2, colStart: 0, colEnd: 1 }], ITEMS, BLOCKS, PAGE)).toBe('le\nx+')
 })
 
 // ---- Which page -------------------------------------------------------------
 
+// An answer drawn at `columns`, its pages `rows` tall (at their own box).
 const drawn = (id: string, seq: number, rows: number[], columns = 80): Drawn => ({
-  id, seq, columns, dir: `/c/${id}`, pages: rows.map((r, i) => ({ file: `/c/${id}/a-${i + 1}.png`, width: columns * 16, height: r * 32, rows: r })),
+  id, seq, dir: `/c/${id}`, pages: rows.map((r, i) => ({ file: `/c/${id}/a-${i + 1}.png`, width: columns * 16, height: r * 32, columns, rows: r })),
 })
 
-test('a run goes to the answer the selection names, else to the newest it fits', () => {
+test('a run goes to the drawing the selection names, else to the newest it fits', () => {
   const runs = decodeSelection([cells(2, 0, 50), cells(3, 0, 50)].join('\n'))
   const answers = [drawn('old', 1, [10]), drawn('new', 2, [10]), drawn('short', 3, [3])]
   expect(pickPages(runs, answers)).toEqual([{ id: 'new', page: 0 }])
   expect(pickPages(runs, answers, 'old')).toEqual([{ id: 'old', page: 0 }])
+  // A plan and a sent file by the call's tool_use_id.
+  expect(pickPages(runs, [...answers, drawn('plan:tu1', 0, [10])], 'tu1')).toEqual([{ id: 'plan:tu1', page: 0 }])
+  expect(pickPages(runs, [...answers, drawn('file:tu2:a.md', 0, [10])], 'tu2')).toEqual([{ id: 'file:tu2:a.md', page: 0 }])
+  expect(isDrawnIn('file:tu2:a.md', 'tu2')).toBe(true)
+  expect(isDrawnIn('file:tu22:a.md', 'tu2')).toBe(false)
   // Too wide for an answer drawn at 40 columns.
   expect(pickPages(runs, [drawn('narrow', 9, [10], 40)])).toEqual([null])
 })
@@ -131,79 +138,173 @@ test('runs one after another are consecutive pages of one answer', () => {
   expect(joinSegments([{ kind: 'text', text: 'a' }, ...segments], [null, 'x', 'y'])).toBe('a\nx\ny')
 })
 
+test('a page drawn smaller than it was compiled for fits by its drawn box', () => {
+  // Compiled 98 x 16, drawn 49 x 8 (an old page in an open epoch).
+  const small: Drawn = { id: 's', seq: 1, dir: '/c/s', pages: [{ file: '/c/s/a-1.png', width: 1568, height: 512, columns: 49, rows: 8 }] }
+  expect(pickPages(decodeSelection(cells(7, 0, 48)), [small])).toEqual([{ id: 's', page: 0 }])
+  expect(pickPages(decodeSelection(cells(2, 0, 60)), [small])).toEqual([null])
+  expect(pickPages(decodeSelection(cells(9, 0, 10)), [small])).toEqual([null])
+})
+
 // ---- A real probe -----------------------------------------------------------
 
 const REAL = positionsOf(SMALL_MARKS as unknown as Mark[], SMALL_PPI)
 const ALL_COLUMNS = (row: number) => ({ row, colStart: 0, colEnd: 97 })
+const TEXT = 'Copy test\nThe quick brown fox jumps over the lazy dog, then keeps running across the wide green field until the well-known path ends.\n- first item\n- second item\necho hello world\nls -la'
 
 test("a real probe: the whole picture copies as the answer's text", () => {
   const all = Array.from({ length: SMALL_PAGE.rows }, (_, row) => ALL_COLUMNS(row))
-  expect(textOfRun(all, REAL.pages[0]!, REAL.blocks, SMALL_PAGE, 98)).toBe(
-    'Copy test\nThe quick brown fox jumps over the lazy dog, then keeps running across the wide green field until the well-known path ends.\n- first item\n- second item\necho hello world\nls -la',
-  )
+  expect(textOfRun(all, REAL.pages[0]!, REAL.blocks, SMALL_PAGE)).toBe(TEXT)
 })
 
 test('a real probe: a selection from mid-paragraph into the code block', () => {
-  // Rows: heading 1, paragraph 4 and 5, items 8 and 9, code 12 and 14.
-  const lines = [{ row: 4, colStart: 30, colEnd: 97 }, ...[5, 6, 7, 8, 9, 10, 11].map(ALL_COLUMNS), { row: 12, colStart: 0, colEnd: 14 }]
-  expect(textOfRun(lines, REAL.pages[0]!, REAL.blocks, SMALL_PAGE, 98)).toBe(
+  // Rows: heading 1, paragraph 3 and 5, items 7 and 9, code 12 and 13.
+  const lines = [{ row: 3, colStart: 30, colEnd: 97 }, ...[4, 5, 6, 7, 8, 9, 10, 11].map(ALL_COLUMNS), { row: 12, colStart: 0, colEnd: 14 }]
+  expect(textOfRun(lines, REAL.pages[0]!, REAL.blocks, SMALL_PAGE)).toBe(
     'the lazy dog, then keeps running across the wide green field until the well-known path ends.\n- first item\n- second item\necho hello ',
   )
   // Part of the second item: no prefix.
-  expect(textOfRun([{ row: 9, colStart: 10, colEnd: 97 }], REAL.pages[0]!, REAL.blocks, SMALL_PAGE, 98)).toBe('item')
+  expect(textOfRun([{ row: 9, colStart: 10, colEnd: 97 }], REAL.pages[0]!, REAL.blocks, SMALL_PAGE)).toBe('item')
+})
+
+test('a real probe on a page drawn at half its box: a cell is twice as large', () => {
+  const half = { ...SMALL_PAGE, columns: 49, rows: 8 }
+  // "jumps" has its centre at x 339 px: column 21 of 16 px, column 10 of 32 px.
+  expect(textOfRun([{ row: 0, colStart: 0, colEnd: 48 }, { row: 1, colStart: 0, colEnd: 10 }], REAL.pages[0]!, REAL.blocks, half)).toBe(
+    'Copy test\nThe quick brown fox jumps',
+  )
+  expect(textOfRun(Array.from({ length: 8 }, (_, row) => ({ row, colStart: 0, colEnd: 48 })), REAL.pages[0]!, REAL.blocks, half)).toBe(TEXT)
 })
 
 test('a real probe through the clipboard: decode, pick, read', () => {
   // "jumps" is columns 18-23, its centre in column 21.
-  const clipboard = [cells(1, 0, 97, '⏺ '), '', cells(4, 0, 21)].join('\n')
+  const clipboard = [cells(1, 0, 97, '⏺ '), '', cells(3, 0, 21)].join('\n')
   const segments = decodeSelection(clipboard)
-  const answer = { id: 'r1', seq: 1, columns: 98, dir: '/c/k', pages: [{ file: '/c/k/a-1.png', ...SMALL_PAGE }] }
+  const answer: Drawn = { id: 'r1', seq: 1, dir: '/c/k', pages: [{ file: '/c/k/a-1.png', ...SMALL_PAGE }] }
   const picks = pickPages(segments, [answer])
   expect(picks).toEqual([{ id: 'r1', page: 0 }, null, { id: 'r1', page: 0 }])
-  const texts = segments.map((s, i) => (s.kind === 'image' && picks[i] ? textOfRun(s.lines, REAL.pages[0]!, REAL.blocks, SMALL_PAGE, 98) : null))
+  const texts = segments.map((s, i) => (s.kind === 'image' && picks[i] ? textOfRun(s.lines, REAL.pages[0]!, REAL.blocks, SMALL_PAGE) : null))
   expect(joinSegments(segments, texts)).toBe('Copy test\n\nThe quick brown fox jumps')
+})
+
+const LONG = positionsOf(LONG_MARKS as unknown as Mark[], SMALL_PPI)
+const longRows = (rows: number[]) => textOfRun(rows.map(ALL_COLUMNS), LONG.pages[0]!, LONG.blocks, LONG_PAGE)
+
+test('a real probe: a long path, a long URL that wraps and CJK text are on their own rows', () => {
+  const [path, cjk, url] = LONG_MD.trim().split('\n\n')
+  // Rows: the path's line 0, the CJK line 3, the URL's lines 5 and 6, "end." 8.
+  expect(longRows([0])).toBe(path)
+  expect(longRows([1, 2])).toBe('')
+  expect(longRows([3])).toBe(cjk)
+  expect(longRows([5, 6, 7, 8])).toBe(url)
+  expect(longRows(Array.from({ length: LONG_PAGE.rows }, (_, row) => row))).toBe(LONG_MD.trim().replace(/\n\n/g, '\n'))
+  // Each character of a long word or CJK text by its own centre.
+  expect(textOfRun([{ row: 0, colStart: 0, colEnd: 9 }], LONG.pages[0]!, LONG.blocks, LONG_PAGE)).toBe('Path /Users')
+  expect(textOfRun([{ row: 3, colStart: 0, colEnd: 3 }], LONG.pages[0]!, LONG.blocks, LONG_PAGE)).toBe('中文')
+  // The URL's second line alone: its characters, no space.
+  expect(longRows([6])).toMatch(/^a+\/x$/)
+  // Every box is inside the page.
+  expect(LONG.pages[0]!.every(i => i.x1 <= LONG_PAGE.width && i.y1 <= LONG_PAGE.height)).toBe(true)
+})
+
+test('invisible marks and list markers of other themes are dropped', () => {
+  const marks: Mark[] = [
+    { k: 'b', p: 1, x: 0, y: 0, kind: 'par' },
+    { k: 'w', p: 1, x: 0, y: 0, t: 'with', w: 20, h: 12 },
+    // The strut before inline code, and a long word with its break chances.
+    { k: 'w', p: 1, x: 24, y: 0, t: '‍', w: 0, h: 12 },
+    { k: 'w', p: 1, x: 24, y: 1, t: 'co​de', w: 20, h: 11 },
+    // The paragraph's last word, then a list with a "•" marker.
+    { k: 'w', p: 1, x: 0, y: 20, t: 'end', w: 15, h: 12 },
+    { k: 'w', p: 1, x: 10, y: 40, t: '•', w: 4, h: 12 },
+    { k: 'b', p: 1, x: 20, y: 40, kind: 'item', prefix: '- ' },
+    { k: 'w', p: 1, x: 20, y: 40, t: 'one', w: 15, h: 12 },
+  ]
+  const got = positionsOf(marks, 72)
+  expect(got.pages[0]!.map(i => i.text)).toEqual(['with', 'code', 'end', 'one'])
 })
 
 // ---- The command ------------------------------------------------------------
 
-test('/md-preview grab and dump are commands; dump with nothing seen says so', async $ => {
+test('/iui grab and dump are commands with typeahead rows; dump with nothing seen says so', async $ => {
   expect(parseCommand('grab')).toEqual({ kind: 'grab' })
   expect(parseCommand('dump')).toEqual({ kind: 'dump' })
-  const ran = await $.command.run({ command: 'md-preview', args: 'dump' } as any)
-  expect(ran.text).toContain('no clipboard text with picture cells seen yet')
+  expect(parseCommand('grab now')).toEqual({ kind: 'bad' })
+  const rows = commandSuggestions('/iui g', 'g', 5, { themes: [], active: 'claude-code', size: 100 })
+  expect(rows).toEqual([{ text: 'grab', description: 'copy the text of the pictures you last selected' }])
+  expect(commandSuggestions('/iui du', 'du', 5, { themes: [], active: 'claude-code', size: 100 }).map(r => r.text)).toEqual(['dump'])
+  const ran = await $.command.run({ command: 'iui', args: 'dump' } as any)
+  expect(ran.text).toContain('Intelligent UI: no clipboard text with picture cells seen yet')
 })
 
-// ---- The clipboard watcher --------------------------------------------------
+// ---- The pipeline: probe.json, the probe, the watcher -------------------------
 
-const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: exitCode ? 'error: boom' : '', isStdoutTruncated: false, isStderrTruncated: false } })
 // The first 24 bytes of a 1568 x 512 PNG (the fixture's page), as `od` prints them.
 const HEAD = '89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52 00 00 06 20 00 00 02 00'
+const WRAP = 'echo $$; exec "$@"'
+const inputsOf = (argv: readonly string[]) => Object.fromEntries(argv.flatMap((a, i) => (argv[i - 1] === '--input' ? [a.split(/=(.*)/s).slice(0, 2)] : [])))
 
-test('a mouse copy of a drawn answer is read from the clipboard and written back as text, once', async ($, on) => {
+// The world beneath the mod: a cache at /c, a typst whose compile writes a
+// 1568 x 512 page and whose query gives the fixture's marks (`hold` holds
+// the next query until `release`; a kill ends it), pbpaste reading
+// `clipboard`, and the copies, toasts and selection the test sees.
+function world(on: any, o: { failFirst?: boolean } = {}) {
   mock.store(on)
   const clock = mock.clock(on)
   mock.env(on, { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
   const files = new Map<string, string>()
-  let clipboard = 'nothing yet'
-  let pastes = 0
-  const copies: string[] = []
-  const toasts: string[] = []
+  const compiles: Record<string, string>[] = []
+  const queries: Record<string, string>[] = []
+  const kills: string[] = []
+  const killers = new Map<string, () => void>()
+  const w = {
+    clock, files, compiles, queries, kills,
+    clipboard: 'nothing yet', pastes: 0, copies: [] as string[], toasts: [] as string[],
+    selection: undefined as { text: string; requestId?: string } | undefined,
+    gate: null as Promise<void> | null, release: () => {},
+    hold() {
+      w.gate = new Promise<void>(r => (w.release = r))
+    },
+  }
+  let pids = 5000
+  on('process.spawn', async function* ($: any, e: any) {
+    const argv: string[] = e.argv
+    if (argv[0] !== 'sh' || argv[2] !== WRAP || argv[4] !== '/usr/bin/typst') return { value: { code: 2, signal: null } }
+    const pid = String(pids++)
+    let killed = false
+    const dead = new Promise<void>(r => killers.set(pid, () => ((killed = true), r())))
+    yield { stream: 'stdout', text: `${pid}\n` }
+    const typst = argv.slice(4)
+    if (typst[1] === 'compile') {
+      compiles.push(inputsOf(typst))
+      const fail = o.failFirst && compiles.length === 1
+      if (fail) yield { stream: 'stderr', text: 'error: boom' }
+      return { value: { code: fail ? 1 : 0, signal: null } }
+    }
+    if (typst[1] !== 'query') return { value: { code: 1, signal: null } }
+    expect(typst.slice(-3)).toEqual(['<mdpos>', '--field', 'value'])
+    queries.push(inputsOf(typst))
+    if (w.gate) await Promise.race([w.gate, dead])
+    if (killed) return { value: { code: null, signal: 'SIGTERM' } }
+    yield { stream: 'stdout', text: JSON.stringify(SMALL_MARKS) }
+    return { value: { code: 0, signal: null } }
+  })
   on('process.run', async ($: any, e: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (/md-preview-/.test(cmd)) return ok('/c\nDarwin\n')
+    if (argv[0] === 'kill') {
+      kills.push(argv[1]!)
+      killers.get(argv[1]!)?.()
+      return ok('')
+    }
+    if (/intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (cmd.includes('command -v typst')) return ok('/usr/bin/typst\n')
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
-    if (argv[0] === '/usr/bin/typst' && argv[1] === 'compile') return ok('')
-    if (argv[0] === '/usr/bin/typst' && argv[1] === 'query') {
-      expect(argv).toContain('probe=1')
-      expect(argv.slice(-3)).toEqual(['<mdpos>', '--field', 'value'])
-      return ok(JSON.stringify(SMALL_MARKS))
-    }
-    if (cmd.includes('od -An')) return ok(`${HEAD}\n@\n`)
+    if (cmd.includes('od -An')) return ok(argv.filter(a => a.endsWith('.png')).map(() => `${HEAD}\n@\n`).join(''))
     if (argv[0] === 'pbpaste') {
-      pastes++
-      return ok(clipboard)
+      w.pastes++
+      return ok(w.clipboard)
     }
     return ok('', 1)
   })
@@ -212,45 +313,236 @@ test('a mouse copy of a drawn answer is read from the clipboard and written back
     return { value: undefined }
   })
   on('fs.read', async ($: any, e: any, next: any) => (files.has(e.path) ? { value: files.get(e.path) } : e.path.startsWith('/c/') ? { deny: 'ENOENT' } : next(e)))
-  on('fs.list', async ($: any, e: any, next: any) => (e.path.startsWith('/c/') ? { value: [{ name: 'a-1.png', kind: 'file', size: 1, mtimeMs: 1, isLink: false }] } : next(e)))
+  on('fs.list', async ($: any, e: any, next: any) => {
+    if (!e.path.startsWith('/c/')) return next(e)
+    const tag = files.has(`${e.path}/b-1.png`) || (o.failFirst && compiles.length > 1) ? 'b' : 'a'
+    return { value: [{ name: `${tag}-1.png`, kind: 'file', size: 1, mtimeMs: 1, isLink: false }] }
+  })
   on('ui.copy', async ($: any, e: any) => {
-    copies.push(e.text)
-    clipboard = e.text
+    w.copies.push(e.text)
+    w.clipboard = e.text
     return { value: { isCopied: true } }
   })
-  on('ui.selection', async () => ({ value: undefined }))
+  on('ui.selection', async () => ({ value: w.selection }))
   on('ui.toast', async ($: any, e: any) => {
-    toasts.push(String(e.text ?? e.message ?? JSON.stringify(e)))
+    w.toasts.push(String(e.text))
     return { value: undefined }
   })
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine drawing'] }) as any)
-  await $.command.run({ command: 'md-preview', args: '' } as any)
-  const props = { text: SMALL_MD, isFirstOfReply: true }
-  const ui = await $.ui.mount({ plugin: 'md-preview', surface: 'terminal', component: 'AssistantMessage', requestId: 'ans-1', props, viewport: { columns: 100, rows: 40 } } as any)
-  await clock.settle()
-  await ui.redraw(props as any)
-  await clock.settle()
-  // The probe ran after the PNGs, by itself.
-  expect([...files.keys()].some(k => k.endsWith('/positions.json'))).toBe(true)
-  expect([...files.keys()].some(k => k.endsWith('/probe.json'))).toBe(true)
+  return w
+}
 
+const message = (requestId: string, text: string) =>
+  ({
+    plugin: 'intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId,
+    props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40 },
+  }) as any
+const props = (text: string) => ({ text, isFirstOfReply: true }) as any
+const written = (files: Map<string, string>, name: string) => [...files.keys()].filter(k => k.endsWith(`/${name}`))
+
+// Draws SMALL_MD as answer `id` (98 columns: the fixture's), compiled; the
+// watcher's first tick (it only notes the selection there is) has run.
+async function drawAnswer($: any, w: ReturnType<typeof world>, id = 'ans-1') {
+  const ui = await $.ui.mount(message(id, SMALL_MD))
+  await w.clock.settle()
+  await ui.redraw(props(SMALL_MD))
+  await w.clock.settle()
+  await w.clock.advance(300)
+  return ui
+}
+
+test('a compile writes probe.json with the PNG compile inputs and runs no probe; a copy runs it then', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  expect(w.compiles.length).toBe(1)
+  expect(written(w.files, 'probe.json').length).toBe(1)
+  expect(written(w.files, 'positions.json')).toEqual([])
+  expect(w.queries).toEqual([])
+  // The probe's inputs are the compile's, and probe=1.
+  const probe = JSON.parse(w.files.get(written(w.files, 'probe.json')[0]!)!)
+  expect(Math.round(probe.ppi * 1000)).toBe(198056)
+  expect(inputsOf(probe.argv)).toEqual({ ...w.compiles[0], probe: '1' })
+  expect(probe.argv).toEqual(probeCall({ typst: '/usr/bin/typst', root: probe.argv[5].replace(/\/render\/packages$/, ''), cache: '/c', inputs: w.compiles[0]! }).argv)
+  // A copy needs the positions: the probe runs now, once.
+  w.clipboard = [cells(1, 0, 97, '⏺ '), cells(2, 0, 97), cells(3, 0, 21)].join('\n')
+  await w.clock.advance(300)
+  await w.clock.settle()
+  expect(w.queries.length).toBe(1)
+  expect(written(w.files, 'positions.json').length).toBe(1)
+  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
+})
+
+test('a compile retried in safe mode gives the probe safe=1', async ($, on) => {
+  const w = world(on, { failFirst: true })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  expect(w.compiles.map(c => c.safe)).toEqual([undefined, '1'])
+  const probe = JSON.parse(w.files.get(written(w.files, 'probe.json')[0]!)!)
+  expect(inputsOf(probe.argv)).toEqual({ ...w.compiles[1], probe: '1' })
+})
+
+test('the probe runs ahead once nothing compiles, and a new job stops it', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  expect(w.queries).toEqual([])
+  // Idle: the newest drawing with no positions is probed, held here.
+  w.hold()
+  await w.clock.advance(PROBE_IDLE_MS)
+  await w.clock.settle()
+  expect(w.queries.length).toBe(1)
+  // A new answer compiles: the probe ahead is killed, nothing is written.
+  const other = await $.ui.mount(message('ans-2', 'Another **answer**.'))
+  await w.clock.settle()
+  expect(w.kills.length).toBe(1)
+  w.release()
+  await w.clock.settle()
+  expect(written(w.files, 'positions.json')).toEqual([])
+  await other.redraw(props('Another **answer**.'))
+  await w.clock.settle()
+  // Idle again: one probe at a time, the newest first, then the next.
+  w.gate = null
+  await w.clock.advance(PROBE_IDLE_MS)
+  await w.clock.settle()
+  expect(w.queries.length).toBe(3)
+  expect(written(w.files, 'positions.json').length).toBe(2)
+})
+
+test('a mouse copy of a drawn answer is read from the clipboard and written back as text, once', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  // No picture drawn: no clipboard reads.
+  await w.clock.advance(900)
+  expect(w.pastes).toBe(0)
+  await drawAnswer($, w)
   // A clipboard with no placeholders is never written.
-  await clock.advance(300)
-  expect(pastes).toBeGreaterThan(0)
-  expect(copies).toEqual([])
-
+  await w.clock.advance(300)
+  expect(w.pastes).toBeGreaterThan(0)
+  expect(w.copies).toEqual([])
   // The heading row and the start of the paragraph, as a mouse copy takes them.
-  clipboard = [cells(1, 0, 97, '⏺ '), cells(2, 0, 97), cells(3, 0, 97), cells(4, 0, 21)].join('\n')
-  await clock.advance(300)
-  await clock.settle()
-  expect(copies).toEqual(['Copy test\nThe quick brown fox jumps'])
-  expect(toasts).toContain('md-preview: copied 35 chars of text')
+  w.clipboard = [cells(1, 0, 97, '⏺ '), cells(2, 0, 97), cells(3, 0, 21)].join('\n')
+  await w.clock.advance(300)
+  await w.clock.settle()
+  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
+  expect(w.toasts).toContain('Intelligent UI: copied 35 chars of text')
   // Our own write is not read again.
-  await clock.advance(900)
-  expect(copies.length).toBe(1)
-
-  const dumped = await $.command.run({ command: 'md-preview', args: 'dump' } as any)
+  await w.clock.advance(900)
+  expect(w.copies.length).toBe(1)
+  const dumped = await $.command.run({ command: 'iui', args: 'dump' } as any)
   expect(dumped.text).toContain('U+10EEEE[1,0]')
   expect(dumped.text).toContain('-> answer ans-1 page 0')
-  expect(files.has('/c/copy-debug.json')).toBe(true)
+  expect(w.files.has('/c/copy-debug.json')).toBe(true)
+  // Off: the watcher stops.
+  await $.command.run({ command: 'iui', args: 'off' } as any)
+  const pastes = w.pastes
+  await w.clock.advance(900)
+  expect(w.pastes).toBe(pastes)
+})
+
+test('a new mouse selection with picture cells is copied at the next tick, with no clipboard read', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w, 'ans-1')
+  await drawAnswer($, w, 'ans-0')
+  // ans-0 is newer, but the selection names its row: ans-1.
+  w.selection = { text: [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n'), requestId: 'ans-1' }
+  const pastes = w.pastes
+  await w.clock.advance(300)
+  await w.clock.settle()
+  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
+  expect(w.pastes).toBe(pastes)
+  const dumped = await $.command.run({ command: 'iui', args: 'dump' } as any)
+  expect(dumped.text).toContain('-> answer ans-1 page 0')
+  // The same selection again: not copied again.
+  await w.clock.advance(600)
+  expect(w.copies.length).toBe(1)
+  // /iui grab copies it on request.
+  const grabbed = await $.command.run({ command: 'iui', args: 'grab' } as any)
+  expect(grabbed.text).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read, row ans-1).')
+  expect(w.copies.length).toBe(2)
+})
+
+// Another plugin's `$.ui.copy`, from its command `cp` (args: the text).
+const COPIER = {
+  name: 'copier',
+  register: (on: any) => {
+    on('command.run', { command: 'cp' }, async ($: any, e: any) => ({ text: JSON.stringify(await $.ui.copy({ text: e.args })) }))
+  },
+}
+
+test('a copy of picture cells through $.ui.copy is rewritten to their text; other copies pass as they are', { plugins: [COPIER] }, async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  const got = await $.command.run({ command: 'cp', args: [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n') } as any)
+  expect(JSON.parse(got.text!)).toEqual({ isCopied: true })
+  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
+  await $.command.run({ command: 'cp', args: 'plain text' } as any)
+  expect(w.copies[1]).toBe('plain text')
+})
+
+test('a clipboard with picture cells that is not this session\'s selection is not rewritten (another session\'s copy)', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  // This session has a selection of its own (no picture cells), and the
+  // clipboard has another session's picture cells.
+  w.selection = { text: 'my own text', requestId: 'u1' }
+  w.clipboard = [cells(1, 0, 97), cells(3, 0, 21)].join('\n')
+  await w.clock.advance(600)
+  expect(w.copies).toEqual([])
+  // The same copy as the selection, with a last line break: rewritten.
+  w.selection = { text: [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n'), requestId: 'ans-1' }
+  await $.command.run({ command: 'iui', args: 'off' } as any)
+  await $.command.run({ command: 'iui', args: 'on' } as any)
+  await drawAnswer($, w, 'ans-2')
+  w.clipboard = `${w.selection.text}\n`
+  await w.clock.advance(300)
+  await w.clock.settle()
+  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
+})
+
+test('a watcher that starts again (a hot reload) does not copy the selection that was there before', async ($, on) => {
+  const w = world(on)
+  // An old selection with picture cells, and a clipboard filled elsewhere.
+  w.selection = { text: [cells(1, 0, 97), cells(3, 0, 21)].join('\n'), requestId: 'ans-1' }
+  w.clipboard = 'copied in another app'
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  await w.clock.advance(900)
+  expect(w.copies).toEqual([])
+  expect(w.clipboard).toBe('copied in another app')
+  // A new selection is copied.
+  w.selection = { text: [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n'), requestId: 'ans-1' }
+  await w.clock.advance(300)
+  await w.clock.settle()
+  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
+})
+
+test('a selection that can not be read gives one toast, not one more from the clipboard', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  // Column 150: wider than any picture drawn.
+  const text = [cells(1, 0, 150), cells(2, 0, 150)].join('\n')
+  w.selection = { text, requestId: 'ans-1' }
+  w.clipboard = text
+  await w.clock.advance(900)
+  await w.clock.settle()
+  expect(w.copies).toEqual([])
+  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: could not read')).length).toBe(1)
+})
+
+test('a $.ui.copy of the selection is not copied again by the watcher', { plugins: [COPIER] }, async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  const text = [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n')
+  w.selection = { text, requestId: 'ans-1' }
+  await $.command.run({ command: 'cp', args: text } as any)
+  await w.clock.advance(900)
+  await w.clock.settle()
+  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
+  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: copied')).length).toBe(0)
 })

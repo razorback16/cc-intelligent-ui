@@ -83,7 +83,7 @@ test('the editor: VS Code when found, else TextEdit on a local Mac, else none', 
   expect(editorArgv({ code: '', isMac: false, isRemote: false }, '/h/p.md')).toBe(null)
 })
 
-test('only the question md-preview asks now is the plan question', () => {
+test('only the question Intelligent UI asks now is the plan question', () => {
   const q = (question: string, header = PLAN_HEADER) => [{ question, header, options: [], multiSelect: false }]
   expect(isPlanQuestion(q(PLAN_QUESTION), PLAN_QUESTION)).toBe(true)
   expect(isPlanQuestion(q(PLAN_QUESTION), '')).toBe(false)
@@ -110,8 +110,8 @@ const PLAN = '# Plan\n\n1. Read the code.\n2. Change it.'
 const EDITED = '# Plan\n\n1. Read the code.\n2. Change it.\n3. Test it.'
 
 // A Mac terminal that draws (forced), with Typst, session sid-1 in /w/app.
-// `answers` answer md-preview's questions in order (null: Esc). The engine's
-// ExitPlanMode raises PermissionRequest as the engine does: md-preview's
+// `answers` answer the mod's questions in order (null: Esc). The engine's
+// ExitPlanMode raises PermissionRequest as the engine does: Intelligent UI's
 // decision, else the engine's dialog (`engineAsks`, which approves).
 function world($: any, on: any, o: {
   vars?: Record<string, string>
@@ -136,19 +136,31 @@ function world($: any, on: any, o: {
   let engineAsks = 0
   const answers = [...(o.answers ?? [])]
   const files = new Map<string, string>([[FILE, PLAN]])
+  // The children Intelligent UI spawns: the Frame watcher (it exits 1: no tty)
+  // and a compile through the PID wrapper (typst.ts wrapPid).
+  let pids = 4242
+  on('process.spawn', async function* ($: any, e: any) {
+    const argv: string[] = e.argv
+    if (argv[0] === 'sh' && argv[2] === 'echo $$; exec "$@"' && argv[4] === '/usr/bin/typst' && argv[5] === 'compile') {
+      yield { stream: 'stdout', text: `${pids++}\n` }
+      if (o.failCompile) {
+        yield { stream: 'stderr', text: 'error: boom' }
+        return { value: { code: 1, signal: null } }
+      }
+      const doc = argv.find(a => a.startsWith('doc='))!.slice(4)
+      compiled.push(JSON.parse(files.get(doc)!).segments.join('\n\n'))
+      return { value: { code: 0, signal: null } }
+    }
+    return { value: { code: 1, signal: null } }
+  })
   on('process.run', async ($: any, e: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (/md-preview-/.test(cmd)) return ok('/c\nDarwin\n')
+    if (argv[0] === 'kill') return ok('')
+    if (/intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (cmd.includes('command -v typst')) return ok('/usr/bin/typst\n')
     if (cmd.includes('command -v code')) return o.code ? ok('/usr/local/bin/code\n') : ok('', 1)
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
-    if (argv[0] === '/usr/bin/typst' && argv[1] === 'compile') {
-      if (o.failCompile) return ok('', 1)
-      const doc = argv.find(a => a.startsWith('doc='))!.slice(4)
-      compiled.push(JSON.parse(files.get(doc)!).segments.join('\n\n'))
-      return ok('')
-    }
     if (cmd.includes('od -An')) return ok(`${HEAD}\n@\n`)
     if (argv.includes(FILE)) {
       edits.push(argv)
@@ -207,7 +219,7 @@ function world($: any, on: any, o: {
 
 const use = (o: { id?: string; input?: unknown; output?: unknown; isRunning?: boolean; isErrored?: boolean } = {}) =>
   ({
-    plugin: 'md-preview', surface: 'terminal', component: 'ToolUse', requestId: o.id ?? 'tu-plan',
+    plugin: 'intelligent-ui', surface: 'terminal', component: 'ToolUse', requestId: o.id ?? 'tu-plan',
     props: {
       tool_use_id: o.id ?? 'tu-plan', tool: 'ExitPlanMode', input: o.input ?? { plan: PLAN, planFilePath: FILE },
       isRunning: o.isRunning ?? true, isErrored: o.isErrored ?? false, isInterrupted: false, output: o.output,
@@ -216,12 +228,12 @@ const use = (o: { id?: string; input?: unknown; output?: unknown; isRunning?: bo
   }) as any
 const result = (output: unknown, isErrored = false, id = 'tu-plan') =>
   ({
-    plugin: 'md-preview', surface: 'terminal', component: 'ToolResult', requestId: id,
+    plugin: 'intelligent-ui', surface: 'terminal', component: 'ToolResult', requestId: id,
     props: { tool_use_id: id, tool: 'ExitPlanMode', output, isErrored }, viewport: { columns: 100, rows: 40 },
   }) as any
 const dialog = (question: string, header = PLAN_HEADER, id = 'tu-ask') =>
   ({
-    plugin: 'md-preview', surface: 'terminal', component: 'AskUserQuestion', requestId: id,
+    plugin: 'intelligent-ui', surface: 'terminal', component: 'AskUserQuestion', requestId: id,
     props: { tool: 'AskUserQuestion', questions: [{ question, header, options: [{ label: 'A', description: '' }, { label: 'B', description: '' }], multiSelect: false }] },
     viewport: { columns: 100, rows: 40 },
   }) as any
@@ -231,7 +243,7 @@ const images = (tree: any): any[] =>
 const texts = (tree: any): string[] =>
   typeof tree === 'string' ? [tree] : tree && typeof tree === 'object' ? (tree.children ?? []).flatMap(texts) : []
 // Sets the mod up (as the first answer would) before a row draws.
-const ready = ($: any) => $.command.run({ command: 'md-preview', args: '' } as any)
+const ready = ($: any) => $.command.run({ command: 'iui', args: '' } as any)
 // ExitPlanMode as the engine calls it: the plan and its file on the envelope.
 const exitPlan = ($: any, more: Record<string, unknown> = {}) =>
   $.tool.call({ tool: 'ExitPlanMode', tool_use_id: 'tu-plan', plan: PLAN, planFilePath: FILE, ...more } as any)
@@ -250,6 +262,26 @@ test('the ExitPlanMode row draws the plan as pictures under the engine row, at a
   expect(image.props.columns).toBe(98)
   expect(image.props.source).toMatchObject({ format: 'png' })
   expect(texts(tree).join('\n')).not.toContain(PLAN_DRAWING)
+})
+
+test('a redraw of the plan row with a new onScreen draws the engine row again and compiles nothing', async ($, on) => {
+  let rows = 0
+  on('ui.render', { component: 'ToolUse' }, async ($: any, e: any, next: any) => (rows++, next(e)))
+  const { clock, compiled } = world($, on)
+  await ready($)
+  const ui = await $.ui.mount(use())
+  await clock.settle()
+  await ui.redraw(use().props)
+  const [first] = images(await ui.drawn())
+  const seen = rows
+  for (const onScreen of [{ first: 0, last: 4, of: 9 }, null, undefined]) {
+    await ui.redraw({ ...use().props, onScreen })
+    const tree: any = await ui.drawn()
+    expect(tree.children[0]).toMatchObject(ENGINE)
+    expect(images(tree)[0].props).toEqual(first.props)
+  }
+  expect(rows).toBe(seen + 3)
+  expect(compiled).toEqual([PLAN])
 })
 
 test('a plan that fails to compile, a rejected call and a subagent call keep the engine row', async ($, on) => {
@@ -411,10 +443,10 @@ test('clear context: once approved, the turn ends, /clear runs and the plan is s
   expect(w.submits).toMatchObject([{ text: `Implement this plan:\n\n${PLAN}`, origin: { kind: 'plugin', asUser: true } }])
 })
 
-test('with md-preview off, the engine dialog asks and the row stays as the engine draws it', async ($, on) => {
+test('with Intelligent UI off, the engine dialog asks and the row stays as the engine draws it', async ($, on) => {
   const off = world($, on, { answers: [PLAN_AUTO] })
   await ready($)
-  await $.command.run({ command: 'md-preview', args: 'off' } as any)
+  await $.command.run({ command: 'iui', args: 'off' } as any)
   const got: any = await exitPlan($)
   expect(got.result.plan).toBe(PLAN)
   expect(off.asked).toEqual([])
@@ -463,10 +495,10 @@ test('a verdict whose PermissionRequest never came does not reach a later call',
   expect(w.engineAsks()).toBe(1)
 })
 
-test('the line above the dialog is for the md-preview question alone', async ($, on) => {
+test('the line above the dialog is for the Intelligent UI question alone', async ($, on) => {
   let during: any = null
   let other: any = null
-  // Draws the dialogs while md-preview's question is asked.
+  // Draws the dialogs while Intelligent UI's question is asked.
   const w = world($, on, {
     answers: [PLAN_AUTO],
     onAsk: async () => {

@@ -1,37 +1,88 @@
 // Streaming and the compile queue: a block is blank while its text streams,
 // final when its request moves on (or its text is still), then compiled, at
-// most MAX_RUNNING at once.
+// most MAX_RUNNING at once: rows on screen first, then the newest. No job
+// starts during a burst (S.resizing); a job that ends calls jobDone (no
+// redraw while an epoch is open: the epoch commits). A job enqueued stops
+// the probe ahead (probe.ts); the last job that ends arms it again.
 import type { EngineInterface } from 'claude-code'
 
-import { BLANK_AFTER_LIVE_MS, MAX_RUNNING } from './settings'
-import { finalized, live, pending, queue, refresh, results, running, type Job } from './state'
+import { BLANK_AFTER_LIVE_MS, MAX_RUNNING, RESULTS_KEPT } from './settings'
+import { finalized, keep, live, pending, queue, refresh, results, running, S, type Job } from './state'
 import { hashOf } from './draw'
+import { noteDesign, recordDesign } from './designs'
 import { compile, logDebug } from './typst'
+import { extendEpoch, jobDone, jobQueued } from './epoch'
+import { probeLater, stopProbe } from './probe'
+
+// The order of enqueue calls: a higher `order` is newer.
+let enqueued = 0
+
+// The queue's next job: one on screen first, then one not known (onScreen
+// undefined), then one known off screen; among them the newest.
+const rankOf = (j: Job) => (j.onScreen === true ? 2 : j.onScreen === false ? 0 : 1)
+export function nextJob(jobs: readonly Job[]): number {
+  let best = -1
+  for (let i = 0; i < jobs.length; i++) {
+    const j = jobs[i]!
+    const b = jobs[best]
+    if (!b || (rankOf(j) !== rankOf(b) ? rankOf(j) > rankOf(b) : (j.order ?? 0) > (b.order ?? 0))) best = i
+  }
+  return best
+}
 
 export function pump($: EngineInterface) {
+  if (S.resizing) return
   while (running.size < MAX_RUNNING && queue.length) {
-    const job = queue.shift()!
-    running.add(job.key)
-    void compile($, job)
+    const job = queue.splice(nextJob(queue), 1)[0]!
+    const controller = new AbortController()
+    const entry = { job, cancel: () => controller.abort(), signal: controller.signal }
+    running.set(job.key, entry)
+    void compile($, job, controller.signal)
       .catch(async (err: unknown) => {
         await logDebug($, job.env.cache, `compile ${job.key} threw: ${String(err)}`)
         return 'failed' as const
       })
-      .then(result => {
-        results.set(job.key, result)
-        running.delete(job.key)
-        refresh($)
+      .then(async result => {
+        // A cancelled compile keeps nothing: no result, no design.
+        if (result !== 'cancelled') {
+          // A first compile of a final text keeps its design (a job compiles
+          // only once its text is final). Any job of the text saves it: the
+          // first job may have been replaced in the queue by a later one with
+          // the same design (recordDesign does nothing once it is saved).
+          if (result !== 'failed' && job.room) {
+            await recordDesign($, job.env.designs, job.room.designKey, job.room.design).catch(() => undefined)
+          }
+          keep(results, job.key, result, RESULTS_KEPT)
+        }
+        // A new run of the same key may have taken the entry.
+        if (running.get(job.key) === entry) running.delete(job.key)
+        // A cancelled compile draws nothing new: no redraw.
+        if (result !== 'cancelled') jobDone($)
         pump($)
+        if (!queue.length && !running.size) probeLater($)
       })
   }
 }
 
+// A newer text of the same message replaces its job still waiting; the same
+// job again takes its new place (on screen or not, and newest).
 export function enqueue($: EngineInterface, job: Job) {
-  if (results.has(job.key) || running.has(job.key)) return
-  // A newer text of the same message replaces its job still waiting.
+  // A first compile's design is in memory at once, so a render of the same
+  // text while it compiles (a resize) uses it too.
+  if (job.room?.isNew) noteDesign(job.room.designKey, job.room.design)
+  if (results.has(job.key)) return
+  // A run cancelled (by beginEpoch) still ends; its key compiles again.
+  const runs = running.get(job.key)
+  if (runs && !runs.signal.aborted) return
   const stale = queue.findIndex(j => j.requestId === job.requestId || j.key === job.key)
   if (stale >= 0) queue.splice(stale, 1)
+  job.epoch = S.epoch
+  job.order = ++enqueued
+  stopProbe()
   queue.push(job)
+  jobQueued(job)
+  // A job of the open epoch: its rows still come, the commit waits for them.
+  extendEpoch($)
   pump($)
 }
 

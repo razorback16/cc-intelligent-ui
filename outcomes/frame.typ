@@ -1,7 +1,7 @@
-// Marketing frame: md-preview renders in terminal windows, with a headline.
+// Outcome frame: Intelligent UI renders in terminal windows, with a headline.
 // One window:  --input img=<abs png> --input mode=dark|light --input ask=..
 // Hero (two):  --input layout=hero --input img-dark=.. --input img-light=.. --input ask=..
-// Both:        --input title=.. --input sub=..   (typst compile --root / frame.typ out.png)
+// Both:        --input title=..   (typst compile --root / frame.typ out.png)
 #let inp = sys.inputs
 #let hero = inp.at("layout", default: "one") == "hero"
 #let page-dark = inp.at("mode", default: "dark") == "dark"
@@ -20,7 +20,7 @@
 })
 
 // A terminal window with Claude Code in it: the header, the prompt, the
-// answer (the md-preview picture beside the bullet), the input box and the
+// answer (the Intelligent UI picture beside the bullet), the input box and the
 // mode line. Colours are from a screenshot of Claude Code 2.1.301.
 #let window(img, dark, ask) = {
   let c = if dark { (
@@ -48,7 +48,7 @@
         mascot(0.42pt, rgb("#d77757"), c.eye),
         [*Claude Code* #text(fill: c.dim)[v2.1.301] \
          #text(fill: c.dim)[Opus 5.5 with high effort · Claude Max] \
-         #text(fill: c.dim)[\~/projects/md-preview ·] #text(fill: c.green)[/rc]])
+         #text(fill: c.dim)[\~/projects/intelligent-ui ·] #text(fill: c.green)[/rc]])
       #v(14pt)
       #block(width: 100%, fill: c.ask-bg, inset: (x: 4pt, y: 4pt), below: 0pt)[❯ #ask]
       #v(12pt)
@@ -79,11 +79,14 @@
 #set text(font: sans, fill: if page-dark { white } else { rgb("#1d1d1f") })
 
 #align(center)[
-  #text(size: 11pt, weight: "semibold", tracking: 1.5pt, fill: rgb("#d97757"))[MD-PREVIEW FOR CLAUDE CODE]
-  #v(4pt)
-  #text(size: if hero { 32pt } else { 27pt }, weight: "bold")[#inp.at("title", default: "")]
-  #v(-6pt)
-  #text(size: 13pt, fill: if page-dark { rgb("#b8b8c8") } else { rgb("#5d5d6b") })[#inp.at("sub", default: "")]
+  // The brand line is on the heroes only; on a single frame the title is the heading.
+  #if hero [
+    #text(size: 34pt, weight: "bold", tracking: 2pt, fill: rgb("#d97757"))[INTELLIGENT UI FOR CLAUDE CODE]
+    #v(-2pt)
+    #text(size: 24pt, weight: "semibold")[#inp.at("title", default: "")]
+  ] else [
+    #text(size: 27pt, weight: "bold")[#inp.at("title", default: "")]
+  ]
 ]
 #v(14pt)
 #let ask = inp.at("ask", default: "")

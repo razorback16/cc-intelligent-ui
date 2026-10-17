@@ -3,14 +3,24 @@
 // images, and the cells a picture takes. The drawing on the host is in
 // pictures.tsx.
 import type { Cell } from './state'
-import { MAX_IMAGE_ROWS, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS } from './settings'
+import { CONVERT_MAX_SIDE, MAX_IMAGE_ROWS, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, PICTURE_ROOM_ROWS, type Height } from './settings'
 import { hashOf } from './draw'
 
-// The most rows a picture under a row takes: half the viewport, within
-// PICTURE_MIN_ROWS to PICTURE_MAX_ROWS.
-export function pictureRowsFor(viewportRows: number | undefined): number {
-  return Math.max(PICTURE_MIN_ROWS, Math.min(PICTURE_MAX_ROWS, Math.floor((viewportRows ?? 2 * PICTURE_MAX_ROWS) / 2)))
+// The most rows a picture under a row (or a drawing's room) takes in a
+// terminal of `terminalRows` rows (frameFor(...).rows), by `height` (/iui
+// height): half the rows within PICTURE_MIN_ROWS to PICTURE_MAX_ROWS
+// (half); the rows less PICTURE_ROOM_ROWS (full); or a number, at most as
+// much as full. Never under PICTURE_MIN_ROWS or over MAX_IMAGE_ROWS.
+export function pictureRowsFor(terminalRows: number | undefined, height: Height): number {
+  const view = terminalRows ?? 2 * PICTURE_MAX_ROWS
+  const full = view - PICTURE_ROOM_ROWS
+  const rows = height === 'half' ? Math.min(PICTURE_MAX_ROWS, Math.floor(view / 2)) : height === 'full' ? full : Math.min(height, full)
+  return Math.min(MAX_IMAGE_ROWS, Math.max(PICTURE_MIN_ROWS, rows))
 }
+
+// A row's onScreen (e.props.onScreen) as a job's: null (the terminal holds
+// the row off screen) is false, a range is true, none is not known.
+export const onScreenOf = (v: unknown): boolean | undefined => (v === null ? false : v ? true : undefined)
 
 // The cells a picture of `size` pixels takes: its own size or smaller (never
 // larger), at most `columns` wide and `rows` tall, the aspect kept.
@@ -66,10 +76,19 @@ export const sentImages = (output: unknown) => sentFiles(output).filter(f => f.k
 // The folder of a file, for the relative images of a Markdown file.
 export const folderOf = (path: string) => path.replace(/\/+[^/]*$/, '') || '/'
 
+// The box in pixels a JPEG or WebP is made to fit: the space a picture
+// takes (as pictureCells), each side at most CONVERT_MAX_SIDE.
+export type PixelBox = { width: number; height: number }
+export function convertBox(columns: number, rows: number, px: Cell): PixelBox {
+  const side = (n: number) => Math.max(1, Math.min(CONVERT_MAX_SIDE, Math.round(n)))
+  return { width: side(columns * px.width), height: side(rows * px.height) }
+}
+
 // The PNG Typst makes of a JPEG or WebP: in a key folder of the cache (as a
-// compile's, dropped after 2 days), by the file and its stat stamp, so a
-// changed file is made again.
-export const convertedPath = (cache: string, file: string, stamp: string) => `${cache}/${hashOf(['convert', file, stamp])}/image.png`
+// compile's, dropped after 2 days), by the file, its stat stamp and the box,
+// so a changed file or a new box is made again.
+export const convertedPath = (cache: string, file: string, stamp: string, box: PixelBox) =>
+  `${cache}/${hashOf(['convert', file, stamp, box.width, box.height])}/image.png`
 
 // The numbers of the `[Image #N]` marks in a prompt, each once, in order.
 export function pastedNumbers(text: string): number[] {

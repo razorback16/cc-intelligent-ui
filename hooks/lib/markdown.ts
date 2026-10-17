@@ -1,4 +1,4 @@
-// Markdown as md-preview reads it: blocks, fences, the segments an answer is
+// Markdown as the mod reads it: blocks, fences, the segments an answer is
 // cut into, the images it names, and a plain text of it for an Image's alt.
 import { ALT_CHARS, SEGMENT_ROWS } from './settings'
 
@@ -58,14 +58,17 @@ export function blocksOf(md: string): Block[] {
   return blocks
 }
 
-// A rough count of the rows a block takes once drawn `columns` wide.
-export function rowsOfBlock(block: Block, columns: number): number {
+// A rough count of the rows a block takes once drawn `columns` wide, its
+// text at `size` percent (/iui size): fewer characters a row, and
+// taller lines.
+export function rowsOfBlock(block: Block, columns: number, size = 100): number {
   const isCode = !!block.fence
-  const perRow = columns * (isCode ? 1.0 : 1.15)
+  const scale = size / 100
+  const perRow = (columns / scale) * (isCode ? 1.0 : 1.15)
   let rows = 1
   for (const line of block.lines) {
-    rows += Math.ceil(Math.max(1, line.length) / perRow) * (isCode ? 1.1 : 1.3)
-    if (/^#{1,2}\s/.test(line)) rows += 1.5
+    rows += Math.ceil(Math.max(1, line.length) / perRow) * (isCode ? 1.1 : 1.3) * scale
+    if (/^#{1,2}\s/.test(line)) rows += 1.5 * scale
   }
   if (block.fence && isTypstInfo(block.fence.info)) rows += 20
   return rows
@@ -79,7 +82,8 @@ const FOOTNOTE_DEF = /^ {0,3}\[\^[^\]]+\]:/
 // fences of the same language; a typst fence always stays whole. A block that
 // starts indented (a list item's continuation) never starts a segment. Text
 // with footnotes stays one segment; link definitions go into every segment.
-export function splitSegments(md: string, columns: number, budget = SEGMENT_ROWS): string[] {
+// `size`: the text size percent the rows are counted at.
+export function splitSegments(md: string, columns: number, budget = SEGMENT_ROWS, size = 100): string[] {
   const blocks = blocksOf(md)
   if (!blocks.length) return []
   const outside = blocks.filter(b => !b.fence).flatMap(b => b.lines)
@@ -89,9 +93,9 @@ export function splitSegments(md: string, columns: number, budget = SEGMENT_ROWS
   const pieces: Block[] = []
   for (const block of blocks) {
     const { fence } = block
-    if (fence && !isTypstInfo(fence.info) && rowsOfBlock(block, columns) > budget && block.lines.length > 2) {
+    if (fence && !isTypstInfo(fence.info) && rowsOfBlock(block, columns, size) > budget && block.lines.length > 2) {
       const body = block.lines.slice(1, -1)
-      const per = Math.max(1, Math.floor(budget / Math.max(1.1, rowsOfBlock(block, columns) / block.lines.length)) - 2)
+      const per = Math.max(1, Math.floor(budget / Math.max(1.1, rowsOfBlock(block, columns, size) / block.lines.length)) - 2)
       for (let i = 0; i < body.length; i += per) {
         pieces.push({ lines: [block.lines[0]!, ...body.slice(i, i + per), fence.mark], fence })
       }
@@ -101,7 +105,7 @@ export function splitSegments(md: string, columns: number, budget = SEGMENT_ROWS
   const segments: Block[][] = [[]]
   let used = 0
   for (const piece of pieces) {
-    const need = rowsOfBlock(piece, columns)
+    const need = rowsOfBlock(piece, columns, size)
     const canCut = !/^\s/.test(piece.lines[0] ?? '')
     if (used + need > budget && segments.at(-1)!.length && canCut) {
       segments.push([])
@@ -113,6 +117,23 @@ export function splitSegments(md: string, columns: number, budget = SEGMENT_ROWS
   const texts = segments.map(seg => seg.map(b => b.lines.join('\n')).join('\n\n'))
   if (texts.length < 2 || !defs.length) return texts
   return texts.map(t => `${t}\n\n${defs.filter(d => !t.includes(d)).join('\n')}`.trimEnd())
+}
+
+// A segment whose page came out taller than an Image can be, cut in two by
+// the same rules (at half its rows); one piece when it can not be cut.
+export function splitInTwo(md: string, columns: number, size = 100): string[] {
+  const rows = blocksOf(md).reduce((n, block) => n + rowsOfBlock(block, columns, size), 0)
+  return splitSegments(md, columns, Math.max(1, Math.ceil(rows / 2)), size)
+}
+
+// Whether a text needs the room height (it is then in its key): it has a
+// live Typst block or a local image, whose size follows the room.
+export function needsRoom(md: string): boolean {
+  const hasTypst = md.split('\n').some(line => {
+    const m = FENCE.exec(line)
+    return !!m && isTypstInfo(m[3] ?? '')
+  })
+  return hasTypst || localImages(md).length > 0
 }
 
 // The local image paths Markdown names outside code fences.

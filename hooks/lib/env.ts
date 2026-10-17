@@ -1,10 +1,11 @@
 // The Env, once per load: the cache folder, Typst, the terminal, its font
-// and cell, the theme and the mode; and the cell measured again when the
-// viewport changes.
+// and Frame (then kept by the Frame watcher), the theme and the mode.
 import { atom, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import { BASE_THEME, DEFAULT_SIZE, DEFAULT_THEME, MAX_SIZE, MIN_SIZE, NO_TYPST } from './settings'
+import {
+  BASE_THEME, DEFAULT_HEIGHT, DEFAULT_SIZE, DESIGNS_KEPT_DAYS, DEFAULT_THEME, DEFAULT_WIDTH, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, NO_TYPST,
+} from './settings'
 import { DEFAULT_METRICS, refresh, S, type Env } from './state'
 import { resolveMode, settingOf } from './mode'
 import { isItermIn } from './terminals'
@@ -12,17 +13,20 @@ import { canDrawIn, isSet } from './terminal'
 import { claudeTmpOf } from './images'
 import { applyTheme } from './themes'
 import { registerCommand } from './command'
-import { measureCell, readHostMode, termFontOf, watchHost } from './host'
+import { readHostMode, termFontOf, watchHost } from './host'
+import { readFrame, setFrame, watchFrame } from './frame'
 import { offerSetup } from './setup'
 import { findTypst, measureFonts } from './typst'
 
 // The `isOn` atom, which setUp turns off when the stored setting says so (a
 // copy of its own: see state.ts).
-const isOn = atom({ plugin: 'md-preview', key: 'isOn' } as const, true)
+const isOn = atom({ plugin: 'intelligent-ui', key: 'isOn' } as const, true)
 
-// Makes the cache folder, drops key folders not touched for 2 days, and
-// prints the folder and the OS name.
-const CACHE_SH = `d="\${TMPDIR:-/tmp}"; d="\${d%/}/md-preview-$(id -u)"; mkdir -p "$d" && chmod 700 "$d" && { find "$d" -mindepth 1 -maxdepth 1 -type d -mtime +2 ! -name pkg-cache -exec rm -rf {} + 2>/dev/null; printf '%s\\n%s\\n' "$d" "$(uname -s)"; }`
+// Makes the cache folder, drops key folders not touched for 2 days, makes
+// the designs folder (outside the tmp cache) and drops design files not
+// touched for DESIGNS_KEPT_DAYS; prints the cache folder, the OS name and
+// the designs folder.
+const CACHE_SH = `d="\${TMPDIR:-/tmp}"; d="\${d%/}/intelligent-ui-$(id -u)"; g="\${XDG_CACHE_HOME:-$HOME/.cache}/intelligent-ui/designs"; mkdir -p "$d" && chmod 700 "$d" && { find "$d" -mindepth 1 -maxdepth 1 -type d -mtime +2 ! -name pkg-cache -exec rm -rf {} + 2>/dev/null; mkdir -p "$g" 2>/dev/null && find "$g" -type f -mtime +${DESIGNS_KEPT_DAYS} -delete 2>/dev/null; printf '%s\\n%s\\n%s\\n' "$d" "$(uname -s)" "$g"; }`
 
 // Once per load: the cache folder, Typst, the terminal and its font, the
 // theme, the cell. A failed setup is tried again on the next call.
@@ -30,8 +34,11 @@ export function setUp($: EngineInterface): Promise<Env> {
   S.envLoading ??= (async () => {
     await registerCommand($)
     const made = await $.process.run(['sh', '-c', CACHE_SH]).catch(() => null)
-    const [made1 = '', os = ''] = (made?.stdout ?? '').split('\n')
-    const cache = made1.trim() || '/tmp/md-preview'
+    const [made1 = '', os = '', made3 = ''] = (made?.stdout ?? '').split('\n')
+    const cache = made1.trim() || '/tmp/intelligent-ui'
+    // The key folders on disk now: a key found here is read back at once.
+    const listed = await $.fs.list(cache).catch(() => [])
+    S.onDisk = new Set(listed.filter(entry => entry.kind === 'dir' && entry.name !== 'pkg-cache').map(entry => entry.name))
     const program = (await $.env.get('TERM_PROGRAM')) ?? ''
     const term = (await $.env.get('TERM')) ?? ''
     const ssh = !!(await $.env.get('SSH_CONNECTION')) || !!(await $.env.get('SSH_TTY'))
@@ -43,7 +50,7 @@ export function setUp($: EngineInterface): Promise<Env> {
       ssh,
       background: (await $.env.get('CLAUDE_CODE_SESSION_KIND')) === 'bg',
       engineForced: isSet(await $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES')),
-      modForced: isSet(await $.env.get('MD_PREVIEW_FORCE')),
+      modForced: isSet(await $.env.get('IUI_FORCE')),
     })
     const root = $.plugin.root
     const template = await $.fs.stat(`${root}/render/md.typ`).catch(() => null)
@@ -51,12 +58,14 @@ export function setUp($: EngineInterface): Promise<Env> {
     const raw = rows.find(row => row.key === 'theme')?.value
     S.settingRaw = typeof raw === 'string' ? raw : ''
     S.setting = settingOf(raw)
+    S.copyOnSelect = rows.find(row => row.key === 'copyOnSelect')?.value !== false
     S.hostOs = os.trim()
     S.termProgram = program
     S.termName = term
     S.itermProfile = (await $.env.get('ITERM_PROFILE')) || undefined
     S.isKitty = /kitty/i.test(term) || !!(await $.env.get('KITTY_WINDOW_ID')) || !!(await $.env.get('KITTY_PID'))
     S.isRemote = ssh
+    S.debug = isSet(await $.env.get('IUI_DEBUG'))
     S.isIterm = isItermIn({
       program,
       profile: S.itermProfile,
@@ -73,9 +82,15 @@ export function setUp($: EngineInterface): Promise<Env> {
     watchHost($)
     const kept = Number(await $.store.get('size').catch(() => undefined))
     S.size = kept >= MIN_SIZE && kept <= MAX_SIZE ? kept : DEFAULT_SIZE
+    const width = await $.store.get('width').catch(() => undefined)
+    S.width = width === 'full' ? 'full' : Number.isInteger(width) && Number(width) >= MIN_WIDTH && Number(width) <= MAX_WIDTH ? Number(width) : DEFAULT_WIDTH
+    const height = await $.store.get('height').catch(() => undefined)
+    S.height = height === 'half' || height === 'full' ? height
+      : Number.isInteger(height) && Number(height) >= MIN_HEIGHT && Number(height) <= MAX_HEIGHT ? Number(height) : DEFAULT_HEIGHT
     if ((await $.store.get('enabled').catch(() => undefined)) === false) await update($, isOn, () => false).catch(() => undefined)
     const isMac = os.trim() === 'Darwin'
-    S.cell = await measureCell($)
+    setFrame(await readFrame($))
+    if (canDraw) watchFrame($)
     const typst = await findTypst($)
     if (!typst) {
       try {
@@ -84,13 +99,14 @@ export function setUp($: EngineInterface): Promise<Env> {
     }
     const termFont = await termFontOf($, program, isMac).catch(() => '')
     const home = (await $.env.get('HOME')) ?? ''
+    const designs = made3.trim() || (home ? `${home}/.cache/intelligent-ui/designs` : `${cache}/designs`)
     const stored = await $.store.get('theme-name').catch(() => undefined)
     const wanted = typeof stored === 'string' && stored ? stored : DEFAULT_THEME
     const applied = await applyTheme($, root, home, wanted).catch(() => null)
     if (!applied) S.look = { name: BASE_THEME, dir: `${root}/render/themes/${BASE_THEME}`, stamp: '0' }
     else if (applied.chosen.isFallback) {
       try {
-        $.ui.toast(`md-preview: theme ${wanted} not found, using ${applied.chosen.name}`, { timeoutMs: 8000 })
+        $.ui.toast(`Intelligent UI: theme ${wanted} not found, using ${applied.chosen.name}`, { timeoutMs: 8000 })
       } catch {}
     }
     S.env = {
@@ -109,6 +125,7 @@ export function setUp($: EngineInterface): Promise<Env> {
         isMac,
       }),
       termFont,
+      designs,
       metrics: typst ? await measureFonts($, typst, root, cache, termFont, S.look?.dir ?? `${root}/render/themes/${BASE_THEME}`) : DEFAULT_METRICS,
     }
     refresh($)
@@ -118,22 +135,4 @@ export function setUp($: EngineInterface): Promise<Env> {
     throw err
   })
   return S.envLoading
-}
-
-// A changed viewport may mean a changed font size: measure the cell again,
-// at most once a second, and redraw only when it really changed.
-export function noteViewport($: EngineInterface, view: { columns: number; rows: number }) {
-  const seen = `${view.columns}x${view.rows}`
-  if (seen === S.lastView) return
-  const isFirst = S.lastView === ''
-  S.lastView = seen
-  if (isFirst || !S.env) return
-  S.measureTimer?.cancel()
-  S.measureTimer = $.clock.after(1000, () => {
-    void measureCell($).then(next => {
-      if (next?.width === S.cell?.width && next?.height === S.cell?.height) return
-      S.cell = next
-      refresh($)
-    })
-  })
 }

@@ -1,4 +1,4 @@
-// md-preview themes: loads the active theme and merges it over the
+// Intelligent UI themes: loads the active theme and merges it over the
 // built-in `vscode` theme, so a user theme only lists what it changes.
 //
 //   --input theme-dir=<absolute folder that holds theme.json>  (optional)

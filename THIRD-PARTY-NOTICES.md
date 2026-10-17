@@ -1,10 +1,10 @@
 # Third-party notices
 
-md-preview is MIT licensed (see `LICENSE`). It includes the work of others, each under its own licence. Each folder below holds that project's licence file.
+Intelligent UI is MIT licensed (see `LICENSE`). It includes the work of others, each under its own licence. Each folder below holds that project's licence file.
 
 ## Typst packages (in `render/packages/preview/`)
 
-These are copies of the published packages from [Typst Universe](https://typst.app/universe), so the mod works offline.
+These are copies of the published packages from [Typst Universe](https://typst.app/universe), so Intelligent UI works offline.
 
 | Package | Version | Licence |
 |---|---|---|
@@ -20,9 +20,9 @@ cetz 0.3.4 and oxifmt are there because other packages import them.
 
 cetz and cetz-plot are under the LGPL-3.0. Their full licence text is in their folders. The LGPL-3.0 refers to the GPL-3.0, which is at https://www.gnu.org/licenses/gpl-3.0.html.
 
-## VS Code (in `render/themes/vscode/` and `render/themes/vscode-modern/`)
+## VS Code (in `render/themes/vscode/`, `render/themes/vscode-modern/` and `render/themes/claude-code/`)
 
-The colours, sizes and spacing of the two built-in themes come from [VS Code](https://github.com/microsoft/vscode): its Markdown preview styles (`markdown.css`, `highlight.css`) and its Dark+, Light+, Dark Modern and Light Modern themes. MIT, Copyright (c) 2015 - present Microsoft Corporation. The `source` key in each `theme.json` names the files.
+The colours, sizes and spacing of the `vscode` and `vscode-modern` themes come from [VS Code](https://github.com/microsoft/vscode): its Markdown preview styles (`markdown.css`, `highlight.css`) and its Dark+, Light+, Dark Modern and Light Modern themes. The `claude-code` theme uses the ANSI colours of the VS Code terminal (`terminalColorRegistry.ts`) and the syntax scopes of the `vscode` theme. MIT, Copyright (c) 2015 - present Microsoft Corporation. The `source` key in each `theme.json` names the files.
 
 ## show-your-work
 

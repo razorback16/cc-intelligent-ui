@@ -1,0 +1,22 @@
+# Limitations
+
+← Back to the [README](../README.md)
+
+- **Copying text from a picture** (refer to [Copy text from a picture](usage.md#copy-text-from-a-picture)) has these limits:
+  - The automatic copy works only on macOS, and not over ssh (`pbpaste` reads the clipboard of the computer that runs Claude Code). On other systems, the clipboard keeps the picture cells (U+10EEEE plus combining marks), and a paste gives strange characters. Use `/iui grab`, Claude Code's `/copy` (the last answer as Markdown, `/copy 2` for the one before it), or turn the mod off (`/iui off`) to select text.
+  - The mod copies whole words. It copies a word when the selection covers the middle of the word. In a code block, in a long word (30 characters or more, for example a path or a URL) and in CJK text, it copies each character whose middle is in the selection.
+  - The mod does not copy math, the text in an image, or the text in a Typst drawing.
+  - The cells do not identify the answer. The mod uses the answer of the selected row if it knows it, else the newest answer whose pages fit the selection. A selection in one page of a long answer fits each page that is tall enough, and the mod uses the first one. Thus the text can come from a different page or an older answer of the same width. `/iui dump` shows the page that the mod used.
+  - The mod knows only the last 64 answers, plans or files that it drew in this session.
+  - With two Claude Code sessions on one computer, a session that has no selection can change a copy from the other session, with the text of its own picture.
+  - To stop the clipboard write on select, set `copyOnSelect` to `false` in `/config`. Then the mod does not copy a selection either. It changes only a clipboard that has picture cells (for example, after a copy with a key).
+- **Search does not find text in a picture.**
+- **While Claude writes**, the block is hidden, and Claude Code's spinner shows the progress. When the block is final, its picture shows after the compile (0.15–0.6 s). A long answer shows only when it is done. If the picture is not ready 2 s after the block is final, the normal text shows until the picture is ready. If the compile fails, the normal text stays. An earlier answer that is not in the cache (for example, after a resume) is blank for up to 1 s, then shows as text until its picture is ready.
+- **Short summaries** between tool calls stay as text.
+- **Plan approval:** a mod cannot draw the Claude Code approval dialog, so the mod shows its own question. That question can have 4 options at most. Thus it has no option to keep planning (use Type something or Esc). The edit option cannot use a terminal editor (vim, nano), because a mod has no terminal. Where an organization manages Claude Code, `classic.PermissionRequest` hooks of a plugin that you install do not run. Then the Claude Code dialog shows after the mod's question.
+- **Typst blocks:** `#page`, `#pagebreak` and `#set page` are errors. A package that is not in the mod cannot be downloaded (the network is blocked for Typst), so its block shows as code.
+- **Security:** Typst runs with `--root /`, so a Typst block can read any file that you can read and draw it in the picture. Nothing leaves the computer.
+- **The look is close to VS Code, not exact:** Typst does not use CSS. Raw HTML in Markdown is shown in a simple form or dropped. Loose lists have tight spacing.
+- **A picture that the terminal dropped from its image memory** (after many large pictures) is not sent again when you scroll back to it.
+- **Over ssh**, the mod cannot read the terminal's config on your computer. So it uses Menlo metrics for the text size, and `auto` uses `COLORFGBG` if ssh sends it. Else `auto` is dark. The mod does not use the OS appearance of the remote computer. Pages are shorter, so that each one is at most 4096 pixels tall. In tmux or screen on the remote computer, no pictures show.
+- **`auto` theme** reads the iTerm2 profile, the Ghostty, kitty and Rio configs, and the cmux settings directly. It does not read kitty's `globinclude`, `envinclude` and `geninclude` lines, or colours that you set while kitty runs. In other terminals, it uses `COLORFGBG` (set only when the terminal starts), then the OS appearance. If you change the theme of such a terminal and the OS appearance does not change, Intelligent UI does not see it. A change shows after up to 3 s.

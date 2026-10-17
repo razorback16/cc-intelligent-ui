@@ -8,7 +8,8 @@
 // runs of (row, columns) per picture; positionsOf turns the template's probe
 // marks (render/md.typ, `<mdpos>`) into word boxes in PNG pixels; pickPages
 // says which drawn page each run is; textOfRun reads the words under a run.
-// The clipboard watcher and the commands are in register.tsx.
+// The drawn pages and the probe runs are in probe.ts; the clipboard watcher
+// and the commands are in register.tsx.
 
 // kitty's rowcolumn-diacritics.txt: 297 combining marks; mark i means row or
 // column i. (The same table is in Claude Code's binary.)
@@ -129,10 +130,13 @@ export type Mark = {
   kind?: string
   prefix?: string
   cx?: number
+  g?: number
 }
 // A word, or a whole code line (`adv`: its character advance), in PNG
 // pixels: its box, the block it is in, and its place in the document (`i`).
-export type Item = { i: number; text: string; x0: number; y0: number; x1: number; y1: number; block: number; adv?: number }
+// `glued`: a character of a long word or of CJK text after the first (it
+// joins the one before with no space).
+export type Item = { i: number; text: string; x0: number; y0: number; x1: number; y1: number; block: number; adv?: number; glued?: boolean }
 // A block: paragraph, heading, code, quote, cell (`cx` its column), item
 // (`prefix`); `first` its first item.
 export type TextBlock = { kind: string; prefix: string; cx?: number; first: number }
@@ -140,11 +144,28 @@ export type TextBlock = { kind: string; prefix: string; cx?: number; first: numb
 export type Positions = { ppi: number; blocks: TextBlock[]; pages: Item[][] }
 
 const round = (n: number) => Math.round(n * 100) / 100
+// The break chances the template adds (a zws in a long word), the strut
+// before inline code (a zwj) and other marks that draw nothing.
+const INVISIBLE = /[\u200b-\u200d\u2060\ufeff]/g
+
+// A list's marker ("-", "1.") is drawn just before its item's mark: the
+// item's prefix says it. It is the word before an item mark that is the
+// prefix's first word, or that is left of the item's first word on its line
+// (another theme's marker, a numbering of its own). The last word of a
+// paragraph before a list is on a line above.
+function isMarker(marks: readonly Mark[], j: number): boolean {
+  const m = marks[j]!
+  const next = marks[j + 1]
+  if (m.k !== 'w' || next?.k !== 'b' || next.kind !== 'item') return false
+  if (next.prefix?.trim().split(' ')[0] === m.t) return true
+  const body = marks.slice(j + 2).find(x => x.k !== 'b')
+  return !!body && body.p === m.p && body.x > m.x && Math.abs(body.y - m.y) < (m.h ?? m.s ?? 11) / 2
+}
 
 // The probe's marks (document order) as boxes in pixels at `ppi`. A list's
-// number ("1.") is drawn before its item's mark: it is dropped, the item's
-// prefix says it. A block mark with no word since the last one (an item,
-// then its paragraph) adds to that block.
+// marker is dropped (isMarker). A block mark with no word since the last one
+// (an item, then its paragraph) adds to that block. A word of only
+// invisible characters is dropped.
 export function positionsOf(marks: readonly Mark[], ppi: number): Positions {
   const k = ppi / 72
   const blocks: TextBlock[] = []
@@ -164,18 +185,20 @@ export function positionsOf(marks: readonly Mark[], ppi: number): Positions {
       }
       return
     }
-    const next = marks[j + 1]
-    if (m.k === 'w' && next?.k === 'b' && next.kind === 'item' && next.prefix?.trim() === m.t) return
+    if (isMarker(marks, j)) return
     if (!blocks.length) blocks.push({ kind: 'par', prefix: '', first: -1 })
     const block = blocks.length - 1
     const item: Item =
       m.k === 'c'
         ? {
-            i: count, text: m.t ?? '', block, x0: round(m.x * k), x1: round((m.x + (m.w ?? 0)) * k),
+            i: count, text: (m.t ?? '').replace(INVISIBLE, ''), block, x0: round(m.x * k), x1: round((m.x + (m.w ?? 0)) * k),
             y0: round((m.y - (m.a ?? 0.8 * (m.s ?? 11))) * k), y1: round((m.y + (m.d ?? 0.25 * (m.s ?? 11))) * k),
             adv: m.n ? ((m.w ?? 0) * k) / m.n : 0,
           }
-        : { i: count, text: m.t ?? '', block, x0: round(m.x * k), x1: round((m.x + (m.w ?? 0)) * k), y0: round(m.y * k), y1: round((m.y + (m.h ?? m.s ?? 11)) * k) }
+        : {
+            i: count, text: (m.t ?? '').replace(INVISIBLE, ''), block, x0: round(m.x * k), x1: round((m.x + (m.w ?? 0)) * k),
+            y0: round(m.y * k), y1: round((m.y + (m.h ?? m.s ?? 11)) * k), ...(m.g ? { glued: true } : {}),
+          }
     if (!item.text) return
     count++
     if (!hasItems) blocks[block]!.first = item.i
@@ -189,24 +212,35 @@ export function positionsOf(marks: readonly Mark[], ppi: number): Positions {
 
 // ---- Which page a run is ---------------------------------------------------
 
-// A page drawn this session: its PNG size and the rows its Image takes.
-export type DrawnPage = { file: string; width: number; height: number; rows: number }
-// An answer drawn this session (`seq` grows with each new one).
-export type Drawn = { id: string; seq: number; columns: number; dir: string; pages: DrawnPage[] }
+// A page drawn this session: its PNG size and the box its Image takes as
+// drawn (fitBox: an old page in an open epoch draws smaller than it was
+// compiled for). The placeholders count the cells of that box.
+export type DrawnPage = { file: string; width: number; height: number; columns: number; rows: number }
+// An answer drawn this session (`seq` grows with each new one); `dir` its
+// key folder. A plan is `plan:<tool_use_id>`, a Markdown file Claude sent
+// `file:<tool_use_id>:<path>`.
+export type Drawn = { id: string; seq: number; dir: string; pages: DrawnPage[] }
 export type Pick = { id: string; page: number } | null
+
+// Whether a drawing is the one of the transcript row `requestId` (a
+// selection's row): an answer by its own id, a plan or a sent file by the
+// call's tool_use_id.
+export const isDrawnIn = (id: string, requestId: string) =>
+  id === requestId || id === `plan:${requestId}` || id.startsWith(`file:${requestId}:`)
 
 // For each segment, the drawn page its run is (null: text, or none fits).
 // Runs next to each other (no text between) are one picture after the other,
 // so consecutive pages of one answer: a run that goes on in the next must
 // end on its page's last row, and the next start at row 0. A chain is
-// matched to the answer `requestId` names (the selection's transcript row)
-// when it fits, else to the newest answer it fits. Ambiguous by nature: a
+// matched to the drawing of `requestId` (the selection's transcript row,
+// isDrawnIn) when it fits, else to the newest drawing it fits. Ambiguous by nature: a
 // run inside one page of a many-page answer fits every page tall enough,
 // and the first such page is taken; an older answer drawn at the same width
 // fits as well as the newest.
 export function pickPages(segments: readonly Segment[], drawn: readonly Drawn[], requestId?: string): Pick[] {
   const picks: Pick[] = segments.map(() => null)
-  const order = [...drawn].sort((a, b) => (a.id === requestId ? -1 : b.id === requestId ? 1 : b.seq - a.seq))
+  const mine = (d: Drawn) => (requestId !== undefined && isDrawnIn(d.id, requestId) ? 1 : 0)
+  const order = [...drawn].sort((a, b) => mine(b) - mine(a) || b.seq - a.seq)
   let i = 0
   while (i < segments.length) {
     if (segments[i]!.kind !== 'image') {
@@ -223,7 +257,7 @@ export function pickPages(segments: readonly Segment[], drawn: readonly Drawn[],
         const rows = run.lines.map(l => l.row)
         const maxRow = Math.max(...rows)
         const maxCol = Math.max(...run.lines.map(l => l.colEnd))
-        if (maxRow >= page.rows || maxCol >= d.columns) return false
+        if (maxRow >= page.rows || maxCol >= page.columns) return false
         if (n > 0 && Math.min(...rows) !== 0) return false
         return n === runs.length - 1 || maxRow === page.rows - 1
       })
@@ -242,13 +276,15 @@ export function pickPages(segments: readonly Segment[], drawn: readonly Drawn[],
 // ---- The text under a run --------------------------------------------------
 
 // The words of one page under a run, in reading order. The picture fills
-// `columns` x `rows` cells, so a cell is width / columns by height / rows
-// PNG pixels. A word is under the run when its box's centre is in a selected
+// its drawn box of `columns` x `rows` cells, so a cell is width / columns by
+// height / rows PNG pixels (a page drawn smaller has larger cells). A word is under the run when its box's centre is in a selected
 // cell (its row by the vertical centre, its column by the horizontal one):
 // half a word selected copies the word when the selection covers its middle.
 // A code line is cut by characters, each by its own centre.
-export function textOfRun(lines: readonly RunLine[], items: readonly Item[], blocks: readonly TextBlock[], page: { width: number; height: number; rows: number }, columns: number): string {
-  const colW = page.width / columns
+export function textOfRun(
+  lines: readonly RunLine[], items: readonly Item[], blocks: readonly TextBlock[], page: { width: number; height: number; columns: number; rows: number },
+): string {
+  const colW = page.width / page.columns
   const rowH = page.height / page.rows
   const sel = new Map(lines.map(l => [l.row, l]))
   const picked: { item: Item; text: string }[] = []
@@ -274,8 +310,9 @@ export function textOfRun(lines: readonly RunLine[], items: readonly Item[], blo
 // a table row), a block's prefix when its first word is in, a new line
 // between code lines; inside a block a space between words, none between
 // the pieces of one word (boxes on one line closer than a fifth of the line
-// height: a space is wider, the padding beside inline code narrower), none after a - or /
-// that ends a line.
+// height: a space is wider, the padding beside inline code narrower; none
+// before a glued character that follows the one before it), none after a
+// - or / that ends a line.
 export function joinItems(picked: readonly { item: Item; text: string }[], blocks: readonly TextBlock[]): string {
   let out = ''
   let prev: { item: Item; text: string } | null = null
@@ -291,6 +328,7 @@ export function joinItems(picked: readonly { item: Item; text: string }[], block
       out += b?.kind === 'cell' && (b.cx ?? 0) > 0 && before?.kind === 'cell' ? '\t' : '\n'
       out += prefixOf(p.item)
     } else if (p.item.adv !== undefined || prev.item.adv !== undefined) out += '\n'
+    else if (p.item.glued && p.item.i === prev.item.i + 1) out += ''
     else {
       const height = p.item.y1 - p.item.y0
       const sameLine = Math.abs((p.item.y0 + p.item.y1) / 2 - (prev.item.y0 + prev.item.y1) / 2) < height / 2
@@ -312,7 +350,7 @@ export function joinSegments(segments: readonly Segment[], texts: readonly (stri
     .join('\n')
 }
 
-// For /md-preview dump: the first `max` cells or characters of the
+// For /iui dump: the first `max` cells or characters of the
 // text, a placeholder cell as `[r,c]`, other characters as U+XXXX.
 export function codePointsOf(text: string, max = 40): string {
   const cps = Array.from(text, c => c.codePointAt(0)!)

@@ -1,4 +1,4 @@
-// iTerm2 setup: the marked block /md-preview setup adds to (or removes from)
+// iTerm2 setup: the marked block /iui setup adds to (or removes from)
 // the shell's start file, and the question asked once per load.
 import type { EngineInterface } from 'claude-code'
 
@@ -10,8 +10,8 @@ import { readText } from './host'
 // $.env.set comes after its terminal check, too late). So the setup adds a
 // marked block to the shell's start file that sets it in iTerm2 alone, not in
 // tmux or screen (Claude Code cannot draw there).
-export const SETUP_START = '# >>> md-preview: Claude Code pictures in iTerm2 >>>'
-export const SETUP_END = '# <<< md-preview <<<'
+export const SETUP_START = '# >>> intelligent-ui: Claude Code pictures in iTerm2 >>>'
+export const SETUP_END = '# <<< intelligent-ui <<<'
 export type ShellRc = { path: string; kind: 'sh' | 'fish' }
 // The start file the setup writes for the login shell (`SHELL`); null for a
 // shell it does not know. iTerm2 starts login shells: bash reads
@@ -20,7 +20,7 @@ export function shellRcOf(o: { shell: string; home: string; zdotdir?: string; xd
   const name = o.shell.split('/').pop() ?? ''
   if (name === 'zsh') return { path: `${o.zdotdir || o.home}/.zshrc`, kind: 'sh' }
   if (name === 'bash') return { path: `${o.home}/${o.isMac ? '.bash_profile' : '.bashrc'}`, kind: 'sh' }
-  if (name === 'fish') return { path: `${o.xdgConfig || `${o.home}/.config`}/fish/conf.d/md-preview.fish`, kind: 'fish' }
+  if (name === 'fish') return { path: `${o.xdgConfig || `${o.home}/.config`}/fish/conf.d/intelligent-ui.fish`, kind: 'fish' }
   return null
 }
 export function setupBlock(kind: ShellRc['kind']): string {
@@ -70,18 +70,18 @@ async function shellRc($: EngineInterface): Promise<ShellRc | null> {
 export async function runSetup($: EngineInterface, remove: boolean): Promise<string> {
   const rc = await shellRc($)
   const manual = `export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 (only in iTerm2, not in tmux or screen)`
-  if (!rc) return `md-preview does not know your shell, so it changed no file. Add this to your shell's start file: ${manual}`
+  if (!rc) return `Intelligent UI does not know your shell, so it changed no file. Add this to your shell's start file: ${manual}`
   const text = (await readText($, rc.path)) ?? ''
   const restart = 'Close this tab, open a new iTerm2 tab, and start Claude Code there to see pictures.'
   if (remove) {
-    if (!hasSetup(text)) return `${rc.path} has no md-preview block.`
+    if (!hasSetup(text)) return `${rc.path} has no Intelligent UI block.`
     await $.fs.write(rc.path, withoutSetup(text))
-    return `Removed the md-preview block from ${rc.path}. New iTerm2 tabs show answers as text.`
+    return `Removed the Intelligent UI block from ${rc.path}. New iTerm2 tabs show answers as text.`
   }
-  if (hasSetup(text)) return `${rc.path} already has the md-preview block. ${restart}`
+  if (hasSetup(text)) return `${rc.path} already has the Intelligent UI block. ${restart}`
   if (rc.kind === 'fish') await $.process.run(['mkdir', '-p', rc.path.replace(/\/[^/]*$/, '')]).catch(() => null)
   await $.fs.write(rc.path, withSetup(text, rc.kind))
-  return `Added the md-preview block to ${rc.path}. ${restart} Undo with /md-preview setup remove.`
+  return `Added the Intelligent UI block to ${rc.path}. ${restart} Undo with /iui setup remove.`
 }
 
 // Asks once per load whether to add the setup block; "Never ask" is kept.
@@ -93,8 +93,8 @@ export async function offerSetup($: EngineInterface) {
   if (rc && hasSetup((await readText($, rc.path)) ?? '')) return
   const file = rc ? rc.path.replace((await $.env.get('HOME')) ?? '\u0000', '~') : "your shell's start file"
   const answer = await $.ui.ask(
-    `md-preview draws answers as pictures, but in iTerm2 Claude Code needs CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 when it starts. Add one line to ${file} that sets it in iTerm2 only (not in tmux or screen)?`,
-    { header: 'md-preview', options: ['Add the line', 'Not now', 'Never ask'] },
+    `Intelligent UI draws answers as pictures, but in iTerm2 Claude Code needs CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 when it starts. Add one line to ${file} that sets it in iTerm2 only (not in tmux or screen)?`,
+    { header: 'iui', options: ['Add the line', 'Not now', 'Never ask'] },
   )
   if (answer === 'Never ask') await $.store.set('setup', 'never')
   if (answer !== 'Add the line') return

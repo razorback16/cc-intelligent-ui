@@ -2,13 +2,16 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   alignFirstLine, DEFAULT_METRICS, DEFAULT_SIZE, firstLineOf, fontFit, ghosttyFontOf, itermFontOf, parseCommand, parseFontSpec, typstCall,
-  blocksOf, canDrawIn, cellOf, columnsFor, DEFAULT_CELL, hashOf, imagePathOf, isSet, localImages, MAX_COLUMNS,
-  parseOd, plainOf, pngSize, rowsFor, shouldRetrySafe, sizing, splitSegments, themeOf, TYPST_PROMPT,
+  blocksOf, canDrawIn, columnsFor, DEFAULT_CELL, hashOf, imagePathOf, isSet, localImages, DEFAULT_WIDTH, IMAGE_MAX_COLUMNS,
+  parseOd, plainOf, pngSize, shouldRetrySafe, sizeOf, sizing, splitSegments, themeOf, TYPST_PROMPT,
   escapeControls, luminanceOf, modeOfLuminance, OSC11_PL, parseOsc11, pickProfile, itermAppearanceOf, itermModeOf,
   GHOSTTY_DEFAULT_BG, ghosttyBackgroundOf, ghosttyThemePaths, ghosttyThemesOf, ghosttyValueOf, hexColorOf,
   modeLine, modeOfColorFgBg, modeOfGnome, modeOfMacAppearance, resolveMode, settingOf,
   BASE_THEME, DEFAULT_THEME, chooseTheme, isSyntaxPath, isThemeName, measureCall, pickThemes, renderKey, themeEntry, themeFiles, themeListing,
+  needsRoom, nextJob, pageRowsOf, resultOf, roomInputs, splitInTwo,
+  composeFrame, fitBox, pictureColumns, roomColumns, scaledBulletRow,
 } from '../hooks/register'
+import { wrapPid } from '../hooks/lib/typst'
 
 const para = (i: number) => `Paragraph ${i} ${'word '.repeat(40)}`.trim()
 const fence = (info: string, lines: number) => ['```' + info, ...Array.from({ length: lines }, (_, i) => `line ${i}`), '```'].join('\n')
@@ -116,9 +119,8 @@ test('the body font is matched to the terminal font by x-height and width', () =
 })
 
 test('size math: the PNG is exactly as wide as the box', () => {
-  expect(columnsFor(100)).toBe(98)
-  expect(columnsFor(300)).toBe(MAX_COLUMNS)
-  expect(columnsFor(undefined)).toBe(78)
+  expect(columnsFor(100, 'full')).toBe(98)
+  expect(columnsFor(undefined, 'full')).toBe(78)
   const s = sizing(100, { width: 16, height: 32 }, 6.6)
   expect(s.widthPt).toBe(660)
   expect(s.widthPx).toBe(1600)
@@ -128,6 +130,39 @@ test('size math: the PNG is exactly as wide as the box', () => {
   expect(Math.round((odd.widthPt / 72) * odd.ppi)).toBe(odd.widthPx)
   // Example: 120 columns of a 17 x 34 px cell.
   expect(sizing(120, { width: 17, height: 34 }, 5.82).widthPx).toBe(2040)
+})
+
+test('the width: full by default (the viewport less the bullet), a cap when set, 20 to 255 columns', () => {
+  expect(DEFAULT_WIDTH).toBe('full')
+  expect(columnsFor(200, DEFAULT_WIDTH)).toBe(198)
+  expect(columnsFor(200, 120)).toBe(120)
+  expect(columnsFor(100, 120)).toBe(98)
+  expect(columnsFor(200, 40)).toBe(40)
+  // An Image is 255 columns at most, also for a larger cap.
+  expect(columnsFor(400, 'full')).toBe(IMAGE_MAX_COLUMNS)
+  expect(columnsFor(400, 400)).toBe(IMAGE_MAX_COLUMNS)
+  // A narrow terminal still gets 20 columns.
+  expect(columnsFor(10, 'full')).toBe(20)
+  expect(columnsFor(10, 40)).toBe(20)
+  // Over ssh a page is 4096 px wide at most: 256 columns of 16 px, 204 of 20 px.
+  expect(columnsFor(400, 'full', { width: 16, height: 32 })).toBe(IMAGE_MAX_COLUMNS)
+  expect(columnsFor(400, 'full', { width: 20, height: 40 })).toBe(204)
+  expect(columnsFor(150, 'full', { width: 20, height: 40 })).toBe(148)
+  expect(columnsFor(400, 'full', null)).toBe(IMAGE_MAX_COLUMNS)
+})
+
+test('the width command: a value of 40 to 400, full, or nothing to show it', () => {
+  expect(parseCommand('width')).toEqual({ kind: 'width' })
+  expect(parseCommand('width full')).toEqual({ kind: 'width', width: 'full' })
+  expect(parseCommand('WIDTH Full')).toEqual({ kind: 'width', width: 'full' })
+  expect(parseCommand('width 40')).toEqual({ kind: 'width', width: 40 })
+  expect(parseCommand('width 160')).toEqual({ kind: 'width', width: 160 })
+  expect(parseCommand('width 400')).toEqual({ kind: 'width', width: 400 })
+  expect(parseCommand('width 39')).toEqual({ kind: 'bad' })
+  expect(parseCommand('width 401')).toEqual({ kind: 'bad' })
+  expect(parseCommand('width 12.5')).toEqual({ kind: 'bad' })
+  expect(parseCommand('width wide')).toEqual({ kind: 'bad' })
+  expect(parseCommand('width 120 full')).toEqual({ kind: 'bad' })
 })
 
 test('the size command takes 80 to 200 percent', () => {
@@ -143,6 +178,7 @@ test('the size command takes 80 to 200 percent', () => {
   expect(parseCommand('size big')).toEqual({ kind: 'bad' })
   expect(parseCommand('bigger')).toEqual({ kind: 'bad' })
   expect(parseCommand('probe')).toEqual({ kind: 'probe' })
+  expect(parseCommand('details')).toEqual({ kind: 'details' })
   expect(parseCommand('probe 3')).toEqual({ kind: 'bad' })
 })
 
@@ -178,28 +214,100 @@ test('the first line of text is centred on the bullet row', () => {
   }
 })
 
-test('pages are padded to whole rows, so rows round', () => {
+test('pages are padded to whole rows, so rows round; a page keeps the box it was compiled for', () => {
   const px = { width: 16, height: 32 }
-  expect(rowsFor({ width: 1600, height: 320 }, 100, px)).toBe(10)
-  expect(rowsFor({ width: 1600, height: 321 }, 100, px)).toBe(10)
-  expect(rowsFor({ width: 1600, height: 319 }, 100, px)).toBe(10)
-  expect(rowsFor({ width: 1600, height: 10 }, 100, px)).toBe(1)
-  expect(rowsFor({ width: 1600, height: 100000 }, 100, px)).toBe(255)
-  // Drawn at half the width (a narrower window before the new render), half the rows.
-  expect(rowsFor({ width: 1600, height: 640 }, 50, px)).toBe(10)
+  expect(pageRowsOf(320, px)).toBe(10)
+  expect(pageRowsOf(321, px)).toBe(10)
+  expect(pageRowsOf(319, px)).toBe(10)
+  expect(pageRowsOf(10, px)).toBe(1)
+  // Not capped here: a page over 255 rows is cut in two by compile.
+  expect(pageRowsOf(100000, px)).toBe(3125)
   expect(DEFAULT_CELL.height / DEFAULT_CELL.width).toBe(2)
+  // A kept pages.json without the box (an older format) is not used.
+  const page = { file: '/c/k/a-1.png', width: 1600, height: 320, alt: 'x', columns: 100, rows: 10 }
+  expect(resultOf(JSON.stringify({ pages: [page], bulletRow: 0 }))).toMatchObject({ pages: [page] })
+  expect(resultOf(JSON.stringify({ pages: [{ ...page, columns: undefined, rows: undefined }], bulletRow: 0 }))).toBe(null)
+  expect(resultOf('not json')).toBe(null)
+})
+
+test('a text needs the room height only with a live Typst block or a local image', () => {
+  expect(needsRoom('# Title\n\nSome text.')).toBe(false)
+  expect(needsRoom('```js\nx()\n```')).toBe(false)
+  expect(needsRoom('```typst\n#rect()\n```')).toBe(true)
+  expect(needsRoom('Text\n\n```typ\n#rect()\n```')).toBe(true)
+  // In a list item too (the template draws it live there as well).
+  expect(needsRoom('- item\n\n  ```typst\n  #rect()\n  ```')).toBe(true)
+  expect(needsRoom('See ![a plot](./plot.png).')).toBe(true)
+  expect(needsRoom('See ![a plot](https://x.org/plot.png).')).toBe(false)
+  expect(needsRoom('```md\n![a plot](./plot.png)\n```')).toBe(false)
+})
+
+test('the room height is in the key only when it is given (a text that needs it)', () => {
+  const o = {
+    textHash: 'h', columns: 100, cell: DEFAULT_CELL, size: 100, mode: 'dark' as const, termFont: '', columnPt: 6,
+    templateStamp: '1', look: { name: 'vscode', dir: '/t', stamp: '0' },
+  }
+  const room = { heightPt: 300, design: { widthPt: 596, heightPt: 300 }, designKey: 'd', isNew: true }
+  const plain = renderKey(o)
+  expect(renderKey({ ...o, room: undefined })).toBe(plain)
+  const roomed = renderKey({ ...o, room })
+  expect(roomed).not.toBe(plain)
+  // Whether the design is new is not in the key: the same space either way.
+  expect(renderKey({ ...o, room: { ...room, isNew: false, designKey: 'e' } })).toBe(roomed)
+  expect(renderKey({ ...o, room: { ...room, heightPt: 200 } })).not.toBe(roomed)
+  expect(renderKey({ ...o, room: { ...room, design: { widthPt: 500, heightPt: 300 } } })).not.toBe(roomed)
+})
+
+test('the room goes to the template in pt: the design page width and room height', () => {
+  expect(roomInputs(undefined)).toEqual({})
+  // A first render: the design is the space now, so the factor is 1 (design-w = width).
+  const width = 600
+  const room = { heightPt: 352.123, design: { widthPt: width, heightPt: 352.123 }, designKey: 'd', isNew: true }
+  expect(roomInputs(room)).toEqual({ height: 352.12, 'design-w': width, 'design-h': 352.12 })
+})
+
+test('rows are counted at the text size: at 200% a long answer is cut into more segments', () => {
+  const md = Array.from({ length: 60 }, (_, i) => para(i)).join('\n\n')
+  const at100 = splitSegments(md, 100)
+  const at200 = splitSegments(md, 100, undefined, 200)
+  expect(at200.length).toBeGreaterThanOrEqual(at100.length * 2)
+  expect(words(at200.join('\n\n'))).toEqual(words(md))
+})
+
+test('a segment too tall for an Image is cut in two by the same rules; one block stays whole', () => {
+  const md = Array.from({ length: 12 }, (_, i) => para(i)).join('\n\n')
+  const two = splitInTwo(md, 100)
+  expect(two.length).toBe(2)
+  expect(words(two.join('\n\n'))).toEqual(words(md))
+  expect(splitInTwo(para(1), 100)).toEqual([para(1)])
+})
+
+test('the queue takes a job on screen first, then the newest', () => {
+  const job = (key: string, order: number, onScreen?: boolean) => ({ key, order, ...(onScreen ? { onScreen } : {}) }) as any
+  expect(nextJob([])).toBe(-1)
+  expect(nextJob([job('a', 1), job('b', 3), job('c', 2)])).toBe(1)
+  expect(nextJob([job('a', 1, true), job('b', 3), job('c', 2, true)])).toBe(2)
+  expect(nextJob([job('a', 5), job('b', 4, true)])).toBe(1)
+  // Known off screen: after any other, the newest of them first.
+  const off = (key: string, order: number) => ({ key, order, onScreen: false }) as any
+  expect(nextJob([job('a', 1), off('b', 9)])).toBe(0)
+  expect(nextJob([off('a', 1), off('b', 2)])).toBe(1)
+})
+
+test('a compile runs through a shell that prints its PID, then becomes typst', () => {
+  expect(wrapPid(['/usr/bin/typst', 'compile', 'a b.typ'])).toEqual(['sh', '-c', 'echo $$; exec "$@"', 'sh', '/usr/bin/typst', 'compile', 'a b.typ'])
 })
 
 test('the cell comes from the tty in device pixels, with no scale step', () => {
   // iTerm2 on Retina, 14 pt Meslo: 2040 x 1700 px for 120 x 50 cells.
-  expect(cellOf('50 120 2040 1700')).toEqual({ width: 17, height: 34 })
+  expect(sizeOf('50 120 2040 1700')).toEqual({ rows: 50, columns: 120, cell: { width: 17, height: 34 } })
   // Ghostty on Retina reports device pixels too.
-  expect(cellOf('40 200 3200 1360')).toEqual({ width: 16, height: 34 })
-  expect(cellOf('50 200 0 0')).toBe(null)
-  expect(cellOf('')).toBe(null)
+  expect(sizeOf('40 200 3200 1360')).toEqual({ rows: 40, columns: 200, cell: { width: 16, height: 34 } })
+  expect(sizeOf('50 200 0 0')).toEqual({ rows: 50, columns: 200, cell: null })
+  expect(sizeOf('')).toBe(null)
   // Not believable: under 4 or over 64 px a cell.
-  expect(cellOf('50 200 600 1700')).toBe(null)
-  expect(cellOf('50 20 1700 1700')).toBe(null)
+  expect(sizeOf('50 200 600 1700')?.cell).toBe(null)
+  expect(sizeOf('50 20 1700 1700')?.cell).toBe(null)
 })
 
 test('the terminal font is read from iTerm2 and Ghostty settings', () => {
@@ -338,22 +446,22 @@ test('a theme folder is usable only with a theme.json object', () => {
 
 test('a user theme replaces the built-in one of its name; a broken one is only reported', () => {
   const found = [
-    themeEntry('nord', '/home/.claude/md-preview/themes/nord', true, '{"description":"mine"}'),
+    themeEntry('nord', '/home/.claude/intelligent-ui/themes/nord', true, '{"description":"mine"}'),
     themeEntry('vscode', '/mod/render/themes/vscode', false, '{"name":"VS Code"}'),
     themeEntry('nord', '/mod/render/themes/nord', false, '{"description":"built-in"}'),
-    themeEntry('vscode', '/home/.claude/md-preview/themes/vscode', true, '{not json'),
-    themeEntry('solar', '/home/.claude/md-preview/themes/solar', true, '[1]'),
+    themeEntry('vscode', '/home/.claude/intelligent-ui/themes/vscode', true, '{not json'),
+    themeEntry('solar', '/home/.claude/intelligent-ui/themes/solar', true, '[1]'),
   ]
   const { themes, problems } = pickThemes(found)
   expect([...themes.keys()].sort()).toEqual(['nord', 'vscode'])
   expect(themes.get('nord')).toMatchObject({ isUser: true, description: 'mine' })
   expect(themes.get('vscode')).toMatchObject({ isUser: false, dir: '/mod/render/themes/vscode' })
   expect(problems.map(p => p.name).sort()).toEqual(['solar', 'vscode'])
-  const listing = themeListing(themes, problems, 'nord', '/home/.claude/md-preview/themes')
+  const listing = themeListing(themes, problems, 'nord', '/home/.claude/intelligent-ui/themes')
   expect(listing).toContain('* nord (user): mine')
   expect(listing).toContain('- vscode (built-in)')
   expect(listing).toContain('skipped solar (user)')
-  expect(listing).toContain('/home/.claude/md-preview/themes/<name>/theme.json')
+  expect(listing).toContain('/home/.claude/intelligent-ui/themes/<name>/theme.json')
 })
 
 test('a missing theme falls back to the base theme, even before it is on disk', () => {
@@ -368,7 +476,7 @@ test('a missing theme falls back to the default theme when it is there', () => {
     themeEntry(BASE_THEME, `/mod/render/themes/${BASE_THEME}`, false, '{}'),
     themeEntry(DEFAULT_THEME, `/mod/render/themes/${DEFAULT_THEME}`, false, '{}'),
   ])
-  expect(DEFAULT_THEME).toBe('vscode-modern')
+  expect(DEFAULT_THEME).toBe('claude-code')
   expect(chooseTheme(themes, 'gone', '/mod')).toEqual({ name: DEFAULT_THEME, dir: `/mod/render/themes/${DEFAULT_THEME}`, isFallback: true })
   expect(chooseTheme(themes, DEFAULT_THEME, '/mod')).toMatchObject({ name: DEFAULT_THEME, isFallback: false })
   expect(chooseTheme(themes, BASE_THEME, '/mod')).toMatchObject({ name: BASE_THEME, isFallback: false })
@@ -546,4 +654,30 @@ test('the probe output is shown with its control characters spelled out', () => 
   expect(escapeControls('a\x1b\\\x01')).toBe('a\\e\\\\x01')
   expect(OSC11_PL).toContain('O_NONBLOCK')
   expect(OSC11_PL).not.toContain('stty')
+})
+
+// ---- The room of a picture ----------------------------------------------------
+
+test('a box wider than its room is drawn at the room, the aspect kept; a box that fits is never grown', () => {
+  expect(fitBox({ columns: 211, rows: 40 }, 118)).toEqual({ columns: 118, rows: 22 })
+  expect(fitBox({ columns: 200, rows: 1 }, 50)).toEqual({ columns: 50, rows: 1 })
+  expect(fitBox({ columns: 98, rows: 12 }, 118)).toEqual({ columns: 98, rows: 12 })
+  expect(fitBox({ columns: 118, rows: 12 }, 118)).toEqual({ columns: 118, rows: 12 })
+})
+
+test('the bullet row scales with the page; at factor 1 it stays', () => {
+  expect(scaledBulletRow(0, 0.5)).toBe(0)
+  expect(scaledBulletRow(2, 1)).toBe(2)
+  expect(scaledBulletRow(2, 0.56)).toBe(1)
+  expect(scaledBulletRow(3, 0.5)).toBe(1)
+})
+
+test('a picture of the target always fits the room of the same viewport', () => {
+  for (const columns of [10, 22, 60, 100, 120, 213, 257, 300, 400]) {
+    for (const width of ['full', 40, 100, 160] as const) {
+      const frame = composeFrame(null, { columns, rows: 40 })
+      expect(columnsFor(frame.columns, width)).toBeLessThanOrEqual(roomColumns({ columns }))
+      expect(pictureColumns(frame, true)).toBeLessThanOrEqual(roomColumns({ columns }))
+    }
+  }
 })

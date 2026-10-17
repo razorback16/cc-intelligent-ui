@@ -61,6 +61,8 @@
     "leading-em": 0.38,
     "paragraph-em": 1.2
   },
+  "math-scale": 1.2,
+  "math-inline-scale": 1.1,
   "heading": {
     "size-em": [2, 1.5, 1.25, 1, 0.875, 0.85],
     "weight": 600,
@@ -76,6 +78,7 @@
     "gap-em": 0.55,
     "number-indent-em": 1.45,
     "number-gap-em": 0.5,
+    "numbering": "1.",
     "item-spacing-em": 0.38
   },
   "inline-code": {

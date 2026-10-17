@@ -1,22 +1,32 @@
-// md-preview's state: the types the modules share, the values that change
+// Intelligent UI's state: the types the modules share, the values that change
 // (`S`), the caches, and refresh (the `done` atom).
 import { atom, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { MdPreviewTheme } from '../../types'
+import type { IuiTheme } from '../../types'
 import type { ThemeInfo } from './themes'
 import type { HostMode, ThemeSetting } from './mode'
 import type { PlanVerdict } from './plan'
 import type { Drawn, Positions } from './copy'
-import { DEFAULT_SIZE } from './settings'
+import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } from './settings'
 
 // The `done` atom (see types/index.d.ts) for refresh. The state scan of
 // `claude plugin validate` reads an atom only from a const in the file that
 // reads or writes it, so each such file has a copy of its own (atom() is a
 // plain description: the copies are one value).
-const done = atom({ plugin: 'md-preview', key: 'done' } as const, 0)
+const done = atom({ plugin: 'intelligent-ui', key: 'done' } as const, 0)
 
 export type Cell = { width: number; height: number }
+// The terminal now (one TIOCGWINSZ read): its columns, rows and cell in
+// device pixels. A font size change is a change of the cell.
+export type Frame = { columns: number; rows: number; cell: Cell }
+// The drawing space in pt at the first compile of a text: the page width
+// (the template's `width`) and the room height. Its live Typst blocks scale from it.
+export type Design = { widthPt: number; heightPt: number }
+// The room for a drawing: its height in pt now, and the design of the text.
+// `designKey` names the design's file; `isNew`: no file yet (the design is
+// the space now, recorded once a final compile succeeds).
+export type Room = { heightPt: number; design: Design; designKey: string; isNew: boolean }
 // Per 1 em (render/measure.typ): `adv` the width of "0", `xh` the x-height,
 // `avg` the mean advance over a lowercase pangram.
 export type FontMetrics = { adv: number; xh: number; avg: number }
@@ -45,21 +55,35 @@ export type Env = {
   // The terminal's font family ('' when not known) and the fonts' metrics.
   termFont: string
   metrics: Metrics
+  // The designs folder (designs.ts), outside the 2-day tmp cleanup.
+  designs: string
 }
-export type Page = { file: string; width: number; height: number; alt: string }
-export type Result = { pages: Page[]; columns: number; bulletRow: number; note?: string }
+// `columns` and `rows`: the cell box the page was compiled for (it is drawn
+// at that box, never stretched).
+export type Page = { file: string; width: number; height: number; alt: string; columns: number; rows: number }
+export type Result = { pages: Page[]; bulletRow: number; note?: string }
 export type Job = {
   key: string
   requestId: string
   text: string
   columns: number
   cell: Cell
-  theme: MdPreviewTheme
+  theme: IuiTheme
   size: number
   themeDir: string
   env: Env
   // The folder relative images start from (a Markdown file's); else env.cwd.
   base?: string
+  // The room for its drawings (a text with a live Typst block or a local image).
+  room?: Room
+  // The epoch (S.epoch) it was enqueued in: only the open epoch's jobs hold
+  // its commit (set by enqueue).
+  epoch: number
+  // The queue's order: a row on screen first, then the newest (`order`, set
+  // by enqueue). `onScreen` false: the row is known to be off screen (it
+  // does not hold the commit); undefined: not known.
+  onScreen?: boolean
+  order?: number
 }
 // The active theme: its name, folder, and the mtimes of its files and the
 // base theme's, which are part of every key.
@@ -71,14 +95,41 @@ export type Look = { name: string; dir: string; stamp: string }
 export const S = {
   env: null as Env | null,
   envLoading: null as Promise<Env> | null,
-  cell: null as Cell | null,
-  theme: 'dark' as MdPreviewTheme,
+  // The target: the terminal now, settled (the tty's Frame with its columns
+  // at most the viewport's). Keys and compiles use it. Only frame.ts and
+  // beginEpoch set it. Null until the first read.
+  frame: null as Frame | null,
+  // The Frame whose pictures are on screen: the target once its epoch
+  // committed (all its pictures swap in one redraw). Pictures size from it.
+  shown: null as Frame | null,
+  // The epoch: one for each new target (a settled resize, a setting, a mode).
+  // It is open while `epoch` is not `shownEpoch` (epochOpen).
+  epoch: 0,
+  shownEpoch: 0,
+  // A burst of tty lines or viewports is not quiet yet: no job starts, and
+  // the epoch does not commit. `missed`: a job ended while it was so.
+  resizing: false,
+  missed: false,
+  // The last good tty read and the last viewport a render hook saw, not
+  // settled yet (frame.ts settles them into `frame`).
+  tty: null as Frame | null,
+  viewColumns: null as number | null,
+  viewRows: null as number | null,
+  // The key folders in the cache at setUp: a key found there is read back
+  // at once (a reopened session), with no queue and no blank.
+  onDisk: new Set<string>(),
+  theme: 'dark' as IuiTheme,
   size: DEFAULT_SIZE,
+  // `/iui width`: the most columns a picture takes, or full.
+  width: DEFAULT_WIDTH as Width,
+  // `/iui height`: the most rows an image or a Typst drawing takes (half, full or a number).
+  height: DEFAULT_HEIGHT as Height,
+  // The height setting of the pictures on screen: `height` once its epoch
+  // committed (with `shown`), so an image box changes in one step.
+  shownHeight: DEFAULT_HEIGHT as Height,
   look: null as Look | null,
   // The usable themes the last scan found, for the typeahead.
   themeChoices: [] as ThemeInfo[],
-  lastView: '',
-  measureTimer: null as { cancel: () => void } | null,
   // Claude Code's theme setting as set (`settingRaw`) and read (`setting`); with
   // auto, `host` is the OS appearance last read and `watch` the poll timer. A
   // hot reload cancels the old module's timers (`$.clock` docs), so `watch`
@@ -99,7 +150,9 @@ export const S = {
   // Over ssh (set in setUp): the terminal's config and the OS appearance here
   // are the remote computer's, not those of the user's screen.
   isRemote: false,
-  // iTerm2 with the engine's pictures off at start: /md-preview setup can help
+  // IUI_DEBUG is set (setUp): trace lines go to the debug log.
+  debug: false,
+  // iTerm2 with the engine's pictures off at start: /iui setup can help
   // (`setupNeeded`); the question is asked once per load (`setupAsked`).
   setupNeeded: false,
   setupAsked: false,
@@ -108,14 +161,18 @@ export const S = {
   // Streaming: model requests of the main loop in flight.
   stepsLive: 0,
   // The plan (plan.tsx): the main loop's running turn (`turn.start`), the
-  // verdict md-preview's question gave for the PermissionRequest that follows
+  // verdict the mod's question gave for the PermissionRequest that follows
   // (null: none, the engine's dialog asks), the question asked now ('': none),
   // and the `code` command's path (null: not looked up yet; '': none).
   mainTurnId: '',
   planVerdict: null as PlanVerdict | null,
   planAsking: '',
   planCode: null as string | null,
+  // Claude Code's copyOnSelect setting (setUp, config.set): false, a mouse
+  // selection is not copied, so the watcher does not copy it either.
+  copyOnSelect: true,
 }
+// The compile results by key (an LRU: set with `keep` at RESULTS_KEPT).
 export const results = new Map<string, Result | 'failed'>()
 // Streaming: model requests of the main loop in flight (`S.stepsLive`), the
 // blocks drawn blank while their text streams (with the job to compile once
@@ -125,11 +182,17 @@ export const live = new Map<string, { job: Job; still: { cancel: () => void } }>
 export const finalized = new Set<string>()
 // A final block not drawn yet: blank until `showText` (its deadline passed).
 export const pending = new Map<string, { textHash: string; showText: boolean; timer: { cancel: () => void } }>()
+// The jobs waiting, and the jobs that compile now by key (with the cancel
+// of each: beginEpoch stops them; and its signal: an entry cancelled still
+// holds its slot until its compile ends, but its key may be enqueued again).
 export const queue: Job[] = []
-export const running = new Set<string>()
-// The last result drawn per message, so a width change keeps the old picture
-// (scaled) until the new one is ready instead of falling back to text.
-export const shown = new Map<string, { textHash: string; result: Result }>()
+export const running = new Map<string, { job: Job; cancel: () => void; signal: AbortSignal }>()
+// An epoch is open: its target is not on screen yet.
+export const epochOpen = () => S.epoch !== S.shownEpoch
+// The key last drawn per message (and its text), so a new size keeps the old
+// picture (at its own box) until the new one is ready instead of the text.
+// The oldest go past RESULTS_KEPT, as `results`.
+export const lastKey = new Map<string, { key: string; textHash: string }>()
 // Over ssh: each page file's PNG as base64 (null: too large to send), read
 // once so a redraw does not read it again; the oldest go past INLINE_KEPT.
 export const inlined = new Map<string, string | null>()
@@ -138,13 +201,16 @@ export const INLINE_KEPT = 64
 // PNG), and the pasted-images folder of each session once found.
 export const pictures = new Map<string, { stamp: string; size: { width: number; height: number } | null }>()
 export const pasteDirs = new Map<string, string>()
-// SendUserFile: the PNG Typst made of each JPEG or WebP by its stat stamp
-// (null: it failed), the ones Typst makes now, and the text of each Markdown
-// file by its stat stamp (null: it does not draw).
-export const converted = new Map<string, { stamp: string; png: string | null }>()
+// SendUserFile: the PNG Typst made of each JPEG or WebP by its file, stat
+// stamp and box (null: it failed), the ones Typst makes now (same keys), the
+// last PNG made of each file (any box: it draws while a new box is made),
+// and the text of each Markdown file by its stat stamp (null: it does not
+// draw).
+export const converted = new Map<string, string | null>()
 export const converting = new Map<string, Promise<string | null>>()
+export const lastConverted = new Map<string, { stamp: string; png: string }>()
 export const sentTexts = new Map<string, { stamp: string; text: string | null }>()
-// The plan: the text edited in md-preview's flow, by the call's tool_use_id
+// The plan: the text edited in Intelligent UI's flow, by the call's tool_use_id
 // (its rows draw it), and the ExitPlanMode calls of subagents (drawn as the
 // engine draws them).
 export const editedPlans = new Map<string, string>()
@@ -153,27 +219,44 @@ export const subagentPlans = new Set<string>()
 // waits for its file's).
 export const writesLive = new Map<string, number>()
 
-// Redraws every reader of `done`; an invalidate where the write is refused.
-export function refresh($: EngineInterface) {
-  void update($, done, n => n + 1).catch(() => $.ui.invalidate('ui.render'))
-}
-
-// Copy: the answers drawn this session by their requestId (a plan by
-// `plan:<tool_use_id>`; oldest first, at most DRAWN_KEPT), each answer
-// folder's word positions once read, and the clipboard watcher's state: its
-// timer and when it last ran, the clipboard text last seen and last written
-// (so a write is never read back as new), the last text with placeholders
-// and how it was read (for dump).
+// Copy (copy.ts, probe.ts): the pages drawn this session by their id (an
+// answer's requestId, `plan:<tool_use_id>`, `file:<tool_use_id>:<path>`;
+// oldest first, at most DRAWN_KEPT), and each key folder's word positions
+// once read (the oldest go past DRAWN_KEPT).
 export const drawnAnswers = new Map<string, Drawn>()
 export const DRAWN_KEPT = 64
 export const positionsByDir = new Map<string, Positions>()
+// The clipboard watcher (register.tsx): its timer and when it last ran,
+// whether its first tick noted the selection there was (`seeded`), the
+// clipboard text last seen and last written (so a write is never read back
+// as new), the last selection handled, the last text with placeholders
+// with its row (`rawRow`, when known) and how it was read (for dump), and
+// the order of the drawings (`seq`).
 export const clip = {
   watch: null as { cancel: () => void } | null,
   ticked: 0,
+  seeded: false,
   busy: false,
   seen: '',
   wrote: '',
+  selected: '',
   raw: '',
+  rawRow: undefined as string | undefined,
   seq: 0,
   last: null as unknown,
+}
+
+// Sets a cache entry as the newest; the oldest go past `max`.
+export function keep<T>(cache: Map<string, T>, key: string, value: T, max: number) {
+  cache.delete(key)
+  cache.set(key, value)
+  for (const old of cache.keys()) {
+    if (cache.size <= max) break
+    cache.delete(old)
+  }
+}
+
+// Redraws every reader of `done`; an invalidate where the write is refused.
+export function refresh($: EngineInterface) {
+  void update($, done, n => n + 1).catch(() => $.ui.invalidate('ui.render'))
 }

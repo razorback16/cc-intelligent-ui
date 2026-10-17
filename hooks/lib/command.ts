@@ -1,14 +1,23 @@
-// The /md-preview command: its arguments, the typeahead rows for them, and
+// The /iui command: its arguments, the typeahead rows for them, and
 // its registration.
 import type { EngineInterface } from 'claude-code'
 
-import { DEFAULT_SIZE, MAX_SIZE, MIN_SIZE } from './settings'
+import {
+  DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, PICTURE_ROOM_ROWS,
+  type Height, type Width,
+} from './settings'
 import { isThemeName, type ThemeInfo } from './themes'
 
-// `/md-preview` arguments: on, off, size <80-200>, or nothing (show state).
+// `/iui` arguments: on, off, size <80-200>, width [40-400|full],
+// height [6-200|half|full], details (all Intelligent UI found), grab (copy
+// the text of the last mouse selection of pictures), dump (how the last
+// clipboard with picture cells was read), or nothing (show state). A `width`
+// or `height` with no value shows it.
 export type Command =
-  | { kind: 'on' | 'off' | 'show' | 'probe' | 'grab' | 'dump' }
+  | { kind: 'on' | 'off' | 'show' | 'details' | 'probe' | 'grab' | 'dump' }
   | { kind: 'size'; percent: number }
+  | { kind: 'width'; width?: Width }
+  | { kind: 'height'; height?: Height }
   | { kind: 'theme'; name?: string }
   | { kind: 'setup'; remove: boolean }
   | { kind: 'bad' }
@@ -21,38 +30,58 @@ export function parseCommand(args: string): Command {
     if (typed.length === 2 && isThemeName(typed[1]!)) return { kind: 'theme', name: typed[1]! }
     return { kind: 'bad' }
   }
-  if (words.length === 1 && (words[0] === 'on' || words[0] === 'off' || words[0] === 'probe' || words[0] === 'grab' || words[0] === 'dump')) return { kind: words[0] }
+  if (words.length === 1 && (words[0] === 'on' || words[0] === 'off' || words[0] === 'details' || words[0] === 'probe' || words[0] === 'grab' || words[0] === 'dump')) {
+    return { kind: words[0] }
+  }
   if (words[0] === 'setup' && words.length === 1) return { kind: 'setup', remove: false }
   if (words[0] === 'setup' && words.length === 2 && words[1] === 'remove') return { kind: 'setup', remove: true }
   if (words[0] === 'size' && words.length === 2 && /^\d+%?$/.test(words[1]!)) {
     const percent = Number.parseInt(words[1]!, 10)
     if (percent >= MIN_SIZE && percent <= MAX_SIZE) return { kind: 'size', percent }
   }
+  if (words[0] === 'width' && words.length === 1) return { kind: 'width' }
+  if (words[0] === 'width' && words.length === 2 && words[1] === 'full') return { kind: 'width', width: 'full' }
+  if (words[0] === 'width' && words.length === 2 && /^\d+$/.test(words[1]!)) {
+    const width = Number.parseInt(words[1]!, 10)
+    if (width >= MIN_WIDTH && width <= MAX_WIDTH) return { kind: 'width', width }
+  }
+  if (words[0] === 'height' && words.length === 1) return { kind: 'height' }
+  if (words[0] === 'height' && words.length === 2 && (words[1] === 'half' || words[1] === 'full')) return { kind: 'height', height: words[1] }
+  if (words[0] === 'height' && words.length === 2 && /^\d+$/.test(words[1]!)) {
+    const height = Number.parseInt(words[1]!, 10)
+    if (height >= MIN_HEIGHT && height <= MAX_HEIGHT) return { kind: 'height', height }
+  }
   return { kind: 'bad' }
 }
 
-// The /md-preview arguments, and the sizes the typeahead offers.
+// The /iui arguments, and the sizes, widths and heights the typeahead offers.
 const SUBCOMMANDS = [
   { name: 'on', description: 'draw answers as pictures' },
   { name: 'off', description: 'show answers as text' },
   { name: 'size', description: `text size, ${MIN_SIZE}-${MAX_SIZE}%` },
+  { name: 'width', description: `the most columns a picture takes, ${MIN_WIDTH}-${MAX_WIDTH} or full` },
+  { name: 'height', description: `the most rows an image or a Typst drawing takes, ${MIN_HEIGHT}-${MAX_HEIGHT}, half or full` },
   { name: 'theme', description: 'list the themes, or switch to one' },
   { name: 'setup', description: 'iTerm2: add the shell line that turns pictures on' },
+  { name: 'details', description: 'the mode source, the terminal font, Typst and the terminal' },
   { name: 'grab', description: 'copy the text of the pictures you last selected' },
   { name: 'dump', description: 'show what the clipboard held and how it was read' },
 ] as const
 const SIZES = [80, 90, 100, 110, 120, 125, 150, 175, 200]
+const WIDTHS: readonly Width[] = [80, 100, 120, 160, 200, 'full']
+const HEIGHTS: readonly Height[] = ['half', 'full', 12, 24, 36]
 
-// Typeahead rows for `/md-preview` arguments: the word at the cursor (`token`,
-// starting at `start` in `text`) completed as a subcommand, a theme name or a
-// size. Right after `theme` or `size`, rows hold the word and its argument,
-// since the typeahead asks only while a word is at the cursor.
+// Typeahead rows for `/iui` arguments: the word at the cursor (`token`,
+// starting at `start` in `text`) completed as a subcommand, a theme name, a
+// size, a width or a height. Right after `theme`, `size`, `width` or
+// `height`, rows hold the word and its argument, since the typeahead asks
+// only while a word is at the cursor.
 export type Suggestion = { text: string; label?: string; description?: string }
 export function commandSuggestions(
   text: string, token: string, start: number,
-  o: { themes: readonly ThemeInfo[]; active: string; size: number },
+  o: { themes: readonly ThemeInfo[]; active: string; size: number; width?: Width; height?: Height },
 ): Suggestion[] {
-  const head = /^\s*\/md-preview\s+/.exec(text)
+  const head = /^\s*\/iui\s+/.exec(text)
   if (!head || start < head[0].length) return []
   const before = text.slice(head[0].length, start).trim().split(/\s+/).filter(Boolean).map(w => w.toLowerCase())
   const word = token.toLowerCase()
@@ -67,22 +96,43 @@ export function commandSuggestions(
   const sizeRows = (prefix: string, lead: string) => SIZES
     .filter(n => String(n).startsWith(prefix))
     .map(n => ({ text: `${lead}${n}`, label: `${n}%`, description: n === o.size ? 'current' : n === DEFAULT_SIZE ? 'the terminal text size' : undefined }))
+  const width = o.width ?? DEFAULT_WIDTH
+  const widthRows = (prefix: string, lead: string) => WIDTHS
+    .filter(w => String(w).startsWith(prefix))
+    .map(w => ({
+      text: `${lead}${w}`,
+      label: w === 'full' ? 'full' : `${w} columns`,
+      description: w === width ? 'current' : w === DEFAULT_WIDTH ? 'the default' : w === 'full' ? `the terminal width (${IMAGE_MAX_COLUMNS} at most)` : undefined,
+    }))
+  const height = o.height ?? DEFAULT_HEIGHT
+  const heightRows = (prefix: string, lead: string) => HEIGHTS
+    .filter(h => String(h).startsWith(prefix))
+    .map(h => ({
+      text: `${lead}${h}`,
+      label: typeof h === 'number' ? `${h} rows` : h,
+      description: h === height ? 'current' : h === DEFAULT_HEIGHT ? 'the default: half the terminal'
+        : h === 'full' ? `the terminal height less ${PICTURE_ROOM_ROWS} rows` : undefined,
+    }))
   if (before.length === 0) {
     if (word === 'theme') return themeRows('', 'theme ')
+    if (word === 'height') return heightRows('', 'height ')
     if (word === 'size') return sizeRows('', 'size ')
+    if (word === 'width') return widthRows('', 'width ')
     return SUBCOMMANDS.filter(c => c.name.startsWith(word)).map(c => ({ text: c.name, description: c.description }))
   }
   if (before.length === 1 && before[0] === 'theme') return themeRows(word, '')
   if (before.length === 1 && before[0] === 'size') return sizeRows(word.replace(/%$/, ''), '')
+  if (before.length === 1 && before[0] === 'width') return widthRows(word, '')
+  if (before.length === 1 && before[0] === 'height') return heightRows(word, '')
   return []
 }
 
-// /md-preview; registered at session start and again in setUp, so it is
+// /iui; registered at session start and again in setUp, so it is
 // there after a hot reload too.
 export async function registerCommand($: EngineInterface) {
   await $.command.register({
-    name: 'md-preview',
-    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), theme [name] (list or switch themes), grab (copy the selected pictures' text), dump (copy diagnostics)",
-    argumentHint: '[on|off|size <percent>|theme [name]|grab|dump]',
+    name: 'iui',
+    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image or a Typst drawing takes), theme [name] (list or switch themes), grab (copy the selected pictures' text), dump (copy diagnostics)",
+    argumentHint: '[on|off|size <percent>|width [columns|full]|height [rows|half|full]|theme [name]|grab|dump]',
   }).catch(() => undefined)
 }

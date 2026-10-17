@@ -1,11 +1,33 @@
-// md-preview: draws Markdown segments like VS Code's Markdown preview
+// Intelligent UI: draws Markdown segments like VS Code's Markdown preview
 // (the colours come from the theme). One segment = one page = one PNG.
 //
 // typst compile --root / --package-path <render>/packages --format png --ppi <ppi>
-//   --input theme=dark|light --input width=<page width in pt>
-//   --input doc=<absolute path of JSON> [--input safe=1]
-//   --input theme-dir=<absolute theme folder> (themes/README.md; merged over vscode)
-//   <render>/md.typ <outdir>/<a|b>-{0p}.png
+//   <render>/md.typ <outdir>/<a|b>-{0p}.png, with these inputs (pt values are
+//   plain numbers as strings):
+//   theme=dark|light     the colour scheme (default dark)
+//   theme-dir=<folder>   the active theme's absolute folder (themes/README.md;
+//                        merged over vscode)
+//   doc=<path>           the absolute path of the doc JSON (below)
+//   width=<pt>           the page width (default 600)
+//   top=<pt>             the first page's top margin (default 6)
+//   row=<pt>             one terminal row; each page is padded to whole rows
+//                        (default 0 = no padding)
+//   code=<fraction>      code size as a fraction of the body text (default 0.9)
+//   term-font=<family>   the terminal's font, used first for code (optional)
+//   height=<pt>          the room height of one drawing now (default 0 =
+//                        unknown: no height limit and no height factor)
+//   design-w=<pt>        the design page width: the `width` at the first
+//                        compile of the text (default = width)
+//   design-h=<pt>        the design room height: the `height` at the first
+//                        compile of the text (default = height)
+//   safe=1               the retry mode (optional; below)
+//
+// Live ```typst blocks are laid out in the design space (theme.width,
+// theme.height, theme.page-width are the design values) and drawn scaled by
+// one factor for the page: f = min(content width / design content width,
+// height / design-h), without the height term when the height is unknown.
+// A block that is still wider than its space after f is made smaller to fit
+// (never larger than f); a tall block is never made smaller (the page grows).
 //
 // doc JSON: { "base": "/dir/for/relative/images", "segments": ["md", ...],
 //             "images": ["/abs/path.png", ...] (optional allow-list) }
@@ -14,7 +36,7 @@
 // code (no eval), math is shown as code (no mitex), images are alt boxes.
 
 #import "@preview/cmarker:0.1.6"
-#import "@preview/mitex:0.2.7": mitex
+#import "@preview/mitex:0.2.7": mitex-convert, mitex-scope
 
 // ---------- inputs ----------
 #let inp = sys.inputs
@@ -34,8 +56,21 @@
 // Code size as a fraction of the body text (the hooks module sets it so code
 // in the terminal's font is the terminal's own size).
 #let code-scale = float(inp.at("code", default: "0.9"))
+// A pt input: its number in pt, else `default` (absent, empty or bad).
+#let pt-in(key, default) = {
+  let v = str(inp.at(key, default: "")).trim()
+  if v.match(regex("^[0-9]+(\\.[0-9]+)?$")) == none { default } else { float(v) * 1pt }
+}
+// The room height of one drawing now; 0pt = unknown.
+#let room-h = pt-in("height", 0pt)
+// The design: the space at the first compile of the text.
+#let design-page-w = {
+  let w = pt-in("design-w", page-w)
+  if w > margin-left + margin-right { w } else { page-w }
+}
+#let design-h = pt-in("design-h", room-h)
 #let doc = if "doc" in inp { json(inp.doc) } else {
-  (base: "", segments: ("*md-preview:* no `doc` input given.",))
+  (base: "", segments: ("*Intelligent UI:* no `doc` input given.",))
 }
 #let base = str(doc.at("base", default: ""))
 #let allow = doc.at("images", default: none)
@@ -57,6 +92,13 @@
 #let term-font = inp.at("term-font", default: "")
 #let mono = if term-font != "" and T.fonts.use-terminal-font { (term-font,) + mono-base } else { mono-base }
 #let content-w = page-w - margin-left - margin-right
+#let design-content-w = design-page-w - margin-left - margin-right
+// The one factor of the page's live blocks (> 0).
+#let factor = {
+  let f = content-w / design-content-w
+  if room-h > 0pt and design-h > 0pt { f = calc.min(f, room-h / design-h) }
+  if f > 0 { f } else { 1.0 }
+}
 // Code size as a fraction of the body text: the theme's number, or
 // "terminal" for the hooks module's `code` input (terminal-sized code).
 #let code-size(v) = if v == "terminal" { code-scale } else if type(v) in (int, float) { float(v) } else { code-scale }
@@ -80,14 +122,23 @@
   purple: C.purple,
   palette: (C.blue, C.orange, C.green, C.red, C.purple, C.yellow),
   width: content-w,
+  // The room height of a drawing (when it is unknown: 3/4 of the width).
+  height: if room-h > 0pt { room-h } else { content-w * 0.75 },
   page-width: page-w,
   text-size: 11pt,
   sans: sans,
   mono: mono,
 )
 
+// What the code of a live block sees: the design space.
+#let live-theme = theme + (
+  width: design-content-w,
+  height: if design-h > 0pt { design-h } else { design-content-w * 0.75 },
+  page-width: design-page-w,
+)
+
 // ---------- page and text ----------
-#set document(title: "md-preview")
+#set document(title: "Intelligent UI")
 #set page(width: page-w, height: auto, margin: (left: margin-left, right: margin-right, y: margin-y), fill: none)
 // CSS-like line boxes: line-height 22px at 14px.
 #set text(
@@ -138,8 +189,15 @@
   marker: E.list.markers.map(list-marker),
   indent: E.list.indent-em * 1em, body-indent: E.list.gap-em * 1em, spacing: E.list.item-spacing-em * 1em,
 )
+// list.numbering is one Typst pattern: its counting symbols are the nesting
+// levels ("1.a.i." gives 1., a., i.), and the last one repeats. A pattern
+// with no counting symbol fails the compile, so it gets "1." instead.
+#let enum-numbering = {
+  let p = E.list.numbering
+  if type(p) == str and p.match(regex("[1aAiI*αΑא一壹あいアイㄱ가①⓵]")) != none { p } else { "1." }
+}
 #set enum(
-  numbering: "1.",
+  numbering: enum-numbering,
   indent: E.list.number-indent-em * 1em, body-indent: E.list.number-gap-em * 1em, spacing: E.list.item-spacing-em * 1em,
 )
 
@@ -158,6 +216,10 @@
   let desc = measure(text(top-edge: "baseline", bottom-edge: "descender", "x")).height
   let pad-x = IC.pad-x-px * px
   let pad-y = IC.pad-y-px * px
+  // A zero-width strut of the body text: a line with only code (a table
+  // cell, a list item) gets the body's line box, so its baseline is where
+  // the text next to it has its baseline (the code font is smaller).
+  text(font: sans, size: text.size, top-edge: "ascender", bottom-edge: "descender", sym.zwj)
   h(pad-x)
   highlight(
     fill: C.inline-code-bg, extent: pad-x, radius: IC.radius-px * px,
@@ -167,23 +229,31 @@
   h(pad-x)
 }
 // Code blocks: VS Code's `pre` (padding 16px, radius 3px, 1px border) with
-// `code { line-height: 1.357em }`.
+// `code { line-height: 1.357em }`. A block with no language has its own
+// colour, code-plain-fg, when the theme sets one (Typst gives unscoped code
+// the text colour, not the tmTheme's).
 #show raw.where(block: true): it => context {
+  let fg = if it.lang == none { C.at("code-plain-fg", default: C.code-fg) } else { C.code-fg }
   let CB = E.code-block
   let area = measure(text(top-edge: "ascender", bottom-edge: "descender", "x")).height
   set par(leading: calc.max(0pt, CB.line-height * text.size - area), justify: false)
   block(
     width: 100%, fill: C.code-bg, stroke: CB.border-px * px + C.code-border,
     radius: CB.radius-px * px, inset: CB.pad-px * px, above: 1.2em, below: 1.2em,
-    text(fill: C.code-fg, it),
+    text(fill: fg, it),
   )
 }
 
 // ---------- block quotes ----------
+// Typst's quote adds its own space around the block (a paragraph then a
+// quote had twice the paragraph gap, and a nested quote a large gap after
+// the text above it), so the gaps are set here: the paragraph gap, like
+// every other block.
 #show quote.where(block: true): it => {
   let Q = E.quote
   block(
     width: 100%, fill: C.quote-bg, radius: Q.radius-px * px,
+    above: E.text.paragraph-em * 1em, below: E.text.paragraph-em * 1em,
     stroke: (left: Q.bar-px * px + C.quote-border),
     inset: (left: (Q.pad-left-px + Q.bar-px) * px, right: Q.pad-right-px * px, y: Q.pad-y-em * 1em),
     it.body,
@@ -221,10 +291,15 @@
 //      top-edge "ascender"), w its advance width and h its ascender-to-
 //      descender height. Its ink lies inside the box (1-4 px side bearings
 //      at 2.75 px/pt), its centre is y + h/2.
+//      A long word (30+ characters) or CJK text breaks anywhere: each of
+//      its characters (clusters) is a word, boxed, `g` on all but the
+//      first (they join with no space).
 //   c: a block code line: x its start, y its baseline, a and d the code
 //      font's ascender and descender, w its width, n its characters.
 //   b: a block starts: paragraph, heading, code block, quote, table cell
 //      (column `cx`), list item (`prefix`: "- ", "1. ", "- [x] ").
+// Math and live ```typst drawings have no marks (a drawing is scaled, so
+// its marks would not be where it is drawn).
 // Each mark has its page `p` (1-based, = the PNG's {0p}) and the text size
 // `s`; all lengths in pt from the page's top-left. A bare (unboxed) mark at
 // the start of a wrapped line is placed at the end of the line above, and
@@ -234,21 +309,27 @@
   let at = here().position()
   [#metadata((k: kind, p: at.page, x: at.x / 1pt, y: at.y / 1pt, s: text.size.to-absolute() / 1pt, ..extra.named()))<mdpos>]
 }
-// Block code sets this (an unused cost) so the word rule leaves its text to
-// the line marks.
-#let in-code(costs) = costs.runt == 101%
+// Block code sets this so the word rule leaves its text to the line marks;
+// math and live drawings set no-marks. The orphan cost changes nothing
+// here: a page is as tall as its text, so no paragraph breaks across pages.
+#let in-code(costs) = costs.orphan == 101%
+#let no-marks(costs) = costs.orphan == 102%
 #let cjk = regex("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]")
 #let probe-rules(body) = {
   // A word is cut after a hyphen or a slash, where a line may break; a
   // token of 30+ characters is one word (it breaks anywhere, see above).
-  show regex("\\S{30,}|[^\\s/-]*[/-]+|[^\\s/-]+"): it => context if in-code(text.costs) { it } else {
+  show regex("\\S{30,}|[^\\s/-]*[/-]+|[^\\s/-]+"): it => context if in-code(text.costs) or no-marks(text.costs) { it } else {
     let size = measure(it)
     let t = it.text
     if t.clusters().len() >= 30 or t.match(cjk) != none {
-      // A long word (zws break chances, above) or CJK text (breaks
-      // anywhere) keeps its breaks: only a mark where it starts.
-      mark("w", t: t, w: size.width / 1pt, h: size.height / 1pt)
-      it
+      // A long word or CJK text breaks anywhere: a box for each character
+      // (a line may break between boxes, as at the long-word rule's zws).
+      // Bare text here would be matched by that rule again as one word,
+      // with all the marks after it.
+      for (i, c) in t.clusters().enumerate() {
+        let one = measure(c)
+        box({ mark("w", t: c, w: one.width / 1pt, h: one.height / 1pt, ..if i > 0 { (g: 1) } else { (:) }); c })
+      }
     } else {
       // Boxed, so the mark is where the word is drawn (a bare mark at the
       // start of a wrapped line stays at the end of the line above).
@@ -265,9 +346,10 @@
   }
   show raw.where(block: true): it => {
     mark("b", kind: "code")
-    set text(costs: (runt: 101%))
+    set text(costs: (orphan: 101%))
     it
   }
+  show math.equation: set text(costs: (orphan: 102%))
   show par: it => { mark("b", kind: "par"); it }
   show heading: it => { mark("b", kind: "heading"); it }
   show quote.where(block: true): it => { mark("b", kind: "quote"); it }
@@ -317,6 +399,10 @@
       want * size.width
     } else { want }
     let w = calc.min(w, size.width)
+    // Never taller than the room of a drawing (when it is known).
+    let w = if room-h > 0pt and nat.width > 0pt and w * (nat.height / nat.width) > room-h {
+      room-h * (nat.width / nat.height)
+    } else { w }
     image(full, width: w, alt: alt)
   }))
 }
@@ -538,15 +624,52 @@
 
 // ---------- ```typst fences: live Typst ----------
 #let live-langs = ("typst", "typ")
+// The width that content `c` needs when it is laid out in the width `w`:
+// more than `w` only when a part with a fixed size (a canvas, a rect) is
+// wider. In Typst 0.15, measure(c, width: w) never gives more than `w`, and
+// measure(c) (no limit) gives the length of unwrapped text lines too, so:
+// content wider than `w` without a limit that does not reflow between `w`
+// and that width (the same height) needs that width; else its direct parts
+// are checked one by one (depth 1 at most: text wraps, so it never needs
+// more than `w`).
+#let needed-width(c, w, depth: 0) = {
+  if type(c) != content { return 0pt }
+  let free = measure(c).width
+  if free <= w { return free }
+  if calc.abs((measure(c, width: w).height - measure(c, width: free).height).pt()) < 0.01 { return free }
+  if depth >= 1 { return 0pt }
+  let f = c.fields()
+  let kids = if "children" in f { f.children } else if "child" in f { (f.child,) } else if "body" in f { (f.body,) } else { () }
+  kids.fold(0pt, (acc, k) => calc.max(acc, needed-width(k, w, depth: depth + 1)))
+}
 #let md-raw(src, block: false, lang: none, ..args) = {
   let l = if lang == none { "" } else { lower(str(lang).trim()) }
   if block and not safe and l in live-langs {
     // Inside a block, so #pagebreak() and #set page() are errors (one
     // segment must stay one page); a column break is dropped.
-    std.block(width: 100%, above: 1.2em, below: 1.2em, {
+    let drawing = {
       show colbreak: none
-      eval(src, mode: "markup", scope: (theme: theme))
-    })
+      // The probe: no marks (see no-marks).
+      set text(costs: (orphan: 102%)) if probe
+      eval(src, mode: "markup", scope: (theme: live-theme))
+    }
+    std.block(width: 100%, above: 1.2em, below: 1.2em, layout(size => {
+      // The space here (less than the content width in a list or a quote).
+      let space = if size.width.pt() < 1e6 { size.width } else { content-w }
+      // Lay the code out in the design width (in design units: the space / f
+      // when that is less, so 100% widths fill the space here).
+      let w = calc.min(design-content-w, space / factor)
+      // Fit guard: a part with a fixed size wider than w gets a smaller
+      // factor, so it is never cut. A tall drawing is never made smaller
+      // (the page grows; the factor has the height ratio already).
+      let k = factor
+      let wide = needed-width(drawing, w)
+      if wide > w { k = calc.min(k, space / wide) }
+      // Lay a too-wide drawing out in the width it needs: in the width w, an
+      // align(center, ..) puts the extra width left of the block, where the
+      // scale cannot bring it back (it is cut off at the page edge).
+      scale(k * 100%, origin: top + left, reflow: true, std.block(width: calc.max(w, wide), drawing))
+    }))
   } else if block and safe and l in live-langs {
     // Retry mode: show the source, with a note that it was not drawn.
     std.block(above: 1.2em, below: 0pt, sticky: true,
@@ -558,9 +681,86 @@
 }
 
 // ---------- math ----------
+// Math is drawn larger than the body text, as in VS Code's preview (KaTeX):
+// display math by the theme's math-scale, inline math by math-inline-scale.
+#let math-scale(key, default) = {
+  let v = T.at(key, default: default)
+  if type(v) in (int, float) and v > 0 and v <= 4 { float(v) } else { default }
+}
+#let display-scale = math-scale("math-scale", 1.2)
+#let inline-scale = math-scale("math-inline-scale", 1.1)
+
+// In LaTeX a bare | (and \vert, \|, \Vert) is an ordinary symbol: |x| and
+// P(A|B) are tight. mitex gives Typst a bare `|`, which Typst spaces like a
+// relation ("| x |"). So each one that is not a delimiter of \left, \right
+// or \middle becomes \mathord{|}, and \big| (\Big, \bigg, \Bigg) becomes
+// \mathord{\big|} (\bigl: \mathopen, \bigr: \mathclose, \bigm: \mathrel), as
+// in LaTeX. Text arguments (\text{a|b}, ...) are left as they are.
+#let bars = ("|", "\\vert", "\\|", "\\Vert")
+#let big-class = (l: "mathopen", r: "mathclose", m: "mathrel")
+#let latex-bars(src) = {
+  if bars.all(b => not src.contains(b)) { return src }
+  let out = ""
+  let last = 0
+  let delim = false // the token before was \left, \right or \middle
+  let big = none // the token before was \big...: (start, class)
+  let text-arg = false // the next { opens a text argument
+  let depth = 0 // brace depth inside a text argument (0 = not in one)
+  for m in src.matches(regex("\\\\([A-Za-z]+|[\\s\\S])|\\S")) {
+    let t = m.text
+    if depth > 0 {
+      if t == "{" { depth += 1 } else if t == "}" { depth -= 1 }
+      continue
+    }
+    if t == "{" and text-arg { depth = 1 }
+    if t in bars and big != none {
+      out += src.slice(last, big.at(0)) + "{\\" + big.at(1) + "{" + src.slice(big.at(0), m.end) + "}}"
+      last = m.end
+    } else if t in bars and not delim {
+      out += src.slice(last, m.start) + "{\\mathord{" + t + "}}"
+      last = m.end
+    }
+    let name = if t.starts-with("\\") { t.slice(1) } else { "" }
+    delim = name in ("left", "right", "middle")
+    let b = name.match(regex("^[bB]igg?([lrm]?)$"))
+    big = if b == none { none } else { (m.start, big-class.at(b.captures.at(0), default: "mathord")) }
+    text-arg = name.match(regex("^(text[a-z]*|mbox|hbox|emph)$")) != none
+  }
+  out + src.slice(last)
+}
+
+// LaTeX's cases is an array `@{}l@{\quad}l@{}`: every column left-aligned,
+// a quad between columns. Typst's cases puts `&` columns right, left, right,
+// ... with no gap, so mitex's `cases(x & x >= 0, ...)` reads "x x≥0". Each
+// row x & y becomes `& x && quad y`: its cells in the left-aligned columns.
+#let amp = $&$.body // an alignment point (Typst has no constructor for it)
+#let latex-row(row) = {
+  let kids = if type(row) == content and row.func() == [].func() { row.children } else { (row,) }
+  let cells = ((),)
+  for k in kids {
+    if type(k) == content and k.func() == amp.func() { cells.push(()) } else { cells.last().push(k) }
+  }
+  let cells = cells.map(c => c.join())
+  (amp, cells.first(), ..cells.slice(1).map(c => (amp, amp, h(1em), c)).flatten()).join()
+}
+#let latex-cases(..args) = math.cases(..args.named(), ..args.pos().map(latex-row))
+#let latex-scope = mitex-scope + (
+  cases: latex-cases,
+  rcases: latex-cases.with(reverse: true),
+  // mitex draws \lVert x \rVert as two bars "||"; LaTeX draws one ‖.
+  lVert: math.class("opening", sym.bar.v.double),
+  rVert: math.class("closing", sym.bar.v.double),
+)
+
 #let md-math = if safe {
   (src, block: false) => if block { raw(src, block: true, lang: "latex") } else { raw(src) }
-} else { mitex }
+} else {
+  (src, block: false) => {
+    let typ = mitex-convert(latex-bars(if type(src) == str { src } else { src.text }))
+    set text(size: (if block { display-scale } else { inline-scale }) * 1em)
+    math.equation(block: block, eval("$" + typ + "$", scope: latex-scope))
+  }
+}
 
 #let kbd(attrs, body) = box(
   stroke: px + C.border, inset: (x: 3pt, y: 1pt), outset: (y: 1pt), radius: 3pt,

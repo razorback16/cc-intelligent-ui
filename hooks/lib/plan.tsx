@@ -1,14 +1,14 @@
-// The plan of plan mode: md-preview's own approval flow for the main loop's
+// The plan of plan mode: Intelligent UI's own approval flow for the main loop's
 // ExitPlanMode, and the plan drawn as pictures in its transcript row.
 //
-// The engine's approval dialog cannot be drawn by a plugin, so md-preview asks
+// The engine's approval dialog cannot be drawn by a plugin, so the mod asks
 // first: the `tool.call` hook on ExitPlanMode asks its own question (decidePlan)
 // before the engine raises PermissionRequest, and keeps the verdict. The
 // PermissionRequest hook then answers with it at once (decisionOf), so the
 // engine's dialog never shows. An allow is honoured for this tool only with
 // `updatedInput`, and its `setMode` ends plan mode. The rendered plan is in
 // the ExitPlanMode ToolUse row, which the engine draws above the question.
-import type { EngineInterface, PermissionRequestDecision, RenderComponent, RenderElement, ResolveInput } from 'claude-code'
+import type { EngineInterface, PermissionRequestDecision, RenderComponent, RenderElement, RenderViewport, ResolveInput } from 'claude-code'
 
 import { GUTTER, bulletOf } from './settings'
 import { S, writesLive } from './state'
@@ -25,11 +25,11 @@ export const PLAN_AUTO = 'Yes, auto-accept edits'
 export const PLAN_MANUAL = 'Yes, manually approve edits'
 export const PLAN_CLEAR = 'Yes, clear context + auto-accept'
 export const PLAN_EDIT = 'Edit the plan'
-// The line above md-preview's question (the dialog takes 12 rows at most
+// The line above Intelligent UI's question (the dialog takes 12 rows at most
 // around it, so the plan itself is in the ToolUse row above).
-export const PLAN_ASK_LINE = 'md-preview: the rendered plan is above'
+export const PLAN_ASK_LINE = 'Intelligent UI: the rendered plan is above'
 // The line in the ToolUse row while the plan's pictures compile.
-export const PLAN_DRAWING = 'md-preview: drawing the plan...'
+export const PLAN_DRAWING = 'Intelligent UI: drawing the plan...'
 // What the model reads when the person rejects the plan (Esc) or types changes.
 export const PLAN_REJECTED = 'The user rejected the plan.'
 export const PLAN_FEEDBACK = 'The user wants changes to the plan:'
@@ -84,7 +84,7 @@ export function planFileOf(input: unknown): string {
   return typeof file === 'string' && file.startsWith('/') ? file : ''
 }
 
-// The plan a row of the call shows: the text edited in md-preview's flow, else
+// The plan a row of the call shows: the text edited in the mod's flow, else
 // the result's, else the call's; '' for none and for a subagent's or a
 // teammate's result.
 export function planShownOf(edited: string | undefined, output: unknown, input: unknown): string {
@@ -120,7 +120,7 @@ export function choiceOf(answer: string, canEdit: boolean): PlanChoice {
 // mode and revises.
 export const feedbackOf = (text: string) => (text ? `${PLAN_FEEDBACK} ${text}` : `${PLAN_FEEDBACK.slice(0, -1)}.`)
 
-// The verdict md-preview's question gave, kept for the PermissionRequest that
+// The verdict the mod's question gave, kept for the PermissionRequest that
 // follows: approve (in a mode, with the plan, edited or not; `clear` starts a
 // new context once the call resolves), or reject and stop the turn (Esc).
 export type PlanVerdict =
@@ -171,11 +171,11 @@ async function findCode($: EngineInterface): Promise<string> {
   return found
 }
 
-// What md-preview's question decided: a verdict for the PermissionRequest, or
+// What the mod's question decided: a verdict for the PermissionRequest, or
 // the person's words (a deny of the call: Claude revises the plan).
 export type PlanOutcome = { kind: 'verdict'; verdict: PlanVerdict } | { kind: 'feedback'; message: string }
 
-// Asks md-preview's question about the plan, as often as the person edits it.
+// Asks the mod's question about the plan, as often as the person edits it.
 // `plan` is the text to ask about, `callPlan` the one the call carried (an
 // approval sends `plan` when they differ). `onEdited` gets each edited text
 // (the ToolUse row draws it). Esc (the ask rejects; in a terminal session
@@ -238,18 +238,18 @@ export function scheduleClear($: EngineInterface, plan: string, turnId: string) 
 
 // ---- Drawing ------------------------------------------------------------------
 
-type Terminal = ResolveInput<RenderComponent, 'terminal'>
+type Terminal = ResolveInput<RenderComponent, 'terminal'> & { viewport?: RenderViewport }
 
 // The ExitPlanMode ToolUse row: the engine's row, then the plan's pages (a
 // dim line while they compile; the engine's row alone when they fail).
-export function drawPlanUse($: EngineInterface, e: Terminal, row: RenderElement, drawing: Drawing, columns: number): RenderElement {
+export function drawPlanUse($: EngineInterface, e: Terminal, row: RenderElement, drawing: Drawing): RenderElement {
   if (drawing.kind === 'text') return row
   const { Box, Text } = $.ui.resolve(e)
   return (
     <Box flexDirection="column">
       {row}
       {drawing.kind === 'pages' ? (
-        drawPages($, e, drawing.result, columns, drawing.px, drawing.bytes, { bullet: true })
+        drawPages($, e, drawing.result, drawing.bytes, { bullet: true })
       ) : (
         <Box marginTop={1} marginLeft={GUTTER}>
           <Text dimColor>{PLAN_DRAWING}</Text>
@@ -281,7 +281,7 @@ export function drawPlanResult($: EngineInterface, e: Terminal, filePath?: strin
   )
 }
 
-// The line md-preview adds above its own question.
+// The line Intelligent UI adds above its own question.
 export function drawAskLine($: EngineInterface, e: ResolveInput<'AskUserQuestion', 'terminal'>, dialog: RenderElement): RenderElement {
   const { Box, Text } = $.ui.resolve(e)
   return (
@@ -292,7 +292,7 @@ export function drawAskLine($: EngineInterface, e: ResolveInput<'AskUserQuestion
   )
 }
 
-// Whether an AskUserQuestion dialog is md-preview's plan question now asked.
+// Whether an AskUserQuestion dialog is the mod's plan question now asked.
 export function isPlanQuestion(questions: unknown, asking: string): boolean {
   if (!asking || !Array.isArray(questions) || questions.length !== 1) return false
   const q = questions[0] as { question?: unknown; header?: unknown } | null
