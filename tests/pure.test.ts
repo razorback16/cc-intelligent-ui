@@ -178,6 +178,7 @@ test('the size command takes 80 to 200 percent', () => {
   expect(parseCommand('size big')).toEqual({ kind: 'bad' })
   expect(parseCommand('bigger')).toEqual({ kind: 'bad' })
   expect(parseCommand('probe')).toEqual({ kind: 'probe' })
+  expect(parseCommand('details')).toEqual({ kind: 'details' })
   expect(parseCommand('probe 3')).toEqual({ kind: 'bad' })
 })
 

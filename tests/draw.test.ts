@@ -224,7 +224,7 @@ const images = (tree: any): any[] =>
 
 test('over ssh in kitty, a page goes as PNG bytes, read once', async ($, on) => {
   const { clock, reads } = world(on, { SSH_CONNECTION: '10.0.0.2 50000 10.0.0.1 22', TERM: 'xterm-kitty' })
-  const ran = await $.command.run({ command: 'md-preview', args: '' } as any)
+  const ran = await $.command.run({ command: 'md-preview', args: 'details' } as any)
   expect(ran.text).toContain('over ssh, sent as bytes')
   const ui = await $.ui.mount(message('ssh-1', 'Some **bold** text.'))
   await clock.settle()
@@ -262,7 +262,7 @@ test('locally, a page goes as a file name', async ($, on) => {
 test('in tmux with the engine forced, answers stay text', async ($, on) => {
   const { clock } = world(on, { TMUX: '/tmp/tmux-501/default,1,0', TERM: 'tmux-256color', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
   const ran = await $.command.run({ command: 'md-preview', args: '' } as any)
-  expect(ran.text).toContain('Claude Code draws no pictures here')
+  expect(ran.text).toContain('This terminal shows no pictures')
   const ui = await $.ui.mount(message('tmux-1', 'Some **bold** text.'))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))

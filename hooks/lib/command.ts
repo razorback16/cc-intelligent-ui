@@ -9,10 +9,10 @@ import {
 import { isThemeName, type ThemeInfo } from './themes'
 
 // `/md-preview` arguments: on, off, size <80-200>, width [40-400|full],
-// height [6-200|half|full], or nothing (show state). A `width` or `height`
+// height [6-200|half|full], details (all md-preview found), or nothing (show state). A `width` or `height`
 // with no value shows it.
 export type Command =
-  | { kind: 'on' | 'off' | 'show' | 'probe' }
+  | { kind: 'on' | 'off' | 'show' | 'details' | 'probe' }
   | { kind: 'size'; percent: number }
   | { kind: 'width'; width?: Width }
   | { kind: 'height'; height?: Height }
@@ -28,7 +28,7 @@ export function parseCommand(args: string): Command {
     if (typed.length === 2 && isThemeName(typed[1]!)) return { kind: 'theme', name: typed[1]! }
     return { kind: 'bad' }
   }
-  if (words.length === 1 && (words[0] === 'on' || words[0] === 'off' || words[0] === 'probe')) return { kind: words[0] }
+  if (words.length === 1 && (words[0] === 'on' || words[0] === 'off' || words[0] === 'details' || words[0] === 'probe')) return { kind: words[0] }
   if (words[0] === 'setup' && words.length === 1) return { kind: 'setup', remove: false }
   if (words[0] === 'setup' && words.length === 2 && words[1] === 'remove') return { kind: 'setup', remove: true }
   if (words[0] === 'size' && words.length === 2 && /^\d+%?$/.test(words[1]!)) {
@@ -59,6 +59,7 @@ const SUBCOMMANDS = [
   { name: 'height', description: `the most rows an image or a Typst drawing takes, ${MIN_HEIGHT}-${MAX_HEIGHT}, half or full` },
   { name: 'theme', description: 'list the themes, or switch to one' },
   { name: 'setup', description: 'iTerm2: add the shell line that turns pictures on' },
+  { name: 'details', description: 'the mode source, the terminal font, Typst and the terminal' },
 ] as const
 const SIZES = [80, 90, 100, 110, 120, 125, 150, 175, 200]
 const WIDTHS: readonly Width[] = [80, 100, 120, 160, 200, 'full']

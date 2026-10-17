@@ -271,15 +271,24 @@ export const register: Register = on => {
     }
     const state = (await read($, isOn)) ? 'on' : 'off'
     const ready = await setUp($)
-    const font = ready.termFont ? `terminal font ${ready.termFont}` : 'terminal font not known (Menlo assumed)'
-    const typst = ready.typst ? `Typst: ${ready.typst}` : 'Typst: not found (brew install typst)'
-    const terminal = ready.canDraw
-      ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
-      : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+ and Rio 0.5.27+ with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
-    const tried = S.setupNeeded ? ' In iTerm2, run /md-preview setup once to show pictures.' : ''
-    const usage = `Use /md-preview on, /md-preview off, /md-preview size <${MIN_SIZE}-${MAX_SIZE}>, /md-preview width <${MIN_WIDTH}-${MAX_WIDTH}|full>, /md-preview height <${MIN_HEIGHT}-${MAX_HEIGHT}|half|full>, or /md-preview theme [name].`
-    const bad = asked.kind === 'bad' ? `Not understood: "${e.args.trim()}". ` : ''
-    return { text: `${bad}md-preview is ${state}, theme ${S.look?.name ?? DEFAULT_THEME}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, ${font}. ${typst}; ${terminal}.${tried} ${usage}` }
+    const bad = asked.kind === 'bad' ? `Not understood: "${e.args.trim()}".\n` : ''
+    const theme = S.look?.name ?? DEFAULT_THEME
+    if (asked.kind === 'details') {
+      const font = ready.termFont ? `terminal font ${ready.termFont}` : 'terminal font not known (Menlo assumed)'
+      const typst = ready.typst ? `Typst: ${ready.typst}` : 'Typst: not found (brew install typst)'
+      const terminal = ready.canDraw
+        ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
+        : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+ and Rio 0.5.27+ with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
+      return { text: `md-preview is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, ${font}. ${typst}; ${terminal}.` }
+    }
+    // The short state: what is set, and only the problems that keep pictures away.
+    const sized = (v: number | 'full' | 'half', unit: string) => (typeof v === 'number' ? `${v} ${unit}` : v)
+    const lines = [`md-preview is ${state}: theme ${theme}, ${S.theme}, text ${S.size}%, width ${sized(S.width, 'columns')}, height ${sized(S.height, 'rows')}.`]
+    if (S.setupNeeded) lines.push('In iTerm2, run /md-preview setup once to show pictures.')
+    else if (!ready.canDraw) lines.push('This terminal shows no pictures, so answers stay text. Pictures show in kitty, Ghostty and iTerm2 3.6+.')
+    if (!ready.typst) lines.push('Typst is not installed, so answers stay text. Install it: brew install typst')
+    lines.push('Change: /md-preview on | off | size | width | height | theme. More: /md-preview details')
+    return { text: bad + lines.join('\n') }
   })
 
   on('config.set', { key: 'theme' }, async ($, e, next) => {

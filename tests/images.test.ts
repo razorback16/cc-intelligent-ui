@@ -742,7 +742,7 @@ test('with md-preview off, rows stay as they are', async ($, on) => {
 test('in a terminal that draws no pictures, rows stay as they are', async ($, on) => {
   world(on, { vars: { TERM: 'xterm-256color' }, files: { '/t/icon.png': HEAD, [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED] })
   const shown = await ready($)
-  expect(shown.text).toContain('Claude Code draws no pictures here')
+  expect(shown.text).toContain('This terminal shows no pictures')
   expect(await (await $.ui.mount(sent(attach('/t/icon.png')))).drawn()).toMatchObject(ENGINE)
   expect(await (await $.ui.mount(prompt('[Image #5] hi'))).drawn()).toMatchObject(ENGINE)
 })
@@ -752,7 +752,7 @@ test('in a terminal that draws no pictures, rows stay as they are', async ($, on
 test('a kept height caps sent and pasted images; height full draws them taller at the commit', async ($, on) => {
   const { clock, kept } = world(on, { stored: { height: 12 }, files: { '/t/tall.png': TALL, [`${PASTED}/5.png`]: TALL }, dirs: [PASTED] })
   const ran = await ready($)
-  expect(ran.text).toContain('image and drawing height 12 rows')
+  expect(ran.text).toContain('height 12 rows')
   const ui = await $.ui.mount(sent(attach('/t/tall.png')))
   expect(images(await ui.drawn())[0].props.rows).toBe(12)
   const pasted = await $.ui.mount(prompt('[Image #5] tall'))
