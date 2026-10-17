@@ -1,12 +1,37 @@
-<img alt="Introducing Intelligent UI" src="outcomes/samples/intelligent-ui.png" width="100%">
-
 # Intelligent UI for Claude Code
 
 **Claude's answers, rendered.** Real Markdown, math, charts and diagrams, right in your terminal.
 
-**[See it live →](https://razorback16.github.io/cc-intelligent-ui/)**
-
 <sub>An independent, community-made mod for Claude Code. Not affiliated with Anthropic.</sub>
+
+## Install
+
+```
+brew install typst
+```
+
+Then, in Claude Code:
+
+```
+/plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui
+```
+
+It works at once, with no restart.
+
+You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15 and macOS. The pictures show only in some terminals:
+
+| Terminal | Pictures | What to do |
+|---|---|---|
+| kitty 0.28+, Ghostty, cmux | Yes | Nothing |
+| iTerm2 3.6+ | Yes | Run `/iui setup` one time |
+| Rio 0.5.27+ | Yes (not tested) | Set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` |
+| ssh | Yes, from kitty or Ghostty | Refer to [Install](docs/install.md#terminals) |
+| tmux, screen | No | — |
+| WezTerm, Warp, Konsole, Terminal.app, Alacritty, VS Code, Windows Terminal, GNOME Terminal, others | No | — |
+
+In other terminals, the mod shows the normal text. Refer to [Install](docs/install.md#terminals) for all the details, and run `/iui details` to see why pictures do or do not show.
+
+<img alt="Introducing Intelligent UI" src="outcomes/samples/intelligent-ui.png" width="100%">
 
 Intelligent UI draws each answer from Claude as a typeset picture, with [Typst](https://typst.app). Tables line up, equations look like a paper, and Claude can draw a chart or a diagram when a picture explains more than words. Only the drawing changes. The saved answer stays Markdown.
 
@@ -44,33 +69,6 @@ Intelligent UI draws each answer from Claude as a typeset picture, with [Typst](
 </table>
 
 More in the [gallery](docs/gallery.md): plots, fractals and a tour of all the Markdown.
-
-## Quick start
-
-You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15 and macOS. The pictures show only in some terminals:
-
-| Terminal | Pictures | What to do |
-|---|---|---|
-| kitty 0.28+, Ghostty, cmux | Yes | Nothing |
-| iTerm2 3.6+ | Yes | Run `/iui setup` one time |
-| Rio 0.5.27+ | Yes (not tested) | Set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` |
-| ssh | Yes, from kitty or Ghostty | Refer to [Install](docs/install.md#terminals) |
-| tmux, screen | No | — |
-| WezTerm, Warp, Konsole, Terminal.app, Alacritty, VS Code, Windows Terminal, GNOME Terminal, others | No | — |
-
-In other terminals, the mod shows the normal text. Refer to [Install](docs/install.md#terminals) for all the details, and run `/iui details` to see why pictures do or do not show.
-
-```
-brew install typst
-```
-
-Then, in Claude Code:
-
-```
-/plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui
-```
-
-It works at once, with no restart.
 
 ## Commands
 
