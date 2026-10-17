@@ -18,7 +18,7 @@ Only the drawing changes. The saved answer stays Markdown.
   #import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge
   ```
 
-  A `theme` dictionary (`theme.fg`, `theme.muted`, `theme.blue`, `theme.palette`, `theme.width`, …) is in scope, so drawings match the terminal's colours. The mod tells Claude about this in a short part of the system prompt.
+  A `theme` dictionary (`theme.fg`, `theme.muted`, `theme.blue`, `theme.palette`, `theme.width`, …) is in scope, so drawings match the terminal's colours. The mod tells Claude about this in a short part of the system prompt. `theme.width` and `theme.height` give the space for a drawing. The mod keeps the size that a message had when it was drawn the first time. When the terminal size changes, the mod makes the drawings larger or smaller by the same amount.
 - Files that Claude sends to you (the SendUserFile tool). The mod draws each file under the row that shows the files, in the same order:
   - PNG, JPEG and WebP images. Typst changes a JPEG or WebP image into a PNG image in the cache folder. The PNG image is the size of the space for the picture in the transcript, or smaller. Typst does this one time for each version of the file and each size of the space. When the space changes, the mod shows the old PNG image until Typst makes the new one.
   - Markdown files (`.md` or `.markdown`, 256 KiB or less). The mod draws the file as rendered pictures, the same as an answer. A relative image path in the file starts from the folder of the file.
@@ -26,7 +26,7 @@ Only the drawing changes. The saved answer stays Markdown.
   Other files stay as the normal row. JPEG images, WebP images and Markdown files need Typst.
 - Images that you paste into the prompt (`[Image #N]`). The mod draws each image under your prompt.
 
-  These pictures are not larger than the image. They are not wider than the transcript. The height setting (`/md-preview height`) sets the most rows that they can use: by default, half the screen and not more than 24 rows. The mod draws PNG, JPEG and WebP images only. Other image types (for example GIF and SVG) stay as the normal row.
+  These pictures are not larger than the image. They are not wider than the transcript. The height setting (`/md-preview height`) sets the most rows that they can use (Typst drawings use it too): by default, half the screen and not more than 24 rows. The mod draws PNG, JPEG and WebP images only. Other image types (for example GIF and SVG) stay as the normal row.
 - The plan in plan mode (the ExitPlanMode tool). The mod draws the plan as a picture in the transcript, the same as an answer. Then the mod asks you to approve the plan. Refer to [Plan approval](#plan-approval).
 
 ## Requirements
@@ -76,7 +76,7 @@ To try it from a clone without installing: `claude --plugin-dir /path/to/claude-
 | `/md-preview width` | Shows the width: the most columns that a picture can use |
 | `/md-preview width <40–400>` | Sets the most columns that a picture can use (kept for later sessions) |
 | `/md-preview width full` | Pictures use the full width of the terminal, the same as the text of Claude Code (kept for later sessions). This is the default. A picture is never wider than 255 columns. |
-| `/md-preview height` | Shows the image height: the most rows that an image can use. This applies to images that Claude sends and to images that you paste, not to answers. |
+| `/md-preview height` | Shows the image height: the most rows that an image can use. This applies to images (sent or pasted) and to Typst drawings in answers. |
 | `/md-preview height half` | An image uses half the terminal height, from 6 to 24 rows (kept for later sessions). This is the default. |
 | `/md-preview height full` | An image uses the terminal height less 16 rows (kept for later sessions). The 16 rows are for the row of the file, the text around it and the prompt. |
 | `/md-preview height <6–200>` | Sets the most rows that an image can use (kept for later sessions). An image is never taller than with `full`. |

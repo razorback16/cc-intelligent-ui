@@ -1,18 +1,18 @@
-## Release checklist for v0.2.0
+## Markdown basics
 
-All **four** terminals now pick the right colours. Here is what changed and what is left:
+| Feature | Syntax | Status |
+|:--|:--:|--:|
+| Tables with alignment | `\|:--\|:--:\|--:\|` | ✅ |
+| Task lists | `- [x]` | ✅ |
+| Inline + display math | `$…$`, `$$…$$` | ✅ |
+| Live Typst drawings | ` ```typst ` | ✅ |
 
-| Terminal | Mode source | Font source | Status |
-|---|---|---|---|
-| iTerm2 | profile background | profile font | ✅ done |
-| Ghostty | config and theme files | `font-family` | ✅ done |
-| kitty | `kitty.conf` and includes | `font_family` | ✅ done |
-| cmux | adaptive theme | Ghostty config | ✅ done |
+- [x] Render Markdown
+- [x] Render LaTeX math
+- [x] Compile Typst live
+- [ ] Make coffee
 
-- [x] Read the terminal background before the OS appearance
-- [x] Send pictures as bytes over **ssh**
-- [ ] Test Rio on a real machine
+> **Note**
+> > Nested quotes also work.
 
-> **Note:** the saved answer stays plain Markdown, so `/copy` still gives you the source.[^1]
-
-[^1]: Only the drawing changes. Use `/copy` to copy an answer as Markdown.
+Euler's identity: $e^{i\pi} + 1 = 0$. The Gaussian integral: $\int_{-\infty}^{\infty} e^{-x^2}\,dx = \sqrt{\pi}$.

@@ -8,7 +8,7 @@
 // engine's dialog never shows. An allow is honoured for this tool only with
 // `updatedInput`, and its `setMode` ends plan mode. The rendered plan is in
 // the ExitPlanMode ToolUse row, which the engine draws above the question.
-import type { EngineInterface, PermissionRequestDecision, RenderComponent, RenderElement, ResolveInput } from 'claude-code'
+import type { EngineInterface, PermissionRequestDecision, RenderComponent, RenderElement, RenderViewport, ResolveInput } from 'claude-code'
 
 import { GUTTER, bulletOf } from './settings'
 import { S, writesLive } from './state'
@@ -238,18 +238,18 @@ export function scheduleClear($: EngineInterface, plan: string, turnId: string) 
 
 // ---- Drawing ------------------------------------------------------------------
 
-type Terminal = ResolveInput<RenderComponent, 'terminal'>
+type Terminal = ResolveInput<RenderComponent, 'terminal'> & { viewport?: RenderViewport }
 
 // The ExitPlanMode ToolUse row: the engine's row, then the plan's pages (a
 // dim line while they compile; the engine's row alone when they fail).
-export function drawPlanUse($: EngineInterface, e: Terminal, row: RenderElement, drawing: Drawing, columns: number): RenderElement {
+export function drawPlanUse($: EngineInterface, e: Terminal, row: RenderElement, drawing: Drawing): RenderElement {
   if (drawing.kind === 'text') return row
   const { Box, Text } = $.ui.resolve(e)
   return (
     <Box flexDirection="column">
       {row}
       {drawing.kind === 'pages' ? (
-        drawPages($, e, drawing.result, columns, drawing.px, drawing.bytes, { bullet: true })
+        drawPages($, e, drawing.result, drawing.bytes, { bullet: true })
       ) : (
         <Box marginTop={1} marginLeft={GUTTER}>
           <Text dimColor>{PLAN_DRAWING}</Text>

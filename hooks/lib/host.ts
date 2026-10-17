@@ -1,11 +1,12 @@
-// Work on the host: the shell snippets md-preview runs, the cell size, the
-// terminal's font, and light or dark for auto (the terminal's settings, then
+// Work on the host: the shell snippets md-preview runs, the tty size (one
+// read, and the Frame watcher's loop), the terminal's font, and light or dark for auto (the terminal's settings, then
 // COLORFGBG, then the OS appearance), read again by a poll.
 import type { EngineInterface } from 'claude-code'
 
 import type { MdPreviewTheme } from '../../types'
 import { HOST_CHECK_MS, HOST_POLL_MS, MODES } from './settings'
-import { refresh, S, type Cell } from './state'
+import { S } from './state'
+import { beginEpoch } from './epoch'
 import { luminanceOf, modeOfColorFgBg, modeOfGnome, modeOfLuminance, modeOfMacAppearance, parseOsc11, resolveMode, type HostMode } from './mode'
 import {
   cmuxAppearanceOf, cmuxSettingsOf, ghosttyBackgroundOf, ghosttyFontOf, ghosttyHasColors, ghosttyThemePaths, ghosttyThemesOf,
@@ -13,10 +14,36 @@ import {
   kittyConfigDirsOf, kittyEntriesOf, kittyFontOf, kittySchemeOfGnome, kittyValueOf, parseFontSpec, rioBackgroundOf,
   rioConfigDirOf, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf, type KittyEntries,
 } from './terminals'
-import { cellOf } from './terminal'
 import { firstLine } from './markdown'
 
-const CELL_SH = `perl -e 'open(T, "</dev/tty") or exit 1; my $w = " " x 8; ioctl(T, ($^O eq "darwin" ? 0x40087468 : 0x5413), $w) or exit 1; print join(" ", unpack("S4", $w))'`
+// One tty size read: `rows cols xpixel ypixel` (TIOCGWINSZ); exit 1 with no tty.
+export const CELL_SH = `perl -e 'open(T, "</dev/tty") or exit 1; my $w = " " x 8; ioctl(T, ($^O eq "darwin" ? 0x40087468 : 0x5413), $w) or exit 1; print join(" ", unpack("S4", $w))'`
+// The Frame watcher (frame.ts): prints a line `rows cols xpixel ypixel`
+// at start and at each change. It sleeps in sigsuspend with SIGWINCH and
+// SIGALRM blocked outside it, so a SIGWINCH that comes while it reads is
+// kept for the next sleep (never lost), and it does no work between
+// signals: no poll. Each 10 s an alarm wakes it to see that its parent
+// still runs. Exit 1 when /dev/tty does not open; exit 0 when the parent
+// dies (its parent id changes) or stdout breaks.
+export const FRAME_PL = [
+  'use POSIX (); use Config;',
+  'my %n; @n{split " ", $Config{sig_name}} = split " ", $Config{sig_num};',
+  'open(my $t, "<", "/dev/tty") or exit 1;',
+  'my $req = $^O eq "darwin" ? 0x40087468 : 0x5413;',
+  'my $parent = getppid(); my $last = ""; $| = 1;',
+  '$SIG{PIPE} = sub { exit 0 }; $SIG{WINCH} = sub {}; $SIG{ALRM} = sub {};',
+  'POSIX::sigprocmask(POSIX::SIG_BLOCK(), POSIX::SigSet->new($n{WINCH}, $n{ALRM}));',
+  'my $none = POSIX::SigSet->new();',
+  'while (1) {',
+  '  my $w = " " x 8;',
+  '  if (ioctl($t, $req, $w)) {',
+  '    my $line = join(" ", unpack("S4", $w));',
+  '    if ($line ne $last) { print "$line\\n" or exit 0; $last = $line; }',
+  '  }',
+  '  exit 0 if getppid() != $parent;',
+  '  alarm(10); POSIX::sigsuspend($none);',
+  '}',
+].join(' ')
 const ITERM_BOOKMARKS_SH = `defaults export com.googlecode.iterm2 - | plutil -extract "New Bookmarks" json -o - -`
 const ITERM_DEFAULT_SH = `defaults read com.googlecode.iterm2 "Default Bookmark Guid"`
 // A PostScript name (argv[0]) to its family name.
@@ -45,11 +72,6 @@ export const OSC11_PL = [
 export const USE_OSC11 = false
 export const PROBE_RUNS = 5
 export const HEADERS_SH = `for f in "$@"; do head -c 24 "$f" | od -An -v -tx1; echo @; done`
-
-export async function measureCell($: EngineInterface): Promise<Cell | null> {
-  const tty = await $.process.run(['sh', '-c', CELL_SH], { timeoutMs: 5000 }).catch(() => null)
-  return tty?.exitCode === 0 ? cellOf(tty.stdout) : null
-}
 
 // The terminal's font family: iTerm2's profile font, Ghostty's font-family,
 // kitty's font_family, Rio's [fonts] family; '' elsewhere or when it can't
@@ -290,12 +312,13 @@ export async function pollHost($: EngineInterface) {
   showMode($)
 }
 
-// Draws in the mode the setting and the OS give, when it changed.
+// Draws in the mode the setting and the OS give, when it changed: a new
+// epoch, so all pictures swap to the new mode in one redraw.
 export function showMode($: EngineInterface) {
   const next = resolveMode(S.setting, S.host)
   if (next === S.theme) return
   S.theme = next
-  refresh($)
+  beginEpoch($)
 }
 
 // Polls the OS appearance while the setting is auto, and only then.

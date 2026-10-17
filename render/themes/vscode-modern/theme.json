@@ -28,5 +28,7 @@
     "code-border": "#e5e5e5",
     "quote-bg": "#00000007",
     "quote-border": "#e5e5e5"
-  }
+  },
+  "math-scale": 1.2,
+  "math-inline-scale": 1.1
 }

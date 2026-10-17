@@ -42,6 +42,7 @@ Example: pink inline code, rounder boxes.
 | `fonts.use-terminal-font` | `true` | Put the terminal's own font first for code |
 | `dark.*`, `light.*` | see `vscode/theme.json` | Colours: `fg`, `muted`, `link`, `accent` (checked boxes), `bg` (the page colour that live Typst blocks get as `theme.bg`), `border` (h1/h2 rules, hr, table rows), `th-border`, `inline-code-fg`, `inline-code-bg`, `code-fg`, `code-bg`, `code-border`, `quote-bg`, `quote-border`, `check` (tick in a checked box), `red`, `green`, `blue`, `yellow`, `orange`, `purple` (for drawings) |
 | `text.leading-em` / `text.paragraph-em` | `0.38` / `1.2` | Gap between lines / between paragraphs |
+| `math-scale`, `math-inline-scale` | `1.2`, `1.1` | Size of display / inline LaTeX math, as a fraction of the text size. Live Typst blocks do not change. |
 | `heading.size-em` | `[2, 1.5, 1.25, 1, 0.875, 0.85]` | h1–h6 sizes |
 | `heading.weight` | `600` | |
 | `heading.leading-em`, `above-em`, `below-em` | `0.2`, `[1.4, 1.6, 1.5, …]`, `[1.0, 1.0, 0.9, …]` | Spacing (arrays are per level; the last entry repeats) |

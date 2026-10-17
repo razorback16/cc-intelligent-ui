@@ -47,7 +47,11 @@ export const MAX_IMAGE_ROWS = 255
 // wide is not trusted.
 export const DEFAULT_CELL: Cell = { width: 16, height: 32 }
 // Part of every key: bump it when the interface with the template changes.
-export const TEMPLATE_VERSION = '7'
+// The template's inputs for the room of a drawing (all in pt): `height` the
+// room height now, `design-w` and `design-h` the design (the space at the
+// first compile of the text). Its live Typst blocks scale by
+// min(content width / design-w, height / design-h).
+export const TEMPLATE_VERSION = '8'
 export const COMPILE_TIMEOUT_MS = 20000
 export const ALT_CHARS = 200
 // Where Typst is when the login shell's PATH does not find it. `~` is $HOME.
@@ -66,14 +70,16 @@ export const BASE_THEME = 'vscode'
 export const DEFAULT_THEME = 'vscode-modern'
 // The two modes a theme has syntax colours for.
 export const MODES = ['dark', 'light'] as const
-// A picture under a row (an image Claude sends, an image the user pastes):
-// at most this many rows tall, and at most half the viewport.
+// A picture under a row (an image Claude sends, an image the user pastes)
+// and a drawing's room: at most this many rows tall, and at most half the
+// terminal's rows.
 export const PICTURE_MAX_ROWS = 24
 export const PICTURE_MIN_ROWS = 6
-// `/md-preview height`: the most rows an image takes (sent or pasted; not a
-// Markdown page). `half`, the default: as above. `full`: the viewport less
-// PICTURE_ROOM_ROWS. A number: that many rows, at most as many as `full`.
-// Never under PICTURE_MIN_ROWS.
+// `/md-preview height`: the most rows an image (sent or pasted) or a Typst
+// drawing (the room of a live block or a local image in Markdown; not a
+// whole Markdown page) takes. `half`, the default: as above. `full`: the
+// terminal's rows less PICTURE_ROOM_ROWS. A number: that many rows, at most
+// as many as `full`. Never under PICTURE_MIN_ROWS.
 export type Height = number | 'half' | 'full'
 export const DEFAULT_HEIGHT: Height = 'half'
 export const MIN_HEIGHT = PICTURE_MIN_ROWS
@@ -87,6 +93,21 @@ export const heightText = (height: Height) =>
   : height === 'full' ? `full (the terminal height less ${PICTURE_ROOM_ROWS} rows)`
   : `${height} rows`
 export const PICTURES_KEPT = 64
+// The compile results kept in memory (an LRU); the oldest go past this.
+export const RESULTS_KEPT = 1024
+// A resize or a font size change is settled when no new tty line and no
+// new viewport came for this long (one compile wave for each drag).
+export const RESIZE_QUIET_MS = 450
+// An epoch (a new target Frame, theme or setting) shows its pictures all at
+// once: when its jobs on screen are done, at least COMMIT_MIN_MS after it
+// began, or at COMMIT_MAX_MS whatever is still running.
+export const COMMIT_MIN_MS = 100
+export const COMMIT_MAX_MS = 5000
+// The cache folders and design files read are touched together this often
+// (one `touch -c` for all), not at each read.
+export const TOUCH_FLUSH_MS = 5000
+// A design file not read in this many days is deleted.
+export const DESIGNS_KEPT_DAYS = 180
 // A Markdown file Claude sends (SendUserFile) draws when it is at most this
 // many bytes.
 export const SENT_TEXT_MAX_BYTES = 256 * 1024
@@ -102,8 +123,8 @@ Packages available offline:
 #import "@preview/cetz:0.5.2"
 #import "@preview/cetz-plot:0.1.4": plot, chart
 #import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge
-A \`theme\` dictionary is in scope: theme.fg, theme.muted, theme.link, theme.border, theme.accent, theme.bg, theme.code-bg, theme.red/green/blue/yellow/orange/purple, theme.palette (6 colours), theme.width (content width), theme.dark (bool).
-Default strokes in cetz, fletcher and cetz-plot are black and invisible on a dark theme, so always pass theme colours: cetz \`set-style(stroke: theme.fg)\`; fletcher \`diagram(node-stroke: theme.fg, edge-stroke: theme.fg, ...)\`; cetz-plot \`set-style(axes: (stroke: theme.fg, tick: (stroke: theme.fg)), legend: (fill: theme.bg, stroke: theme.border))\`; fills like \`theme.blue.transparentize(70%)\`; size drawings to theme.width at most.
+A \`theme\` dictionary is in scope: theme.fg, theme.muted, theme.link, theme.border, theme.accent, theme.bg, theme.code-bg, theme.red/green/blue/yellow/orange/purple, theme.palette (6 colours), theme.width (content width), theme.height (the height a drawing should fit in), theme.dark (bool).
+Default strokes in cetz, fletcher and cetz-plot are black and invisible on a dark theme, so always pass theme colours: cetz \`set-style(stroke: theme.fg)\`; fletcher \`diagram(node-stroke: theme.fg, edge-stroke: theme.fg, ...)\`; cetz-plot \`set-style(axes: (stroke: theme.fg, tick: (stroke: theme.fg)), legend: (fill: theme.bg, stroke: theme.border))\`; fills like \`theme.blue.transparentize(70%)\`; size drawings to fit theme.width × theme.height; md-preview scales them when the terminal changes.
 Inside a typst block, #page, #pagebreak and #set page are errors. If a block fails to compile, it is shown as code instead.
 A plan (the plan file you write in plan mode) is drawn the same way when ExitPlanMode asks for approval, so the same Markdown, $math$ and typst blocks work there.
 The stored text stays Markdown, so keep replies readable as plain text too.`

@@ -136,19 +136,31 @@ function world($: any, on: any, o: {
   let engineAsks = 0
   const answers = [...(o.answers ?? [])]
   const files = new Map<string, string>([[FILE, PLAN]])
+  // The children md-preview spawns: the Frame watcher (it exits 1: no tty)
+  // and a compile through the PID wrapper (typst.ts wrapPid).
+  let pids = 4242
+  on('process.spawn', async function* ($: any, e: any) {
+    const argv: string[] = e.argv
+    if (argv[0] === 'sh' && argv[2] === 'echo $$; exec "$@"' && argv[4] === '/usr/bin/typst' && argv[5] === 'compile') {
+      yield { stream: 'stdout', text: `${pids++}\n` }
+      if (o.failCompile) {
+        yield { stream: 'stderr', text: 'error: boom' }
+        return { value: { code: 1, signal: null } }
+      }
+      const doc = argv.find(a => a.startsWith('doc='))!.slice(4)
+      compiled.push(JSON.parse(files.get(doc)!).segments.join('\n\n'))
+      return { value: { code: 0, signal: null } }
+    }
+    return { value: { code: 1, signal: null } }
+  })
   on('process.run', async ($: any, e: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
+    if (argv[0] === 'kill') return ok('')
     if (/md-preview-/.test(cmd)) return ok('/c\nDarwin\n')
     if (cmd.includes('command -v typst')) return ok('/usr/bin/typst\n')
     if (cmd.includes('command -v code')) return o.code ? ok('/usr/local/bin/code\n') : ok('', 1)
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
-    if (argv[0] === '/usr/bin/typst' && argv[1] === 'compile') {
-      if (o.failCompile) return ok('', 1)
-      const doc = argv.find(a => a.startsWith('doc='))!.slice(4)
-      compiled.push(JSON.parse(files.get(doc)!).segments.join('\n\n'))
-      return ok('')
-    }
     if (cmd.includes('od -An')) return ok(`${HEAD}\n@\n`)
     if (argv.includes(FILE)) {
       edits.push(argv)
@@ -250,6 +262,26 @@ test('the ExitPlanMode row draws the plan as pictures under the engine row, at a
   expect(image.props.columns).toBe(98)
   expect(image.props.source).toMatchObject({ format: 'png' })
   expect(texts(tree).join('\n')).not.toContain(PLAN_DRAWING)
+})
+
+test('a redraw of the plan row with a new onScreen draws the engine row again and compiles nothing', async ($, on) => {
+  let rows = 0
+  on('ui.render', { component: 'ToolUse' }, async ($: any, e: any, next: any) => (rows++, next(e)))
+  const { clock, compiled } = world($, on)
+  await ready($)
+  const ui = await $.ui.mount(use())
+  await clock.settle()
+  await ui.redraw(use().props)
+  const [first] = images(await ui.drawn())
+  const seen = rows
+  for (const onScreen of [{ first: 0, last: 4, of: 9 }, null, undefined]) {
+    await ui.redraw({ ...use().props, onScreen })
+    const tree: any = await ui.drawn()
+    expect(tree.children[0]).toMatchObject(ENGINE)
+    expect(images(tree)[0].props).toEqual(first.props)
+  }
+  expect(rows).toBe(seen + 3)
+  expect(compiled).toEqual([PLAN])
 })
 
 test('a plan that fails to compile, a rejected call and a subagent call keep the engine row', async ($, on) => {

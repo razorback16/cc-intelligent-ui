@@ -56,7 +56,7 @@ const SUBCOMMANDS = [
   { name: 'off', description: 'show answers as text' },
   { name: 'size', description: `text size, ${MIN_SIZE}-${MAX_SIZE}%` },
   { name: 'width', description: `the most columns a picture takes, ${MIN_WIDTH}-${MAX_WIDTH} or full` },
-  { name: 'height', description: `the most rows an image takes, ${MIN_HEIGHT}-${MAX_HEIGHT}, half or full` },
+  { name: 'height', description: `the most rows an image or a Typst drawing takes, ${MIN_HEIGHT}-${MAX_HEIGHT}, half or full` },
   { name: 'theme', description: 'list the themes, or switch to one' },
   { name: 'setup', description: 'iTerm2: add the shell line that turns pictures on' },
 ] as const
@@ -125,7 +125,7 @@ export function commandSuggestions(
 export async function registerCommand($: EngineInterface) {
   await $.command.register({
     name: 'md-preview',
-    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image takes), theme [name] (list or switch themes)",
+    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image or a Typst drawing takes), theme [name] (list or switch themes)",
     argumentHint: '[on|off|size <percent>|width [columns|full]|height [rows|half|full]|theme [name]]',
   }).catch(() => undefined)
 }

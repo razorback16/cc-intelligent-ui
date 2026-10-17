@@ -6,16 +6,21 @@ import type { Cell } from './state'
 import { CONVERT_MAX_SIDE, MAX_IMAGE_ROWS, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, PICTURE_ROOM_ROWS, type Height } from './settings'
 import { hashOf } from './draw'
 
-// The most rows a picture under a row takes, by `height` (/md-preview
-// height): half the viewport within PICTURE_MIN_ROWS to PICTURE_MAX_ROWS
-// (half); the viewport less PICTURE_ROOM_ROWS (full); or a number, at most
-// as much as full. Never under PICTURE_MIN_ROWS or over MAX_IMAGE_ROWS.
-export function pictureRowsFor(viewportRows: number | undefined, height: Height): number {
-  const view = viewportRows ?? 2 * PICTURE_MAX_ROWS
+// The most rows a picture under a row (or a drawing's room) takes in a
+// terminal of `terminalRows` rows (frameFor(...).rows), by `height` (/md-preview
+// height): half the rows within PICTURE_MIN_ROWS to PICTURE_MAX_ROWS
+// (half); the rows less PICTURE_ROOM_ROWS (full); or a number, at most as
+// much as full. Never under PICTURE_MIN_ROWS or over MAX_IMAGE_ROWS.
+export function pictureRowsFor(terminalRows: number | undefined, height: Height): number {
+  const view = terminalRows ?? 2 * PICTURE_MAX_ROWS
   const full = view - PICTURE_ROOM_ROWS
   const rows = height === 'half' ? Math.min(PICTURE_MAX_ROWS, Math.floor(view / 2)) : height === 'full' ? full : Math.min(height, full)
   return Math.min(MAX_IMAGE_ROWS, Math.max(PICTURE_MIN_ROWS, rows))
 }
+
+// A row's onScreen (e.props.onScreen) as a job's: null (the terminal holds
+// the row off screen) is false, a range is true, none is not known.
+export const onScreenOf = (v: unknown): boolean | undefined => (v === null ? false : v ? true : undefined)
 
 // The cells a picture of `size` pixels takes: its own size or smaller (never
 // larger), at most `columns` wide and `rows` tall, the aspect kept.

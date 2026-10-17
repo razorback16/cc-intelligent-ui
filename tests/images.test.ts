@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import {
   claudeTmpOf, convertBox, convertCall, convertedPath, DEFAULT_CELL, folderOf, imageKindOf, isMarkdownPath, pasteDirOf, pastedImagePath, pastedNumbers,
-  DEFAULT_HEIGHT, parseCommand, PICTURE_MAX_ROWS, PICTURE_ROOM_ROWS, pictureCells, pictureRowsFor, projectSlug, renderKey, sentFiles, sentImages,
+  COMMIT_MIN_MS, DEFAULT_HEIGHT, parseCommand, RESIZE_QUIET_MS, PICTURE_MAX_ROWS, PICTURE_ROOM_ROWS, pictureCells, pictureRowsFor, projectSlug, renderKey, sentFiles, sentImages,
 } from '../hooks/register'
 
 // ---- Pure helpers -----------------------------------------------------------
@@ -216,13 +216,23 @@ function world(on: any, o: {
   holdRun?: { at: number; until: Promise<void> }
   holdCompile?: Promise<void>
 } = {}) {
-  // md-preview's store in memory (as mock.store), and its writes by key.
+  // md-preview's store in memory (as mock.store), and its writes by key;
+  // `redrawsAt`: by key, the `done` writes (redraws) made when its write ended.
   const store = new Map(Object.entries(o.stored ?? {}))
   const kept: Record<string, unknown> = {}
+  const redrawsAt: Record<string, number> = {}
+  let redraws = 0
+  on('state.set', async ($: any, e: any, next: any) => {
+    if (e.key === 'done') redraws++
+    return next(e)
+  })
   on('store.get', async ($: any, e: any) => ({ value: store.get(e.key) }))
   on('store.set', async ($: any, e: any) => {
     store.set(e.key, e.value)
     kept[e.key] = e.value
+    // A write to the host takes a while: what was asked before it lands.
+    for (let i = 0; i < 50; i++) await Promise.resolve()
+    redrawsAt[e.key] = redraws
     return { value: undefined }
   })
   const clock = mock.clock(on)
@@ -247,9 +257,24 @@ function world(on: any, o: {
       w.done()
     }
   }
+  // The children md-preview spawns: the Frame watcher (it exits 1: no tty)
+  // and a Markdown compile through the PID wrapper (typst.ts wrapPid).
+  let pids = 4242
+  on('process.spawn', async function* ($: any, e: any) {
+    const argv: string[] = e.argv
+    if (argv[0] === 'sh' && argv[2] === 'echo $$; exec "$@"' && argv[4] === '/usr/bin/typst' && argv[5] === 'compile') {
+      yield { stream: 'stdout', text: `${pids++}\n` }
+      const doc = argv.find(a => a.startsWith('doc='))!.slice(4)
+      docs.push(JSON.parse(written.get(doc)!))
+      await o.holdCompile
+      return { value: { code: 0, signal: null } }
+    }
+    return { value: { code: 1, signal: null } }
+  })
   on('process.run', async ($: any, e: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
+    if (argv[0] === 'kill') return ok('')
     if (/md-preview-/.test(cmd)) return ok('/c\nDarwin\n')
     if (argv[0] === 'id' && argv[1] === '-u') return ok('501\n')
     if (cmd.includes('command -v typst')) return o.typst ? ok('/usr/bin/typst\n') : ok('', 1)
@@ -268,12 +293,6 @@ function world(on: any, o: {
       if (o.holdRun?.at === converts.length) await o.holdRun.until
       if (o.failConvert || converts.length >= (o.failConvertFrom ?? Infinity)) return ok('', 1)
       files[argv.at(-1)!] = HEAD
-      return ok('')
-    }
-    if (argv[0] === '/usr/bin/typst' && argv[1] === 'compile') {
-      const doc = argv.find(a => a.startsWith('doc='))!.slice(4)
-      docs.push(JSON.parse(written.get(doc)!))
-      await o.holdCompile
       return ok('')
     }
     if (cmd.includes('od -An')) {
@@ -318,7 +337,7 @@ function world(on: any, o: {
   })
   on('ui.toast', async () => ({ value: undefined }))
   on('ui.render', () => ENGINE as any)
-  return { clock, heads, reads, converts, moves, docs, logs, files, texts, mtimes, written, kept }
+  return { clock, heads, reads, converts, moves, docs, logs, files, texts, mtimes, written, kept, redrawsAt, redraws: () => redraws }
 }
 
 const sent = (output: unknown, isErrored = false, id = 'tu-1') =>
@@ -417,30 +436,37 @@ test('a JPEG by its name; two rows at once convert it once; a changed file conve
   expect(converts.length).toBe(2)
 })
 
-test('a new box: the last PNG draws at once, a run for the box starts, and its refresh draws the new PNG', async ($, on) => {
+test('a new box: the last PNG draws until the epoch commits; the PNG for the target is made meanwhile and the commit waits for it', async ($, on) => {
   let release = () => {}
   const until = new Promise<void>(done => (release = done))
   const { clock, converts } = world(on, { typst: true, holdRun: { at: 2, until }, files: { '/t/photo.jpg': JPEG } })
   await ready($)
   const wide = await $.ui.mount(sent(attachAll('/t/photo.jpg'), false, 'tu-1'))
   const first = images(await wide.drawn())[0].props.source.file
-  // The same file in a narrower row: 58 columns, so another box.
-  const narrow = await $.ui.mount({ ...sent(attachAll('/t/photo.jpg'), false, 'tu-2'), viewport: { columns: 60, rows: 40 } })
+  expect(converts.length).toBe(1)
+  // The transcript gets narrower (58 columns, so another box): nothing runs
+  // until it is quiet.
+  await wide.unmount()
+  const narrow = await $.ui.mount({ ...sent(attachAll('/t/photo.jpg'), false, 'tu-1'), viewport: { columns: 60, rows: 40 } })
+  expect(images(await narrow.drawn())[0].props.source.file).toBe(first)
+  expect(converts.length).toBe(1)
+  // Quiet: the epoch begins; the old PNG draws, the target's is made.
+  await clock.advance(RESIZE_QUIET_MS)
   expect(images(await narrow.drawn())[0].props.source.file).toBe(first)
   expect(converts.length).toBe(2)
   expect(converts[1]).toContain('maxw=928')
-  // While it runs, the narrow row and a third box do not wait or run again.
-  await narrow.redraw(sent(attachAll('/t/photo.jpg'), false, 'tu-2').props)
-  const other = await $.ui.mount({ ...sent(attachAll('/t/photo.jpg'), false, 'tu-3'), viewport: { columns: 80, rows: 40 } })
-  expect(images(await other.drawn())[0].props.source.file).toBe(first)
+  // While it runs, a redraw does not run it again, and the epoch waits.
+  await clock.advance(COMMIT_MIN_MS)
+  await narrow.redraw(sent(attachAll('/t/photo.jpg'), false, 'tu-1').props)
+  expect(images(await narrow.drawn())[0].props.source.file).toBe(first)
+  expect(images(await narrow.drawn())[0].props.columns).toBe(40)
   expect(converts.length).toBe(2)
   release()
   await clock.settle()
-  // The refresh drew the rows again: the narrow row has its own PNG now.
+  // The commit drew the row again: its own PNG now.
   const now = images(await narrow.drawn())[0].props.source.file
-  expect(now).not.toBe(first)
   expect(now).toBe(convertedPath('/c', '/t/photo.jpg', '1:1000', { width: 928, height: 640 }))
-  expect(images(await wide.drawn())[0].props.source.file).toBe(first)
+  expect(converts.length).toBe(2)
 })
 
 test('a failed run for a new box keeps the last PNG', async ($, on) => {
@@ -449,13 +475,33 @@ test('a failed run for a new box keeps the last PNG', async ($, on) => {
   await ready($)
   const wide = await $.ui.mount(sent(attachAll('/t/photo.jpg'), false, 'tu-1'))
   const first = images(await wide.drawn())[0].props.source.file
-  const narrow = await $.ui.mount({ ...sent(attachAll('/t/photo.jpg'), false, 'tu-2'), viewport: { columns: 60, rows: 40 } })
-  expect(images(await narrow.drawn())[0].props.source.file).toBe(first)
-  await clock.settle()
-  await narrow.redraw(sent(attachAll('/t/photo.jpg'), false, 'tu-2').props)
+  await wide.unmount()
+  const narrow = await $.ui.mount({ ...sent(attachAll('/t/photo.jpg'), false, 'tu-1'), viewport: { columns: 60, rows: 40 } })
+  await clock.advance(RESIZE_QUIET_MS)
+  await clock.advance(COMMIT_MIN_MS)
+  await narrow.redraw(sent(attachAll('/t/photo.jpg'), false, 'tu-1').props)
   expect(images(await narrow.drawn())[0].props.source.file).toBe(first)
   expect(converts.length).toBe(2)
   expect(logs.join('')).toContain('convert /t/photo.jpg failed')
+})
+
+test('a sent PNG keeps its generation when the viewport changes; only its box follows', async ($, on) => {
+  // 3136 x 640 px: wider than the transcript.
+  const WIDE = '89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52 00 00 0c 40 00 00 02 80'
+  const { clock } = world(on, { files: { '/t/wide.png': WIDE } })
+  await ready($)
+  const ui = await $.ui.mount(sent(attach('/t/wide.png')))
+  const [before] = images(await ui.drawn())
+  expect(before.props.columns).toBe(98)
+  await ui.unmount()
+  const narrow = await $.ui.mount({ ...sent(attach('/t/wide.png')), viewport: { columns: 60, rows: 40 } })
+  // Not quiet yet: the box on screen, made smaller to fit the room.
+  expect(images(await narrow.drawn())[0].props.columns).toBe(58)
+  await clock.advance(RESIZE_QUIET_MS)
+  await clock.advance(COMMIT_MIN_MS)
+  const [after] = images(await narrow.drawn())
+  expect(after.props.columns).toBe(58)
+  expect(after.props.source.generation).toBe(before.props.source.generation)
 })
 
 test('over ssh, a converted JPEG goes as bytes', async ($, on) => {
@@ -559,6 +605,38 @@ test('while a Markdown file compiles: an empty space, then for a moment the row 
   expect(images(await ui.drawn()).map(i => i.props.alt)).toEqual(['Notes', 'one.png'])
 })
 
+test('a kept SendUserFile row gives a new onScreen to its Markdown files\' jobs: one known off screen does not hold the commit', async ($, on) => {
+  // 3136 x 640 px: its box follows the columns, so it shows the commit.
+  const WIDE = '89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52 00 00 0c 40 00 00 02 80'
+  const o: Parameters<typeof world>[1] = { typst: true, files: { '/t/wide.png': WIDE }, texts: { '/t/notes.md': '# Notes' } }
+  const { clock, redraws } = world(on, o)
+  await ready($)
+  const output = attachAll('/t/wide.png', '/t/notes.md')
+  const ui = await $.ui.mount(sent(output))
+  await clock.settle()
+  await ui.redraw(sent(output).props)
+  expect(images(await ui.drawn()).map(i => i.props.columns)).toEqual([98, 98])
+  // Narrower: the epoch's compile of the Markdown file is held.
+  let release = () => {}
+  o.holdCompile = new Promise<void>(done => (release = done))
+  await ui.unmount()
+  const narrow = await $.ui.mount({ ...sent(output), viewport: { columns: 60, rows: 40 } })
+  await clock.advance(RESIZE_QUIET_MS)
+  await narrow.redraw(sent(output).props)
+  // The old boxes, made smaller to fit the room.
+  expect(images(await narrow.drawn()).map(i => i.props.columns)).toEqual([58, 58])
+  // Scrolled off screen: the kept row, and its job no longer holds the commit
+  // (its one redraw).
+  await narrow.redraw({ ...sent(output).props, onScreen: null })
+  const before = redraws()
+  await clock.advance(COMMIT_MIN_MS)
+  expect(redraws()).toBe(before + 1)
+  await narrow.redraw(sent(output).props)
+  expect(images(await narrow.drawn())[0].props.columns).toBe(58)
+  release()
+  await clock.settle()
+})
+
 test('images and Markdown files draw in the attachments order', async ($, on) => {
   const { clock } = world(on, { typst: true, files: { '/t/one.png': HEAD, '/t/two.jpg': JPEG }, texts: { '/t/notes.md': '# Notes' } })
   await ready($)
@@ -589,7 +667,7 @@ test('a Markdown file that is empty, too large, gone or not Markdown leaves the 
   expect(reads).toEqual(['/t/empty.md'])
 })
 
-test('a Markdown file is read again only when its stat changes', async ($, on) => {
+test('a Markdown file is read again only when its stat changes, seen at the next refresh', async ($, on) => {
   const { clock, docs, reads, texts, mtimes } = world(on, { typst: true, texts: { '/t/n.md': '# One' } })
   await ready($)
   const ui = await $.ui.mount(sent(attachAll('/t/n.md')))
@@ -598,6 +676,13 @@ test('a Markdown file is read again only when its stat changes', async ($, on) =
   expect(reads).toEqual(['/t/n.md'])
   texts['/t/n.md'] = '# Two'
   mtimes['/t/n.md'] = 2
+  // A redraw with nothing new (a scroll step) reads no file.
+  await ui.redraw(sent(attachAll('/t/n.md')).props)
+  await clock.settle()
+  expect(reads).toEqual(['/t/n.md'])
+  // A refresh (here a setting) draws the row anew: the new stat is seen.
+  await $.command.run({ command: 'md-preview', args: 'size 100' } as any)
+  await clock.settle()
   await ui.redraw(sent(attachAll('/t/n.md')).props)
   await clock.settle()
   expect(reads).toEqual(['/t/n.md', '/t/n.md'])
@@ -664,10 +749,10 @@ test('in a terminal that draws no pictures, rows stay as they are', async ($, on
 
 // ---- The height setting -------------------------------------------------------
 
-test('a kept height caps sent and pasted images; height full draws them taller at once', async ($, on) => {
-  const { kept } = world(on, { stored: { height: 12 }, files: { '/t/tall.png': TALL, [`${PASTED}/5.png`]: TALL }, dirs: [PASTED] })
+test('a kept height caps sent and pasted images; height full draws them taller at the commit', async ($, on) => {
+  const { clock, kept } = world(on, { stored: { height: 12 }, files: { '/t/tall.png': TALL, [`${PASTED}/5.png`]: TALL }, dirs: [PASTED] })
   const ran = await ready($)
-  expect(ran.text).toContain('image height 12 rows')
+  expect(ran.text).toContain('image and drawing height 12 rows')
   const ui = await $.ui.mount(sent(attach('/t/tall.png')))
   expect(images(await ui.drawn())[0].props.rows).toBe(12)
   const pasted = await $.ui.mount(prompt('[Image #5] tall'))
@@ -675,7 +760,11 @@ test('a kept height caps sent and pasted images; height full draws them taller a
   const set = await $.command.run({ command: 'md-preview', args: 'height full' } as any)
   expect(set.text).toContain('full (the terminal height less 16 rows)')
   expect(kept.height).toBe('full')
-  // 40 rows less 16.
+  // The epoch is open: the box on screen stays.
+  await ui.redraw(sent(attach('/t/tall.png')).props)
+  expect(images(await ui.drawn())[0].props.rows).toBe(12)
+  // It commits: 40 rows less 16.
+  await clock.advance(COMMIT_MIN_MS)
   await ui.redraw(sent(attach('/t/tall.png')).props)
   expect(images(await ui.drawn())[0].props.rows).toBe(24)
   await pasted.redraw(prompt('[Image #5] tall').props)
@@ -683,12 +772,73 @@ test('a kept height caps sent and pasted images; height full draws them taller a
   // A number is never more than full.
   await $.command.run({ command: 'md-preview', args: 'height 36' } as any)
   expect(kept.height).toBe(36)
+  await clock.advance(COMMIT_MIN_MS)
   await ui.redraw(sent(attach('/t/tall.png')).props)
   expect(images(await ui.drawn())[0].props.rows).toBe(24)
   // Half, the default: half of 40 rows.
   await $.command.run({ command: 'md-preview', args: 'height half' } as any)
+  await clock.advance(COMMIT_MIN_MS)
   await ui.redraw(sent(attach('/t/tall.png')).props)
   expect(images(await ui.drawn())[0].props.rows).toBe(20)
+})
+
+test('a height command while an epoch is open keeps the image box until the commit', async ($, on) => {
+  let release = () => {}
+  const until = new Promise<void>(done => (release = done))
+  // The second convert (the JPEG for the new height) holds the commit.
+  const { clock, converts } = world(on, { typst: true, stored: { height: 12 }, holdRun: { at: 2, until }, files: { '/t/tall.png': TALL, '/t/photo.jpg': JPEG } })
+  await ready($)
+  const output = attachAll('/t/tall.png', '/t/photo.jpg')
+  const ui = await $.ui.mount(sent(output))
+  expect(images(await ui.drawn()).map(i => i.props.rows)).toEqual([12, 10])
+  // An epoch is open (a new text size), then the height changes.
+  await $.command.run({ command: 'md-preview', args: 'size 90' } as any)
+  await $.command.run({ command: 'md-preview', args: 'height full' } as any)
+  await ui.redraw(sent(output).props)
+  expect(images(await ui.drawn())[0].props.rows).toBe(12)
+  expect(converts[1]).toContain('maxh=768')
+  // Past COMMIT_MIN_MS the convert still runs: the box stays.
+  await clock.advance(COMMIT_MIN_MS)
+  await ui.redraw(sent(output).props)
+  expect(images(await ui.drawn())[0].props.rows).toBe(12)
+  // It ends: the epoch commits, the PNG and the JPEG change together.
+  release()
+  await clock.settle()
+  const [png, jpeg] = images(await ui.drawn())
+  expect(png.props.rows).toBe(24)
+  expect(jpeg.props.source.file).toBe(convertedPath('/c', '/t/photo.jpg', '1:1000', { width: 1568, height: 768 }))
+  expect(converts.length).toBe(2)
+})
+
+test('in an open epoch a JPEG with no PNG made in this load (a resumed session) is converted once, for the target, and draws at the commit', async ($, on) => {
+  let release = () => {}
+  const until = new Promise<void>(done => (release = done))
+  const { clock, converts } = world(on, { typst: true, holdRun: { at: 1, until }, files: { '/t/photo.jpg': JPEG } })
+  await ready($)
+  await $.command.run({ command: 'md-preview', args: 'height full' } as any)
+  const ui = await $.ui.mount(sent(attachAll('/t/photo.jpg')))
+  // Nothing under the row for it until the commit; only the target's PNG is made.
+  expect(images(await ui.drawn()).length).toBe(0)
+  expect(converts.length).toBe(1)
+  expect(converts[0]).toContain('maxh=768')
+  await clock.advance(COMMIT_MIN_MS)
+  await ui.redraw(sent(attachAll('/t/photo.jpg')).props)
+  expect(images(await ui.drawn()).length).toBe(0)
+  expect(converts.length).toBe(1)
+  release()
+  await clock.settle()
+  expect(images(await ui.drawn())[0].props.source.file).toBe(convertedPath('/c', '/t/photo.jpg', '1:1000', { width: 1568, height: 768 }))
+  expect(converts.length).toBe(1)
+})
+
+test('a size, width or height command begins its epoch (one redraw) before the setting is stored', async ($, on) => {
+  const { redrawsAt, redraws } = world(on)
+  await ready($)
+  for (const [args, key] of [['size 90', 'size'], ['width 80', 'width'], ['height full', 'height']] as const) {
+    const before = redraws()
+    await $.command.run({ command: 'md-preview', args } as any)
+    expect(redrawsAt[key]).toBe(before + 1)
+  }
 })
 
 test('a new height makes a new PNG of a JPEG in the background; the last one draws meanwhile', async ($, on) => {
@@ -704,9 +854,10 @@ test('a new height makes a new PNG of a JPEG in the background; the last one dra
   expect(images(await ui.drawn())[0].props.source.file).toBe(first)
   // 24 rows of 32 px.
   expect(converts[1]).toContain('maxh=768')
-  // The run ends: its refresh draws the row again, with the new PNG.
+  // The run ends: the epoch commits, its refresh draws the row again, with the new PNG.
   release()
   await clock.settle()
+  await clock.advance(COMMIT_MIN_MS)
   expect(images(await ui.drawn())[0].props.source.file).toBe(convertedPath('/c', '/t/photo.jpg', '1:1000', { width: 1568, height: 768 }))
 })
 
@@ -719,6 +870,7 @@ test('a background run that ends while the row draws still draws its PNG', async
   await ui.redraw(sent(attachAll('/t/photo.jpg')).props)
   expect(converts.length).toBe(2)
   await clock.settle()
+  await clock.advance(COMMIT_MIN_MS)
   const now = images(await ui.drawn())[0].props.source.file
   expect(now).not.toBe(first)
   expect(now).toBe(convertedPath('/c', '/t/photo.jpg', '1:1000', { width: 1568, height: 768 }))
@@ -727,7 +879,8 @@ test('a background run that ends while the row draws still draws its PNG', async
 test('height with no value shows it; a bad value is refused; a bad kept value is the default', async ($, on) => {
   const { kept } = world(on, { stored: { height: 3 } })
   const shown = await $.command.run({ command: 'md-preview', args: 'height' } as any)
-  expect(shown.text).toContain('The most rows an image takes: half (half the terminal, 6 to 24 rows)')
+  expect(shown.text).toContain('The most rows an image or a Typst drawing takes: half (half the terminal, 6 to 24 rows)')
+  expect(shown.text).toContain('This applies to images (sent or pasted) and to Typst drawings in answers.')
   const bad = await $.command.run({ command: 'md-preview', args: 'height 5' } as any)
   expect(bad.text).toContain('Not understood: "height 5"')
   expect(kept.height).toBe(undefined)

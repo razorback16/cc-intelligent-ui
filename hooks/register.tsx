@@ -19,10 +19,10 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderViewport } from 'claude-code'
 
 import {
-  DEFAULT_CELL, DEFAULT_THEME, heightText, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, TYPST_PROMPT, widthText,
+  DEFAULT_THEME, heightText, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT, widthText,
 } from './lib/settings'
-import { editedPlans, refresh, S, subagentPlans, writesLive, type Env } from './lib/state'
-import { columnsFor } from './lib/terminal'
+import { editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env } from './lib/state'
+import { beginEpoch } from './lib/epoch'
 import { escapeControls, luminanceOf, modeLine, modeOfLuminance, parseOsc11, settingOf } from './lib/mode'
 import { applyTheme, themeListing, userThemesOf } from './lib/themes'
 import { commandSuggestions, parseCommand, registerCommand } from './lib/command'
@@ -31,9 +31,11 @@ import { pollHost, PROBE_RUNS, probeOsc11, showMode, USE_OSC11, watchHost } from
 import { measureFonts } from './lib/typst'
 import { drawPages } from './lib/draw'
 import { finalizeAll } from './lib/stream'
-import { pagesOf } from './lib/answer'
-import { noteViewport, setUp } from './lib/env'
-import { pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
+import { pagesOf, type Drawing } from './lib/answer'
+import { setUp } from './lib/env'
+import { frameFor, noteView } from './lib/frame'
+import { roomColumns } from './lib/terminal'
+import { onScreenOf, pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
 import { pasteDir, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
 import {
   currentPlan, decidePlan, decisionOf, drawAskLine, drawPlanResult, drawPlanUse, isPlanQuestion, planFileOf, planInputOf, planOf,
@@ -44,10 +46,15 @@ import {
 export {
   BASE_THEME, DEFAULT_CELL, DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_THEME, DEFAULT_WIDTH, heightText, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH,
   MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, PICTURE_ROOM_ROWS, SEGMENT_ROWS, TYPST_PROMPT, widthText, type Height, type Width,
+  COMMIT_MAX_MS, COMMIT_MIN_MS, DESIGNS_KEPT_DAYS, RESIZE_QUIET_MS, RESULTS_KEPT, TOUCH_FLUSH_MS,
 } from './lib/settings'
-export { DEFAULT_METRICS, type Cell, type FontMetrics, type Look, type Metrics } from './lib/state'
+export { DEFAULT_METRICS, keep, type Cell, type Design, type FontMetrics, type Frame, type Look, type Metrics, type Room } from './lib/state'
 export {
-  blocksOf, firstLine, imagePathOf, isTypstInfo, localImages, plainOf, rowsOfBlock, splitSegments, type Block,
+  composeFrame, followWatcher, frameChange, frameFor, frameOfLine, lineSplitter, noteTty, pictureColumns, quietTimer, shownFor, type View,
+} from './lib/frame'
+export { designKey, designPath, designText, loadDesign, parseDesign, recordDesign } from './lib/designs'
+export {
+  blocksOf, firstLine, imagePathOf, isTypstInfo, localImages, needsRoom, plainOf, rowsOfBlock, splitInTwo, splitSegments, type Block,
 } from './lib/markdown'
 export * from './lib/terminal'
 export * from './lib/mode'
@@ -59,8 +66,11 @@ export {
 export { commandSuggestions, parseCommand, type Command, type Suggestion } from './lib/command'
 export { hasSetup, SETUP_END, SETUP_START, setupBlock, shellRcOf, withoutSetup, withSetup, type ShellRc } from './lib/setup'
 export { OSC11_PL } from './lib/host'
-export { convertCall, measureCall, noNetworkEnv, parseOd, pngSize, shouldRetrySafe, typstCall } from './lib/typst'
-export { alignFirstLine, firstLineOf, fontFit, hashOf, renderKey, rowsFor, sizing, type FirstLine } from './lib/draw'
+export {
+  convertCall, measureCall, noNetworkEnv, pageRowsOf, parseOd, pngSize, resultOf, roomInputs, shouldRetrySafe, typstCall,
+} from './lib/typst'
+export { alignFirstLine, firstLineOf, fontFit, hashOf, renderKey, scaledBulletRow, sizing, type FirstLine } from './lib/draw'
+export { nextJob } from './lib/stream'
 export * from './lib/images'
 export {
   choiceOf, decisionOf, editorArgv, feedbackOf, isPlanQuestion, normalPath, PLAN_ASK_LINE, PLAN_AUTO, PLAN_CLEAR, PLAN_DRAWING, PLAN_EDIT,
@@ -75,27 +85,87 @@ const done = atom({ plugin: 'md-preview', key: 'done' } as const, 0)
 // ---- Pictures under rows ----------------------------------------------------
 
 // The env to draw pictures with: md-preview on, in a terminal that draws;
-// null otherwise (no Typst needed). Here and not in pictures.tsx, as it
-// reads the atoms.
-async function pictureEnv($: EngineInterface, e: { viewport?: RenderViewport }): Promise<Env | null> {
+// null otherwise (no Typst needed), with the `done` value read. Here and not
+// in pictures.tsx, as it reads the atoms. The sizes come from the Frame
+// (frameFor, shownFor); the viewport is noted for it (a change is settled
+// with the tty's).
+async function pictureEnv($: EngineInterface, e: { viewport?: RenderViewport }): Promise<{ env: Env; done: number } | null> {
   if (!(await read($, isOn))) return null
-  // Read so the end of setUp draws this row again.
-  await read($, done)
+  if (e.viewport) noteView($, e.viewport)
+  // Read so the end of setUp, a compile and a commit draw this row again.
+  const now = await read($, done)
   if (!S.env) {
     void setUp($).catch(() => undefined)
     return null
   }
-  if (!S.env.canDraw) return null
-  if (e.viewport) noteViewport($, e.viewport)
-  return S.env
+  return S.env.canDraw ? { env: S.env, done: now } : null
 }
 
 // The env to draw Markdown pictures with (an answer, a plan): as
-// pictureEnv, and Typst found. Reading `done` draws the reader again when a
-// render finishes.
-async function answerEnv($: EngineInterface, e: { viewport?: RenderViewport }): Promise<Env | null> {
+// pictureEnv, and Typst found.
+async function answerEnv($: EngineInterface, e: { viewport?: RenderViewport }): Promise<{ env: Env; done: number } | null> {
   const ready = await pictureEnv($, e)
-  return ready?.typst ? ready : null
+  return ready?.env.typst ? ready : null
+}
+
+// ---- Rows drawn before ----------------------------------------------------------
+
+// What a drawn row depends on besides its own inputs: `done` (every result
+// stored, setting, theme, mode and commit redraws through it), the epochs
+// (the target and shown Frames change only with them, but at setFrame and
+// at the first viewport noted, both before a row is kept), the env, and the
+// viewport's columns (the room: the engine draws every row again once a
+// width change settles; a scroll keeps them).
+const stampOf = (ready: { env: Env; done: number }, view?: RenderViewport) =>
+  `${ready.done}|${S.epoch}|${S.shownEpoch}|${ready.env.inline ? 1 : 0}|${view?.columns ?? ''}|${roomColumns(view)}`
+
+// Each row's last drawing, by its requestId: a redraw with the same inputs
+// and the same stamp (a scroll step, a new onScreen) returns the same thing,
+// with no hash, no file and no process. Only drawn pictures are kept (a
+// blank or a text row runs the pipeline again: its timers move it on).
+// `text` the row's text (a string kept as given, so the compare is mostly
+// one pointer), `extra` its other inputs.
+type Memo<T> = { text: string; extra: string; stamp: string; onScreen: boolean | undefined; value: T }
+const answers = new Map<string, Memo<RenderElement>>()
+const plans = new Map<string, Memo<Drawing>>()
+const unders = new Map<string, Memo<Under[]>>()
+const pasted = new Map<string, Memo<Shown[]>>()
+
+// The kept value when the inputs and the stamp are the same. A new onScreen
+// is given to the row's jobs that wait or run (their order and whether they
+// hold the commit), with nothing drawn again. `isJob`: which jobs are the
+// row's, by their requestId (by default the row's id).
+type MemoKey = { text: string; extra: string; stamp: string; onScreen: boolean | undefined }
+function memoOf<T>(memo: Map<string, Memo<T>>, id: string, k: MemoKey, isJob = (requestId: string) => requestId === id): T | undefined {
+  const kept = memo.get(id)
+  if (!kept || kept.text !== k.text || kept.extra !== k.extra || kept.stamp !== k.stamp) return undefined
+  const { onScreen } = k
+  if (kept.onScreen !== onScreen) {
+    kept.onScreen = onScreen
+    for (const job of queue) if (isJob(job.requestId)) job.onScreen = onScreen
+    for (const { job } of running.values()) if (isJob(job.requestId)) job.onScreen = onScreen
+  }
+  return kept.value
+}
+
+function memoSet<T>(memo: Map<string, Memo<T>>, id: string, k: MemoKey, value: T) {
+  keep(memo, id, { ...k, value }, RESULTS_KEPT)
+}
+
+// A plan's drawing (both its rows: ToolUse and ToolResult), kept while it
+// is drawn pages (memoOf).
+async function planDrawing(
+  $: EngineInterface, e: { viewport?: RenderViewport; props: { onScreen?: unknown } }, toolUseId: string, plan: string, ready: { env: Env; done: number },
+): Promise<Drawing> {
+  const id = `plan:${toolUseId}`
+  const onScreen = onScreenOf(e.props.onScreen)
+  const k = { text: plan, extra: '', stamp: stampOf(ready, e.viewport), onScreen }
+  const kept = memoOf(plans, id, k)
+  if (kept) return kept
+  const drawing = await pagesOf($, { id, text: plan, frame: frameFor(e.viewport), env: ready.env, canStream: false, onScreen })
+  if (drawing.kind === 'pages') memoSet(plans, id, k, drawing)
+  else plans.delete(id)
+  return drawing
 }
 
 // md-preview's own plan question: only on the main loop of a session drawn
@@ -136,17 +206,19 @@ export const register: Register = on => {
       return { text: `md-preview is ${asked.kind}.` }
     }
     if (asked.kind === 'size') {
+      // The epoch begins with the setting, so no row draws it with no epoch
+      // open (the store write waits for the host).
       S.size = asked.percent
+      beginEpoch($)
       await $.store.set('size', S.size)
-      refresh($)
       return { text: `md-preview draws text at ${S.size}% of the terminal's text size (100% matches it).` }
     }
     if (asked.kind === 'width') {
       if (asked.width === undefined) await setUp($).catch(() => null)
       else {
         S.width = asked.width
+        beginEpoch($)
         await $.store.set('width', S.width)
-        refresh($)
       }
       const most = typeof S.width === 'number' && S.width > IMAGE_MAX_COLUMNS ? ` (a picture is ${IMAGE_MAX_COLUMNS} columns at most)` : ''
       const head = asked.width === undefined ? 'The most columns a picture takes' : 'md-preview pictures now take at most'
@@ -156,11 +228,11 @@ export const register: Register = on => {
       if (asked.height === undefined) await setUp($).catch(() => null)
       else {
         S.height = asked.height
+        beginEpoch($)
         await $.store.set('height', S.height)
-        refresh($)
       }
-      const head = asked.height === undefined ? 'The most rows an image takes' : 'md-preview images now take at most'
-      return { text: `${head}: ${heightText(S.height)}. Use /md-preview height half (the default), /md-preview height full, or /md-preview height <${MIN_HEIGHT}-${MAX_HEIGHT}> (never more than full).` }
+      const head = asked.height === undefined ? 'The most rows an image or a Typst drawing takes' : 'md-preview images and Typst drawings now take at most'
+      return { text: `${head}: ${heightText(S.height)}. This applies to images (sent or pasted) and to Typst drawings in answers. Use /md-preview height half (the default), /md-preview height full, or /md-preview height <${MIN_HEIGHT}-${MAX_HEIGHT}> (never more than full).` }
     }
     if (asked.kind === 'setup') {
       await setUp($).catch(() => null)
@@ -188,12 +260,12 @@ export const register: Register = on => {
         const names = [...themes.keys()].sort().join(', ') || 'none'
         return { text: `No usable theme named ${asked.name}. Themes: ${names}.\n${themeListing(themes, problems, was?.name ?? DEFAULT_THEME, userThemesOf(ready.home))}` }
       }
-      if (asked.name) await $.store.set('theme-name', chosen.name)
       if (S.look?.name !== was?.name || S.look?.dir !== was?.dir || S.look?.stamp !== was?.stamp) {
         // The theme's fonts set the column width and the code size.
         if (ready.typst && S.look) ready.metrics = await measureFonts($, ready.typst, ready.root, ready.cache, ready.termFont, S.look.dir)
-        refresh($)
+        beginEpoch($)
       }
+      if (asked.name) await $.store.set('theme-name', chosen.name)
       const head = asked.name ? `md-preview uses the theme ${chosen.name}.\n` : ''
       return { text: `${head}${themeListing(themes, problems, chosen.name, userThemesOf(ready.home))}` }
     }
@@ -207,7 +279,7 @@ export const register: Register = on => {
     const tried = S.setupNeeded ? ' In iTerm2, run /md-preview setup once to show pictures.' : ''
     const usage = `Use /md-preview on, /md-preview off, /md-preview size <${MIN_SIZE}-${MAX_SIZE}>, /md-preview width <${MIN_WIDTH}-${MAX_WIDTH}|full>, /md-preview height <${MIN_HEIGHT}-${MAX_HEIGHT}|half|full>, or /md-preview theme [name].`
     const bad = asked.kind === 'bad' ? `Not understood: "${e.args.trim()}". ` : ''
-    return { text: `${bad}md-preview is ${state}, theme ${S.look?.name ?? DEFAULT_THEME}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image height ${heightText(S.height)}, ${font}. ${typst}; ${terminal}.${tried} ${usage}` }
+    return { text: `${bad}md-preview is ${state}, theme ${S.look?.name ?? DEFAULT_THEME}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, ${font}. ${typst}; ${terminal}.${tried} ${usage}` }
   })
 
   on('config.set', { key: 'theme' }, async ($, e, next) => {
@@ -288,9 +360,18 @@ export const register: Register = on => {
     if (e.surface !== 'terminal' || e.props.isSummary || !e.props.text.trim()) return next(e)
     const ready = await answerEnv($, e)
     if (!ready) return next(e)
-    const columns = columnsFor(e.viewport?.columns, S.width, ready.inline ? (S.cell ?? DEFAULT_CELL) : null)
-    const drawing = await pagesOf($, { id: e.requestId, text: e.props.text, columns, env: ready, canStream: true })
-    if (drawing.kind === 'pages') return drawPages($, e, drawing.result, columns, drawing.px, drawing.bytes, { bullet: !!e.props.isFirstOfReply })
+    const bullet = !!e.props.isFirstOfReply
+    const onScreen = onScreenOf(e.props.onScreen)
+    const k = { text: e.props.text, extra: bullet ? 'bullet' : '', stamp: stampOf(ready, e.viewport), onScreen }
+    const kept = memoOf(answers, e.requestId, k)
+    if (kept) return kept
+    const drawing = await pagesOf($, { id: e.requestId, text: e.props.text, frame: frameFor(e.viewport), env: ready.env, canStream: true, onScreen })
+    if (drawing.kind === 'pages') {
+      const tree = drawPages($, e, drawing.result, drawing.bytes, { bullet })
+      memoSet(answers, e.requestId, k, tree)
+      return tree
+    }
+    answers.delete(e.requestId)
     if (drawing.kind === 'text') return next(e)
     const { Box } = $.ui.resolve(e)
     return <Box />
@@ -307,8 +388,20 @@ export const register: Register = on => {
     try {
       const files = sentFiles(e.props.output)
       const ready = files.length ? await pictureEnv($, e) : null
-      const markdown = ready && files.some(f => f.kind === 'markdown') ? await answerEnv($, e) : null
-      if (ready) under = await sentOf($, e, { ready, markdown, files, id: e.props.tool_use_id })
+      if (ready) {
+        const markdown = files.some(f => f.kind === 'markdown') && ready.env.typst ? ready.env : null
+        const id = e.props.tool_use_id
+        const onScreen = onScreenOf(e.props.onScreen)
+        const k = { text: files.map(f => `${f.kind}:${f.path}`).join('\n'), extra: '', stamp: stampOf(ready, e.viewport), onScreen }
+        // Its jobs: one per Markdown file (pagesOf's id `file:<id>:<path>`).
+        const kept = memoOf(unders, id, k, requestId => requestId.startsWith(`file:${id}:`))
+        if (kept) under = kept
+        else {
+          under = await sentOf($, e, { ready: ready.env, markdown, files, id, at: { done: ready.done, row: e.requestId } })
+          if (under.length && under.every(u => !('drawing' in u) || u.drawing.kind === 'pages')) memoSet(unders, id, k, under)
+          else unders.delete(id)
+        }
+      }
     } catch {
       under = []
     }
@@ -330,8 +423,15 @@ export const register: Register = on => {
     let shown: Shown[] = []
     try {
       const ready = await pictureEnv($, e)
-      const dir = ready ? await pasteDir($, ready) : ''
-      if (ready && dir) shown = await shownOf($, e, ready, numbers.map(n => pastedImagePath(dir, n)))
+      const k = { text: e.props.text, extra: '', stamp: ready ? stampOf(ready, e.viewport) : '', onScreen: undefined }
+      const kept = ready ? memoOf(pasted, e.requestId, k, () => false) : undefined
+      if (kept) shown = kept
+      else if (ready) {
+        const dir = await pasteDir($, ready.env)
+        if (dir) shown = await shownOf($, e, ready.env, numbers.map(n => pastedImagePath(dir, n)), { done: ready.done, row: e.requestId })
+        if (shown.length) memoSet(pasted, e.requestId, k, shown)
+        else pasted.delete(e.requestId)
+      }
     } catch {
       shown = []
     }
@@ -363,9 +463,8 @@ export const register: Register = on => {
       const plan = planShownOf(editedPlans.get(e.props.tool_use_id), e.props.output, e.props.input)
       const ready = plan ? await answerEnv($, e) : null
       if (!ready) return row
-      const columns = columnsFor(e.viewport?.columns, S.width, ready.inline ? (S.cell ?? DEFAULT_CELL) : null)
-      const drawing = await pagesOf($, { id: `plan:${e.props.tool_use_id}`, text: plan, columns, env: ready, canStream: false })
-      return drawPlanUse($, e, row, drawing, columns)
+      const drawing = await planDrawing($, e, e.props.tool_use_id, plan, ready)
+      return drawPlanUse($, e, row, drawing)
     } catch {
       return row
     }
@@ -381,8 +480,7 @@ export const register: Register = on => {
     try {
       const plan = planOf(e.props.output) ? planShownOf(editedPlans.get(e.props.tool_use_id), e.props.output, undefined) : ''
       const ready = plan ? await answerEnv($, e) : null
-      const columns = columnsFor(e.viewport?.columns, S.width, ready?.inline ? (S.cell ?? DEFAULT_CELL) : null)
-      const drawing = ready ? await pagesOf($, { id: `plan:${e.props.tool_use_id}`, text: plan, columns, env: ready, canStream: false }) : null
+      const drawing = ready ? await planDrawing($, e, e.props.tool_use_id, plan, ready) : null
       const filePath = (e.props.output as { filePath?: unknown }).filePath
       if (drawing && drawing.kind !== 'text') drawn = drawPlanResult($, e, typeof filePath === 'string' ? filePath : undefined)
     } catch {

@@ -1,6 +1,6 @@
 // What the terminal can draw: its columns and cell size, whether the engine
 // draws pictures there, and how large a picture sent as bytes (over ssh) can be.
-import type { Cell } from './state'
+import { S, type Cell } from './state'
 import { GUTTER, IMAGE_MAX_COLUMNS, SEGMENT_ROWS, type Width } from './settings'
 
 // The columns a picture takes: the viewport less the bullet, at most `width`
@@ -12,16 +12,34 @@ export function columnsFor(viewportColumns: number | undefined, width: Width, in
   return Math.max(20, Math.min(...caps, (viewportColumns ?? 80) - GUTTER))
 }
 
-// The cell in device pixels from `rows cols xpixel ypixel` (TIOCGWINSZ).
-// iTerm2 (3.5+), Ghostty, kitty and WezTerm report device pixels already, so
-// there is no backing-scale step. Null where the tty reports no pixels or a
-// cell that can't be right (under 4 or over 64 px wide).
-export function cellOf(stdout: string): Cell | null {
+// The columns a picture has room for now: the viewport at most the tty's,
+// less the bullet (as pictureColumns, with no width or ssh cap).
+export function roomColumns(view?: { columns: number } | null): number {
+  const v = view?.columns ?? S.viewColumns ?? S.frame?.columns
+  const tty = S.tty?.columns
+  const columns = v === undefined ? tty : tty === undefined ? v : Math.min(v, tty)
+  return columnsFor(columns, 'full')
+}
+
+// A box at most `room` columns wide, the aspect kept; never larger.
+export function fitBox(box: { columns: number; rows: number }, room: number): { columns: number; rows: number } {
+  if (box.columns <= room) return { columns: box.columns, rows: box.rows }
+  return { columns: room, rows: Math.max(1, Math.round((box.rows * room) / box.columns)) }
+}
+
+// The size from `rows cols xpixel ypixel` (TIOCGWINSZ): the rows, the
+// columns and the cell in device pixels. iTerm2 (3.5+), Ghostty, kitty and
+// WezTerm report device pixels already, so there is no backing-scale step.
+// `cell` is null where the tty reports no pixels or a cell that can't be
+// right (under 4 or over 64 px wide); the whole is null with no rows or
+// columns.
+export function sizeOf(stdout: string): { rows: number; columns: number; cell: Cell | null } | null {
   const [rows, columns, x, y] = stdout.trim().split(/\s+/).map(Number)
-  if (!rows || !columns || !x || !y) return null
+  if (!rows || !columns || !Number.isInteger(rows) || !Number.isInteger(columns)) return null
+  if (!x || !y) return { rows, columns, cell: null }
   const width = x / columns
   const height = y / rows
-  return width >= 4 && width <= 64 && height >= 4 ? { width, height } : null
+  return { rows, columns, cell: width >= 4 && width <= 64 && height >= 4 ? { width, height } : null }
 }
 
 // A set flag: anything but empty, 0, false, no or off.

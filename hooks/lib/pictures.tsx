@@ -2,29 +2,55 @@
 // the user pastes are drawn under their row. An image is drawn at its own
 // size or smaller (a JPEG or WebP as the PNG Typst makes of it); a Markdown
 // file as an answer is. The pure parts are in images.ts.
-import type { EngineInterface, ImageSource, RenderElement, RenderInput } from 'claude-code'
+import type { EngineInterface, FsStat, ImageSource, RenderElement, RenderInput } from 'claude-code'
 
-import { COMPILE_TIMEOUT_MS, DEFAULT_CELL, GUTTER, PICTURES_KEPT, SENT_TEXT_MAX_BYTES } from './settings'
-import { converted, converting, INLINE_KEPT, inlined, lastConverted, pasteDirs, pictures, refresh, S, sentTexts, type Env } from './state'
-import { columnsFor, fitsInline, INLINE_MAX_BYTES } from './terminal'
-import { convertBox, convertedPath, folderOf, pasteDirOf, pictureCells, pictureRowsFor, type PixelBox, type SentFile } from './images'
+import { COMPILE_TIMEOUT_MS, GUTTER, PICTURES_KEPT, SENT_TEXT_MAX_BYTES, type Height } from './settings'
+import { converted, converting, epochOpen, INLINE_KEPT, inlined, keep, lastConverted, pasteDirs, pictures, S, sentTexts, type Env } from './state'
+import { jobDone } from './epoch'
+import { fitBox, fitsInline, INLINE_MAX_BYTES, roomColumns } from './terminal'
+import { convertBox, convertedPath, folderOf, onScreenOf, pasteDirOf, pictureCells, pictureRowsFor, type PixelBox, type SentFile } from './images'
 import { imagePathOf } from './markdown'
 import { drawPages, hashOf } from './draw'
 import { convertCall, logDebug, parseOd, pngSize } from './typst'
 import { pagesOf, type Drawing } from './answer'
 import { HEADERS_SH } from './host'
+import { frameFor, pictureColumns, shownFor, type Frame } from './frame'
 
 export type Picture = { file: string; stamp: string; bytes: number; width: number; height: number }
 export type Shown = { source: ImageSource; columns: number; rows: number; alt: string }
 // What draws under a SendUserFile row: a picture, or a Markdown file's
-// pages (`blank`: an empty space while they compile).
-export type Under = Shown | { drawing: Exclude<Drawing, { kind: 'text' }>; columns: number }
+// pages (`blank`: an empty space while they compile; an older, wider page
+// draws smaller to fit).
+export type Under = Shown | { drawing: Exclude<Drawing, { kind: 'text' }> }
 export type RowInput = RenderInput<'ToolResult' | 'UserMessage', 'terminal'>
+
+// Where a stat is read: the `done` value the row read and the row's
+// requestId. A row that draws again with no new `done` (a scroll step, a new
+// onScreen) reads each stat once; a new row (the same file sent again)
+// reads it anew. With none given, the file is stat'ed each time.
+export type StatAt = { done: number; row: string }
+const STATS_KEPT = 4096
+let statsDone: number | undefined
+const stats = new Map<string, Promise<FsStat | null>>()
+function statOf($: EngineInterface, file: string, at?: StatAt): Promise<FsStat | null> {
+  if (!at) return $.fs.stat(file).catch(() => null)
+  if (statsDone !== at.done || stats.size >= STATS_KEPT) {
+    stats.clear()
+    statsDone = at.done
+  }
+  const key = `${at.row}\n${file}`
+  let got = stats.get(key)
+  if (!got) {
+    got = $.fs.stat(file).catch(() => null)
+    stats.set(key, got)
+  }
+  return got
+}
 
 // A PNG's pixel size from its first 24 bytes, read again only when its stat
 // changes; null for a file that is gone or not a PNG.
-export async function pictureOf($: EngineInterface, file: string): Promise<Picture | null> {
-  const st = await $.fs.stat(file).catch(() => null)
+export async function pictureOf($: EngineInterface, file: string, at?: StatAt): Promise<Picture | null> {
+  const st = await statOf($, file, at)
   if (!st || st.kind !== 'file') return null
   const stamp = `${st.mtimeMs}:${st.size}`
   let kept = pictures.get(file)
@@ -59,27 +85,32 @@ export async function pictureBytes($: EngineInterface, p: Picture): Promise<stri
   return base64
 }
 
-// The Images for the files that are PNGs, sized to the viewport.
-export async function shownOf($: EngineInterface, e: RowInput, ready: Env, files: readonly string[]): Promise<Shown[]> {
+// The Images for the files that are PNGs, sized to the Frame on screen.
+// `at`: as statOf.
+export async function shownOf($: EngineInterface, e: RowInput, ready: Env, files: readonly string[], at?: StatAt): Promise<Shown[]> {
   const shown: Shown[] = []
   for (const file of new Set(files)) {
-    const s = await shownOne($, e, ready, file)
+    const s = await shownOne($, e, ready, file, nameOf(file), at)
     if (s) shown.push(s)
   }
   return shown
 }
 
-// One PNG's Image, sized to the viewport; null when it is not a PNG. `alt`
-// is the file's name (the name of the file it was made of).
-export async function shownOne($: EngineInterface, e: RowInput, ready: Env, file: string, alt = nameOf(file)): Promise<Shown | null> {
-  const p = await pictureOf($, file)
+// One PNG's Image, sized to the Frame and the height setting on screen
+// (shownFor, S.shownHeight: a new size shows when its epoch commits, with
+// every other picture), and at most as wide as the room now; null when it is not a PNG. `alt` is the file's name
+// (the name of the file it was made of). Its generation follows the file's
+// stat alone: a new box is not a new file.
+export async function shownOne($: EngineInterface, e: RowInput, ready: Env, file: string, alt = nameOf(file), at?: StatAt): Promise<Shown | null> {
+  const p = await pictureOf($, file, at)
   if (!p) return null
-  const fit = pictureCells(p, columnsFor(e.viewport?.columns, S.width), pictureRowsFor(e.viewport?.rows, S.height), S.cell ?? DEFAULT_CELL)
+  const frame = shownFor(e.viewport)
+  const fit = fitBox(pictureCells(p, pictureColumns(frame, false), pictureRowsFor(frame.rows, S.shownHeight), frame.cell), roomColumns(e.viewport))
   if (ready.inline) {
     const png = await pictureBytes($, p)
     return png ? { source: { png }, ...fit, alt } : null
   }
-  const generation = Number.parseInt(hashOf([p.stamp, fit.columns, fit.rows]).slice(0, 8), 16)
+  const generation = Number.parseInt(hashOf([p.stamp]).slice(0, 8), 16)
   return { source: { file, format: 'png', generation }, ...fit, alt }
 }
 
@@ -88,15 +119,15 @@ const nameOf = (file: string) => file.split('/').pop() || 'image'
 // A JPEG or WebP as a PNG that Typst makes (render/convert.typ) in the
 // cache, to fit `box`: once per stat stamp and box, one run at a time per
 // key. The first PNG of a file is waited for; for a new box, the last PNG
-// of the file draws at once while the new one is made, then a refresh
-// draws it. Null with no Typst, or when it fails (the row stays as is).
-export async function convertedOf($: EngineInterface, ready: Env, file: string, box: PixelBox): Promise<string | null> {
+// of the file draws at once while the new one is made, then jobDone draws
+// it (in an open epoch: at its commit, which waits for every convert).
+// `at`: as statOf. Null with no Typst, or when it fails (the row stays as is).
+export async function convertedOf($: EngineInterface, ready: Env, file: string, box: PixelBox, at?: StatAt): Promise<string | null> {
   if (!ready.typst) return null
-  const st = await $.fs.stat(file).catch(() => null)
+  const st = await statOf($, file, at)
   if (!st || st.kind !== 'file') return null
   const stamp = `${st.mtimeMs}:${st.size}`
-  const last = lastConverted.get(file)
-  const before = last?.stamp === stamp ? last.png : null
+  const before = lastPngOf(file, stamp)
   const key = `${file}@${stamp}@${box.width}x${box.height}`
   if (converted.has(key)) return converted.get(key) ?? before
   let run = converting.get(key)
@@ -106,11 +137,26 @@ export async function convertedOf($: EngineInterface, ready: Env, file: string, 
     if (before && [...converting.keys()].some(k => k.startsWith(`${file}@${stamp}@`))) return before
     run = convertOnce($, ready, file, stamp, box, key).finally(() => converting.delete(key))
     converting.set(key, run)
-    // The refresh one tick later: a run that ends while this row still draws
-    // must not be lost.
-    if (before) void run.then(() => void $.clock.after(0, () => refresh($)), () => undefined)
+    // jobDone one tick later: a run that ends while this row still draws
+    // must not be lost. A run that is waited for (the first PNG, no epoch
+    // open) draws in this render.
+    if (before || epochOpen()) void run.then(() => void $.clock.after(0, () => jobDone($)), () => undefined)
   }
   return before ?? run
+}
+
+// The last PNG made of `file` at its stat stamp in this load (any box); null
+// when there is none.
+function lastPngOf(file: string, stamp: string): string | null {
+  const last = lastConverted.get(file)
+  return last?.stamp === stamp ? last.png : null
+}
+
+// Whether a PNG of `file` as it is now was made in this load (any box).
+// `at`: as statOf.
+async function hasPngOf($: EngineInterface, file: string, at?: StatAt): Promise<boolean> {
+  const st = await statOf($, file, at)
+  return !!st && st.kind === 'file' && !!lastPngOf(file, `${st.mtimeMs}:${st.size}`)
 }
 
 async function convertOnce($: EngineInterface, ready: Env, file: string, stamp: string, box: PixelBox, key: string): Promise<string | null> {
@@ -138,62 +184,70 @@ async function convertOnce($: EngineInterface, ready: Env, file: string, stamp: 
       png = null
     }
   }
-  keep(converted, key, png)
-  if (png) keep(lastConverted, file, { stamp, png })
+  keep(converted, key, png, PICTURES_KEPT)
+  if (png) keep(lastConverted, file, { stamp, png }, PICTURES_KEPT)
   return png
-}
-
-// Sets a cache entry as the newest; the oldest go past PICTURES_KEPT.
-function keep<T>(cache: Map<string, T>, key: string, value: T) {
-  cache.delete(key)
-  cache.set(key, value)
-  for (const old of cache.keys()) {
-    if (cache.size <= PICTURES_KEPT) break
-    cache.delete(old)
-  }
 }
 
 // A Markdown file's text, read again only when its stat changes; null when
 // it is gone, over SENT_TEXT_MAX_BYTES, not read, or empty.
-export async function sentTextOf($: EngineInterface, file: string): Promise<string | null> {
-  const st = await $.fs.stat(file).catch(() => null)
+export async function sentTextOf($: EngineInterface, file: string, at?: StatAt): Promise<string | null> {
+  const st = await statOf($, file, at)
   if (!st || st.kind !== 'file') return null
   const stamp = `${st.mtimeMs}:${st.size}`
   const kept = sentTexts.get(file)
   if (kept?.stamp === stamp) return kept.text
   const got = st.size <= SENT_TEXT_MAX_BYTES ? await $.fs.read(file).catch(() => null) : null
   const text = got?.trim() ? got : null
-  keep(sentTexts, file, { stamp, text })
+  keep(sentTexts, file, { stamp, text }, PICTURES_KEPT)
   return text
 }
 
 // What draws under a SendUserFile row, in the attachments' order: each
 // image, and each Markdown file's pages (through the answers' pipeline, its
 // relative images by its own folder). `markdown`: the env for the Markdown
-// files (null: they stay out); `id`: the call's tool_use_id.
+// files (null: they stay out); `id`: the call's tool_use_id; `at`: as
+// statOf. Images size from the Frame on screen; while an epoch is open, the
+// PNG of a JPEG or WebP for the target is made at once (not waited for), so
+// it is there when the epoch commits. With no PNG of that file yet (a
+// resumed session) only the target's is made, and nothing draws for it
+// until the commit.
 export async function sentOf(
-  $: EngineInterface, e: RowInput, o: { ready: Env; markdown: Env | null; files: readonly SentFile[]; id: string },
+  $: EngineInterface, e: RowInput, o: { ready: Env; markdown: Env | null; files: readonly SentFile[]; id: string; at?: StatAt },
 ): Promise<Under[]> {
-  // Over ssh a Markdown file's page must stay INLINE_MAX_SIDE pixels wide at most.
-  const columns = columnsFor(e.viewport?.columns, S.width, o.ready.inline ? (S.cell ?? DEFAULT_CELL) : null)
-  // The space a picture takes (as in shownOne), which a JPEG or WebP is made to fit.
-  const box = convertBox(columns, pictureRowsFor(e.viewport?.rows, S.height), S.cell ?? DEFAULT_CELL)
+  const shown = shownFor(e.viewport)
+  const target = epochOpen() ? frameFor(e.viewport) : null
+  const box = boxOf(shown, o.ready.inline, S.shownHeight)
+  const next = target ? boxOf(target, o.ready.inline, S.height) : null
   const under: Under[] = []
   for (const f of o.files) {
     const full = imagePathOf(f.path, o.ready.cwd)
     if (f.kind === 'markdown') {
-      const text = o.markdown ? await sentTextOf($, full) : null
+      const text = o.markdown ? await sentTextOf($, full, o.at) : null
       if (!o.markdown || !text) continue
-      const drawing = await pagesOf($, { id: `file:${o.id}:${f.path}`, text, columns, env: o.markdown, canStream: false, base: folderOf(full) })
-      if (drawing.kind !== 'text') under.push({ drawing, columns })
+      const drawing = await pagesOf($, {
+        id: `file:${o.id}:${f.path}`, text, frame: frameFor(e.viewport), env: o.markdown, canStream: false, base: folderOf(full),
+        onScreen: onScreenOf(e.props.onScreen),
+      })
+      if (drawing.kind !== 'text') under.push({ drawing })
       continue
     }
-    const png = f.kind === 'png' ? full : await convertedOf($, o.ready, full, box)
-    const shown = png ? await shownOne($, e, o.ready, png, nameOf(full)) : null
-    if (shown) under.push(shown)
+    if (f.kind !== 'png' && next && (next.width !== box.width || next.height !== box.height)) {
+      void convertedOf($, o.ready, full, next, o.at).catch(() => null)
+      if (!(await hasPngOf($, full, o.at))) continue
+    }
+    const png = f.kind === 'png' ? full : await convertedOf($, o.ready, full, box, o.at)
+    const picture = png ? await shownOne($, e, o.ready, png, nameOf(full), o.at) : null
+    if (picture) under.push(picture)
   }
   return under
 }
+
+// The space a picture takes in `frame` with the height setting `height`
+// (as in shownOne), which a JPEG or WebP is made to fit. Over ssh it stays
+// INLINE_MAX_SIDE pixels wide at most.
+const boxOf = (frame: Frame, inline: boolean, height: Height): PixelBox =>
+  convertBox(pictureColumns(frame, inline), pictureRowsFor(frame.rows, height), frame.cell)
 
 // The engine's row, then the pictures under it.
 export function underRow($: EngineInterface, e: RowInput, row: RenderElement, under: readonly Under[]) {
@@ -204,11 +258,11 @@ export function underRow($: EngineInterface, e: RowInput, row: RenderElement, un
       <Box flexDirection="column" marginLeft={GUTTER}>
         {under.map((s, i) => {
           if ('source' in s) return <Image key={`picture-${i}`} source={s.source} columns={s.columns} rows={s.rows} alt={s.alt} />
-          const { drawing, columns } = s
+          const { drawing } = s
           if (drawing.kind === 'blank') return <Box key={`blank-${i}`} />
           return (
             <Box key={`pages-${i}`} flexDirection="column">
-              {drawPages($, e, drawing.result, columns, drawing.px, drawing.bytes, { gutter: 0, marginTop: 0, keys: `file${i}-` })}
+              {drawPages($, e, drawing.result, drawing.bytes, { gutter: 0, marginTop: 0, keys: `file${i}-` })}
             </Box>
           )
         })}
