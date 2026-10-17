@@ -21,7 +21,7 @@ Set `IUI_DEBUG=1` before you start Claude Code. The mod then writes trace lines 
 
 ## Module layout
 
-The hooks module is `hooks/register.tsx`. It connects the hooks to the modules in `hooks/lib/`. Each module has one topic, for example `markdown.ts` (blocks and segments), `mode.ts` (light or dark), `typst.ts` (compile), `draw.tsx` (the pages of an answer), `answer.ts` (one text through the compile and cache steps), `plan.tsx` (the plan approval question and the plan rows), `copy.ts` (the text under a mouse selection of pictures) and `probe.ts` (the drawn pages and the probe that finds their words). The values that change are in one object, `S`, in `state.ts`. The tests import from `hooks/register.tsx`, which exports the names that they use.
+The hooks module is `hooks/register.tsx`. It connects the hooks to the modules in `hooks/lib/`. Each module has one topic, for example `markdown.ts` (blocks and segments), `mode.ts` (light or dark), `typst.ts` (compile), `draw.tsx` (the pages of an answer), `answer.ts` (one text through the compile and cache steps), `plan.tsx` (the plan approval question and the plan rows), `frame.ts` (the terminal size and the watcher process, which also reports the clipboard changes), `copy.ts` (the text under a mouse selection of pictures) and `probe.ts` (the drawn pages, and the words of a page that a copy reads, kept in memory). The values that change are in one object, `S`, in `state.ts`. The tests import from `hooks/register.tsx`, which exports the names that they use.
 
 The Typst template is `render/md.typ`. The themes are in `render/themes/` (refer to [`render/themes/README.md`](../render/themes/README.md)). The vendored Typst packages are in `render/packages/preview/`.
 

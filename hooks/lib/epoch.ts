@@ -3,14 +3,12 @@
 // target, and its pictures swap in all at once: a job of the open epoch that
 // ends does not redraw; the epoch commits (S.shown = S.frame, with the
 // height setting of the target, one redraw) when its jobs on screen are done. A burst (a drag not quiet yet) holds the
-// jobs and the commit. An epoch begun stops the probe ahead (probe.ts); a
-// commit, or a burst's end, arms it again.
+// jobs and the commit.
 import type { EngineInterface } from 'claude-code'
 
 import { COMMIT_MAX_MS, COMMIT_MIN_MS } from './settings'
 import { converting, epochOpen, queue, refresh, running, S, type Frame, type Job } from './state'
 import { traceDebug } from './log'
-import { probeLater, stopProbe } from './probe'
 
 // The open epoch: `ready` once COMMIT_MIN_MS passed with no new activity
 // (a row drawn, a job enqueued: extendEpoch), `overdue` once COMMIT_MAX_MS
@@ -38,7 +36,6 @@ export function beginEpoch($: EngineInterface, frame?: Frame | null) {
     } catch {}
   }
   queue.length = 0
-  stopProbe()
   const target = frame ?? S.frame
   if (target) S.frame = { ...target }
   const epoch = ++S.epoch
@@ -95,7 +92,6 @@ export function releaseJobs($: EngineInterface) {
   if (S.missed && !epochOpen()) refresh($)
   S.missed = false
   maybeCommit($)
-  probeLater($)
 }
 
 // A job ended (its result is stored): during a burst it is noted; in an open
@@ -127,5 +123,4 @@ function maybeCommit($: EngineInterface) {
   S.shownHeight = S.height
   S.shownEpoch = S.epoch
   refresh($)
-  probeLater($)
 }

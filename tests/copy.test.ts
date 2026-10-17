@@ -2,9 +2,10 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import {
   codePointsOf, commandSuggestions, decodeSelection, DIACRITICS, hasPlaceholders, isDrawnIn, joinSegments, parseCommand, pickPages, placeholderCell,
-  positionsOf, probeCall, textOfRun, type Drawn, type TextBlock, type Item, type Mark,
+  isSafePage, positionsOf, textOfRun, WATCH_PL, type Drawn, type TextBlock, type Item, type Mark,
 } from '../hooks/register'
-import { PROBE_IDLE_MS } from '../hooks/lib/settings'
+import { WATCH_RESTART_MS } from '../hooks/lib/frame'
+import { READING_TOAST_MS } from '../hooks/lib/settings'
 import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI } from './copy-fixture'
 
 // One screen row of a picture as Claude Code draws it: `lead` (the gutter),
@@ -237,7 +238,7 @@ test('/iui grab and dump are commands with typeahead rows; dump with nothing see
   expect(ran.text).toContain('Intelligent UI: no clipboard text with picture cells seen yet')
 })
 
-// ---- The pipeline: probe.json, the probe, the watcher -------------------------
+// ---- The pipeline: the watcher's clip lines, pbpaste, the probe of a page ------
 
 const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: exitCode ? 'error: boom' : '', isStdoutTruncated: false, isStderrTruncated: false } })
 // The first 24 bytes of a 1568 x 512 PNG (the fixture's page), as `od` prints them.
@@ -246,10 +247,14 @@ const WRAP = 'echo $$; exec "$@"'
 const inputsOf = (argv: readonly string[]) => Object.fromEntries(argv.flatMap((a, i) => (argv[i - 1] === '--input' ? [a.split(/=(.*)/s).slice(0, 2)] : [])))
 
 // The world beneath the mod: a cache at /c, a typst whose compile writes a
-// 1568 x 512 page and whose query gives the fixture's marks (`hold` holds
-// the next query until `release`; a kill ends it), pbpaste reading
-// `clipboard`, and the copies, toasts and selection the test sees.
-function world(on: any, o: { failFirst?: boolean } = {}) {
+// 1568 x 512 page per segment and whose query of page n gives the fixture's
+// marks on page n (`hold` holds the next query until `release`; a kill ends
+// it), the watcher (WATCH_PL: its PID, then with `clip` the change count at
+// its start and at each change of the clipboard; `clip none` with
+// `noBridge`), pbpaste reading `clipboard`, and the copies, toasts and
+// selection the test sees. `copy` is a copy in another app (or a mouse
+// copy): the clipboard and its change count change.
+function world(on: any, o: { failFirst?: boolean; noBridge?: boolean } = {}) {
   mock.store(on)
   const clock = mock.clock(on)
   mock.env(on, { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
@@ -258,18 +263,37 @@ function world(on: any, o: { failFirst?: boolean } = {}) {
   const queries: Record<string, string>[] = []
   const kills: string[] = []
   const killers = new Map<string, () => void>()
+  const watchers: { argv: string[]; pid: string; say: (line: string) => void; dead: boolean }[] = []
   const w = {
-    clock, files, compiles, queries, kills,
-    clipboard: 'nothing yet', pastes: 0, copies: [] as string[], toasts: [] as string[],
+    clock, files, compiles, queries, kills, watchers,
+    clipboard: 'nothing yet', count: 40, pastes: 0, copies: [] as string[], toasts: [] as string[],
     selection: undefined as { text: string; requestId?: string } | undefined,
     gate: null as Promise<void> | null, release: () => {},
     hold() {
       w.gate = new Promise<void>(r => (w.release = r))
     },
+    copy(text: string) {
+      w.clipboard = text
+      w.count++
+      for (const c of watchers) if (!c.dead && c.argv[3] === 'clip' && !o.noBridge) c.say(`clip ${w.count}`)
+    },
   }
   let pids = 5000
   on('process.spawn', async function* ($: any, e: any) {
     const argv: string[] = e.argv
+    if (argv[0] === '/usr/bin/perl' && argv[1] === '-e' && argv[2] === WATCH_PL) {
+      const pid = String(pids++)
+      const lines = [`pid ${pid}`, ...(argv[3] === 'clip' ? [o.noBridge ? 'clip none' : `clip ${w.count}`] : [])]
+      let wake = () => {}
+      const me = { argv, pid, dead: false, say: (line: string) => (lines.push(line), wake()) }
+      watchers.push(me)
+      killers.set(pid, () => ((me.dead = true), wake()))
+      for (;;) {
+        while (lines.length && !me.dead) yield { stream: 'stdout', text: `${lines.shift()}\n` }
+        if (me.dead) return { value: { code: null, signal: 'SIGTERM' } }
+        await new Promise<void>(r => (wake = r))
+      }
+    }
     if (argv[0] !== 'sh' || argv[2] !== WRAP || argv[4] !== '/usr/bin/typst') return { value: { code: 2, signal: null } }
     const pid = String(pids++)
     let killed = false
@@ -284,10 +308,11 @@ function world(on: any, o: { failFirst?: boolean } = {}) {
     }
     if (typst[1] !== 'query') return { value: { code: 1, signal: null } }
     expect(typst.slice(-3)).toEqual(['<mdpos>', '--field', 'value'])
-    queries.push(inputsOf(typst))
+    const inputs = inputsOf(typst)
+    queries.push(inputs)
     if (w.gate) await Promise.race([w.gate, dead])
     if (killed) return { value: { code: null, signal: 'SIGTERM' } }
-    yield { stream: 'stdout', text: JSON.stringify(SMALL_MARKS) }
+    yield { stream: 'stdout', text: JSON.stringify(SMALL_MARKS.map(m => ({ ...m, p: Number(inputs.page) }))) }
     return { value: { code: 0, signal: null } }
   })
   on('process.run', async ($: any, e: any) => {
@@ -313,14 +338,16 @@ function world(on: any, o: { failFirst?: boolean } = {}) {
     return { value: undefined }
   })
   on('fs.read', async ($: any, e: any, next: any) => (files.has(e.path) ? { value: files.get(e.path) } : e.path.startsWith('/c/') ? { deny: 'ENOENT' } : next(e)))
+  // One page per segment of the folder's doc.json.
   on('fs.list', async ($: any, e: any, next: any) => {
     if (!e.path.startsWith('/c/')) return next(e)
-    const tag = files.has(`${e.path}/b-1.png`) || (o.failFirst && compiles.length > 1) ? 'b' : 'a'
-    return { value: [{ name: `${tag}-1.png`, kind: 'file', size: 1, mtimeMs: 1, isLink: false }] }
+    const tag = o.failFirst && compiles.length > 1 ? 'b' : 'a'
+    const segments = (JSON.parse(files.get(`${e.path}/doc.json`) ?? '{"segments":[""]}') as { segments: string[] }).segments
+    return { value: segments.map((_, i) => ({ name: `${tag}-${i + 1}.png`, kind: 'file', size: 1, mtimeMs: 1, isLink: false })) }
   })
   on('ui.copy', async ($: any, e: any) => {
     w.copies.push(e.text)
-    w.clipboard = e.text
+    w.copy(e.text)
     return { value: { isCopied: true } }
   })
   on('ui.selection', async () => ({ value: w.selection }))
@@ -338,129 +365,173 @@ const message = (requestId: string, text: string) =>
     props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40 },
   }) as any
 const props = (text: string) => ({ text, isFirstOfReply: true }) as any
-const written = (files: Map<string, string>, name: string) => [...files.keys()].filter(k => k.endsWith(`/${name}`))
+const names = (files: Map<string, string>) => [...new Set([...files.keys()].filter(k => k.startsWith('/c/')).map(k => k.replace(/^.*\//, '')))].sort()
 
-// Draws SMALL_MD as answer `id` (98 columns: the fixture's), compiled; the
-// watcher's first tick (it only notes the selection there is) has run.
-async function drawAnswer($: any, w: ReturnType<typeof world>, id = 'ans-1') {
-  const ui = await $.ui.mount(message(id, SMALL_MD))
+// Draws `text` (SMALL_MD) as answer `id` (98 columns: the fixture's),
+// compiled; the watcher has its clipboard part (its first count noted).
+async function drawAnswer($: any, w: ReturnType<typeof world>, id = 'ans-1', text = SMALL_MD) {
+  const ui = await $.ui.mount(message(id, text))
   await w.clock.settle()
-  await ui.redraw(props(SMALL_MD))
+  await ui.redraw(props(text))
   await w.clock.settle()
   await w.clock.advance(300)
+  await w.clock.settle()
   return ui
 }
 
-test('a compile writes probe.json with the PNG compile inputs and runs no probe; a copy runs it then', async ($, on) => {
+// The heading row and the start of the paragraph, as a mouse copy takes them.
+const COPY = [cells(1, 0, 97, '⏺ '), cells(2, 0, 97), cells(3, 0, 21)].join('\n')
+const COPIED = 'Copy test\nThe quick brown fox jumps'
+
+test('a compile writes no probe file and runs no probe; a copy probes only its page, with the PNG compile inputs', async ($, on) => {
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
   expect(w.compiles.length).toBe(1)
-  expect(written(w.files, 'probe.json').length).toBe(1)
-  expect(written(w.files, 'positions.json')).toEqual([])
+  expect(names(w.files)).toEqual(['doc.json', 'pages.json'])
   expect(w.queries).toEqual([])
-  // The probe's inputs are the compile's, and probe=1.
-  const probe = JSON.parse(w.files.get(written(w.files, 'probe.json')[0]!)!)
-  expect(Math.round(probe.ppi * 1000)).toBe(198056)
-  expect(inputsOf(probe.argv)).toEqual({ ...w.compiles[0], probe: '1' })
-  expect(probe.argv).toEqual(probeCall({ typst: '/usr/bin/typst', root: probe.argv[5].replace(/\/render\/packages$/, ''), cache: '/c', inputs: w.compiles[0]! }).argv)
-  // A copy needs the positions: the probe runs now, once.
-  w.clipboard = [cells(1, 0, 97, '⏺ '), cells(2, 0, 97), cells(3, 0, 21)].join('\n')
-  await w.clock.advance(300)
+  w.copy(COPY)
   await w.clock.settle()
-  expect(w.queries.length).toBe(1)
-  expect(written(w.files, 'positions.json').length).toBe(1)
-  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
+  expect(w.copies).toEqual([COPIED])
+  // The PNG compile's inputs, probe=1 and page=1.
+  expect(w.queries).toEqual([{ ...w.compiles[0], probe: '1', page: '1' }])
+  // Nothing is written for it.
+  expect(names(w.files)).toEqual(['doc.json', 'pages.json'])
 })
 
-test('a compile retried in safe mode gives the probe safe=1', async ($, on) => {
+test('a compile retried in safe mode gives the probe safe=1 (its page files say so)', async ($, on) => {
   const w = world(on, { failFirst: true })
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
   expect(w.compiles.map(c => c.safe)).toEqual([undefined, '1'])
-  const probe = JSON.parse(w.files.get(written(w.files, 'probe.json')[0]!)!)
-  expect(inputsOf(probe.argv)).toEqual({ ...w.compiles[1], probe: '1' })
+  w.copy(COPY)
+  await w.clock.settle()
+  expect(w.queries).toEqual([{ ...w.compiles[1], probe: '1', page: '1' }])
+  expect(w.copies).toEqual([COPIED])
+  expect(isSafePage('/c/k/b-1.png')).toBe(true)
+  expect(isSafePage('/c/k/d-12.png')).toBe(true)
+  expect(isSafePage('/c/k/a-1.png')).toBe(false)
+  expect(isSafePage('/c/k/c-3.png')).toBe(false)
 })
 
-test('the probe runs ahead once nothing compiles, and a new job stops it', async ($, on) => {
+test('a copy over two pages of a long answer probes those two pages only', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const long = Array.from({ length: 240 }, (_, i) => `Paragraph ${i} with a few words in it.`).join('\n\n')
+  await drawAnswer($, w, 'ans-1', long)
+  const pages = (JSON.parse(w.files.get([...w.files.keys()].find(k => k.endsWith('/doc.json'))!)!) as { segments: string[] }).segments.length
+  expect(pages).toBeGreaterThan(2)
+  // The last row of page 1, then the first two rows of page 2.
+  w.copy([cells(15, 0, 97, '⏺ '), cells(0, 0, 97), cells(1, 0, 97)].join('\n'))
+  await w.clock.settle()
+  expect(w.queries.map(q => q.page)).toEqual(['1', '2'])
+  expect(w.copies.length).toBe(1)
+  expect(w.copies[0]).toContain('Copy test')
+})
+
+test('positions are kept in memory: copies of the same page share one probe run, and a later copy runs none', async ($, on) => {
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
-  expect(w.queries).toEqual([])
-  // Idle: the newest drawing with no positions is probed, held here.
+  // A slow probe: a toast says the mod reads the picture.
   w.hold()
-  await w.clock.advance(PROBE_IDLE_MS)
+  w.copy(COPY)
   await w.clock.settle()
   expect(w.queries.length).toBe(1)
-  // A new answer compiles: the probe ahead is killed, nothing is written.
-  const other = await $.ui.mount(message('ans-2', 'Another **answer**.'))
+  expect(w.toasts).not.toContain('Intelligent UI: reading the picture…')
+  await w.clock.advance(READING_TOAST_MS)
+  expect(w.toasts).toContain('Intelligent UI: reading the picture…')
+  // /iui grab of the same page meanwhile waits for the same run.
+  w.selection = { text: COPY, requestId: 'ans-1' }
+  const grabbed = $.command.run({ command: 'iui', args: 'grab' } as any)
   await w.clock.settle()
-  expect(w.kills.length).toBe(1)
+  expect(w.queries.length).toBe(1)
   w.release()
   await w.clock.settle()
-  expect(written(w.files, 'positions.json')).toEqual([])
-  await other.redraw(props('Another **answer**.'))
-  await w.clock.settle()
-  // Idle again: one probe at a time, the newest first, then the next.
+  expect((await grabbed).text).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read, row ans-1).')
+  expect(w.copies).toEqual([COPIED, COPIED])
+  // Known now: no probe and no toast for the next copy.
+  const toasts = w.toasts.length
   w.gate = null
-  await w.clock.advance(PROBE_IDLE_MS)
+  w.selection = undefined
+  w.copy([cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n'))
   await w.clock.settle()
-  expect(w.queries.length).toBe(3)
-  expect(written(w.files, 'positions.json').length).toBe(2)
+  await w.clock.advance(READING_TOAST_MS)
+  expect(w.queries.length).toBe(1)
+  expect(w.copies.length).toBe(3)
+  expect(w.toasts.slice(toasts)).toEqual(['Intelligent UI: copied 35 chars of text'])
 })
 
-test('a mouse copy of a drawn answer is read from the clipboard and written back as text, once', async ($, on) => {
+test('a clipboard change runs pbpaste once and copies; no change, no read; our own write is not read as new', async ($, on) => {
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
-  // No picture drawn: no clipboard reads.
+  // No picture drawn: the watcher has no clipboard part.
+  await w.clock.advance(900)
+  expect(w.watchers.map(c => c.argv.slice(3))).toEqual([[]])
+  await drawAnswer($, w)
+  // The first picture: the watcher again with `clip`, the first one killed.
+  expect(w.watchers.map(c => c.argv.slice(3))).toEqual([[], ['clip']])
+  expect(w.kills).toEqual([w.watchers[0]!.pid])
+  // Its first count is only noted; no change, no read.
   await w.clock.advance(900)
   expect(w.pastes).toBe(0)
-  await drawAnswer($, w)
-  // A clipboard with no placeholders is never written.
-  await w.clock.advance(300)
-  expect(w.pastes).toBeGreaterThan(0)
-  expect(w.copies).toEqual([])
-  // The heading row and the start of the paragraph, as a mouse copy takes them.
-  w.clipboard = [cells(1, 0, 97, '⏺ '), cells(2, 0, 97), cells(3, 0, 21)].join('\n')
-  await w.clock.advance(300)
+  // A copy with no placeholders: one read, never written.
+  w.copy('copied in another app')
   await w.clock.settle()
-  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
+  expect(w.pastes).toBe(1)
+  expect(w.copies).toEqual([])
+  w.copy(COPY)
+  await w.clock.settle()
+  expect(w.copies).toEqual([COPIED])
   expect(w.toasts).toContain('Intelligent UI: copied 35 chars of text')
-  // Our own write is not read again.
+  // One read before the write; our own write changes the count: read
+  // once, not copied again.
+  expect(w.pastes).toBe(4)
   await w.clock.advance(900)
+  expect(w.pastes).toBe(4)
   expect(w.copies.length).toBe(1)
   const dumped = await $.command.run({ command: 'iui', args: 'dump' } as any)
   expect(dumped.text).toContain('U+10EEEE[1,0]')
   expect(dumped.text).toContain('-> answer ans-1 page 0')
+  expect(dumped.text).toContain('auto copy on')
   expect(w.files.has('/c/copy-debug.json')).toBe(true)
-  // Off: the watcher stops.
+  // Off: the watcher again with no clipboard part; no reads.
   await $.command.run({ command: 'iui', args: 'off' } as any)
-  const pastes = w.pastes
-  await w.clock.advance(900)
-  expect(w.pastes).toBe(pastes)
+  expect(w.watchers.map(c => c.argv.slice(3))).toEqual([[], ['clip'], []])
+  await w.clock.settle()
+  expect(w.kills).toEqual([w.watchers[0]!.pid, w.watchers[1]!.pid])
+  w.copy(COPY)
+  await w.clock.settle()
+  expect(w.pastes).toBe(4)
 })
 
-test('a new mouse selection with picture cells is copied at the next tick, with no clipboard read', async ($, on) => {
+test('/iui details says whether the automatic copy is on', async ($, on) => {
   const w = world(on)
+  const details = async () => ((await $.command.run({ command: 'iui', args: 'details' } as any)).text ?? '').split('\n').find(l => l.startsWith('Auto copy:'))
+  expect(await details()).toBe('Auto copy: off (no picture yet)')
+  await drawAnswer($, w)
+  expect(await details()).toBe('Auto copy: on')
+  await $.command.run({ command: 'iui', args: 'off' } as any)
+  expect(await details()).toBe('Auto copy: off (Intelligent UI is off)')
+})
+
+test('with no PerlObjCBridge (clip none) the copy is off: no read, no copy; details says why; grab still copies', async ($, on) => {
+  const w = world(on, { noBridge: true })
   await $.command.run({ command: 'iui', args: '' } as any)
-  await drawAnswer($, w, 'ans-1')
-  await drawAnswer($, w, 'ans-0')
-  // ans-0 is newer, but the selection names its row: ans-1.
-  w.selection = { text: [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n'), requestId: 'ans-1' }
-  const pastes = w.pastes
-  await w.clock.advance(300)
+  await drawAnswer($, w)
+  w.copy(COPY)
+  await w.clock.advance(900)
   await w.clock.settle()
-  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
-  expect(w.pastes).toBe(pastes)
-  const dumped = await $.command.run({ command: 'iui', args: 'dump' } as any)
-  expect(dumped.text).toContain('-> answer ans-1 page 0')
-  // The same selection again: not copied again.
-  await w.clock.advance(600)
-  expect(w.copies.length).toBe(1)
-  // /iui grab copies it on request.
+  expect(w.pastes).toBe(0)
+  expect(w.copies).toEqual([])
+  const details = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(details.text).toContain('\nAuto copy: off (no PerlObjCBridge in /usr/bin/perl)')
+  // No new watcher for it: once is enough.
+  await drawAnswer($, w, 'ans-2')
+  expect(w.watchers.length).toBe(2)
+  w.selection = { text: COPY, requestId: 'ans-1' }
   const grabbed = await $.command.run({ command: 'iui', args: 'grab' } as any)
   expect(grabbed.text).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read, row ans-1).')
-  expect(w.copies.length).toBe(2)
 })
 
 // Another plugin's `$.ui.copy`, from its command `cp` (args: the text).
@@ -477,9 +548,22 @@ test('a copy of picture cells through $.ui.copy is rewritten to their text; othe
   await drawAnswer($, w)
   const got = await $.command.run({ command: 'cp', args: [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n') } as any)
   expect(JSON.parse(got.text!)).toEqual({ isCopied: true })
-  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
+  expect(w.copies).toEqual([COPIED])
   await $.command.run({ command: 'cp', args: 'plain text' } as any)
   expect(w.copies[1]).toBe('plain text')
+})
+
+test('a $.ui.copy of picture cells is not copied again at its clipboard change', { plugins: [COPIER] }, async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  w.selection = { text: COPY, requestId: 'ans-1' }
+  await $.command.run({ command: 'cp', args: COPY } as any)
+  await w.clock.advance(900)
+  await w.clock.settle()
+  expect(w.pastes).toBe(1)
+  expect(w.copies).toEqual([COPIED])
+  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: copied')).length).toBe(0)
 })
 
 test('a clipboard with picture cells that is not this session\'s selection is not rewritten (another session\'s copy)', async ($, on) => {
@@ -489,60 +573,159 @@ test('a clipboard with picture cells that is not this session\'s selection is no
   // This session has a selection of its own (no picture cells), and the
   // clipboard has another session's picture cells.
   w.selection = { text: 'my own text', requestId: 'u1' }
-  w.clipboard = [cells(1, 0, 97), cells(3, 0, 21)].join('\n')
-  await w.clock.advance(600)
+  w.copy([cells(1, 0, 97), cells(3, 0, 21)].join('\n'))
+  await w.clock.settle()
+  expect(w.pastes).toBe(1)
   expect(w.copies).toEqual([])
   // The same copy as the selection, with a last line break: rewritten.
-  w.selection = { text: [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n'), requestId: 'ans-1' }
-  await $.command.run({ command: 'iui', args: 'off' } as any)
-  await $.command.run({ command: 'iui', args: 'on' } as any)
-  await drawAnswer($, w, 'ans-2')
-  w.clipboard = `${w.selection.text}\n`
-  await w.clock.advance(300)
+  w.selection = { text: COPY, requestId: 'ans-1' }
+  w.copy(`${COPY}\n`)
   await w.clock.settle()
-  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
+  expect(w.copies).toEqual([COPIED])
 })
 
-test('a watcher that starts again (a hot reload) does not copy the selection that was there before', async ($, on) => {
+test('a watcher that starts again does not copy the clipboard that was there before (its first count is only noted)', async ($, on) => {
   const w = world(on)
-  // An old selection with picture cells, and a clipboard filled elsewhere.
-  w.selection = { text: [cells(1, 0, 97), cells(3, 0, 21)].join('\n'), requestId: 'ans-1' }
-  w.clipboard = 'copied in another app'
+  // Picture cells on the clipboard before this load (a hot reload).
+  w.clipboard = COPY
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
   await w.clock.advance(900)
+  expect(w.pastes).toBe(0)
   expect(w.copies).toEqual([])
-  expect(w.clipboard).toBe('copied in another app')
-  // A new selection is copied.
-  w.selection = { text: [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n'), requestId: 'ans-1' }
-  await w.clock.advance(300)
+  // A new copy is copied.
+  w.copy(COPY)
   await w.clock.settle()
-  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
+  expect(w.copies).toEqual([COPIED])
 })
 
-test('a selection that can not be read gives one toast, not one more from the clipboard', async ($, on) => {
+test('a copy that can not be read gives one toast; the same text again gives none', async ($, on) => {
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
   // Column 150: wider than any picture drawn.
   const text = [cells(1, 0, 150), cells(2, 0, 150)].join('\n')
-  w.selection = { text, requestId: 'ans-1' }
-  w.clipboard = text
-  await w.clock.advance(900)
+  w.copy(text)
   await w.clock.settle()
+  w.copy(text)
+  await w.clock.settle()
+  expect(w.pastes).toBe(2)
   expect(w.copies).toEqual([])
   expect(w.toasts.filter(t => t.startsWith('Intelligent UI: could not read')).length).toBe(1)
 })
 
-test('a $.ui.copy of the selection is not copied again by the watcher', { plugins: [COPIER] }, async ($, on) => {
+test('a clipboard change while a copy is read: the newer clipboard is read after it and is not written over', async ($, on) => {
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
-  const text = [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n')
-  w.selection = { text, requestId: 'ans-1' }
-  await $.command.run({ command: 'cp', args: text } as any)
-  await w.clock.advance(900)
+  w.hold()
+  w.copy(COPY)
   await w.clock.settle()
-  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
-  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: copied')).length).toBe(0)
+  expect(w.queries.length).toBe(1)
+  w.copy('copied in another app')
+  await w.clock.settle()
+  expect(w.pastes).toBe(1)
+  w.release()
+  await w.clock.settle()
+  // One read before the write (not the copy now: no write), one of the newer.
+  expect(w.pastes).toBe(3)
+  expect(w.copies).toEqual([])
+  expect(w.clipboard).toBe('copied in another app')
+})
+
+test('the same copy again while its picture is read: copied once, one toast', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  w.hold()
+  w.copy(COPY)
+  await w.clock.settle()
+  w.copy(COPY)
+  await w.clock.settle()
+  w.release()
+  await w.clock.settle()
+  expect(w.queries.length).toBe(1)
+  expect(w.copies).toEqual([COPIED])
+  expect(w.clipboard).toBe(COPIED)
+  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: copied'))).toEqual(['Intelligent UI: copied 35 chars of text'])
+  // A copy of it after the write is a new copy: copied again (no probe).
+  w.copy(COPY)
+  await w.clock.settle()
+  expect(w.copies).toEqual([COPIED, COPIED])
+  expect(w.queries.length).toBe(1)
+})
+
+test('a newer clipboard that the watcher has not said yet is not written over; it is read next', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  // Other picture cells: copied as their own text, not the first copy's.
+  w.hold()
+  w.copy([cells(2, 0, 97), cells(3, 0, 21)].join('\n'))
+  await w.clock.settle()
+  w.clipboard = COPY
+  w.release()
+  await w.clock.settle()
+  expect(w.copies).toEqual([COPIED])
+  expect(w.clipboard).toBe(COPIED)
+  // Text with no picture cells (a page not probed yet): kept as it is.
+  await drawAnswer($, w, 'ans-2', `${SMALL_MD}\n\nEnd.`)
+  w.gate = null
+  w.hold()
+  w.copy(COPY)
+  await w.clock.settle()
+  expect(w.queries.length).toBe(2)
+  w.clipboard = 'copied in another app'
+  w.release()
+  await w.clock.settle()
+  expect(w.copies).toEqual([COPIED])
+  expect(w.clipboard).toBe('copied in another app')
+  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: copied')).length).toBe(1)
+  // Its change comes late: one read, the same text, nothing more.
+  const pastes = w.pastes
+  w.copy('copied in another app')
+  await w.clock.settle()
+  expect(w.pastes).toBe(pastes + 1)
+  expect(w.copies).toEqual([COPIED])
+})
+
+test('at an exit the watcher is killed and no child takes its place; a /clear starts it again with no clipboard part', async ($, on) => {
+  const w = world(on)
+  on('session.end', async ($: any, e: any) => ({ sessionId: e.sessionId }))
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  expect(w.watchers.map(c => c.argv.slice(3))).toEqual([[], ['clip']])
+  await $.session.end({ reason: 'clear', sessionId: 's1' } as any)
+  await w.clock.settle()
+  expect(w.watchers.map(c => c.argv.slice(3))).toEqual([[], ['clip'], []])
+  expect(w.kills).toEqual([w.watchers[0]!.pid, w.watchers[1]!.pid])
+  w.copy(COPY)
+  await w.clock.settle()
+  expect(w.pastes).toBe(0)
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's2' } as any)
+  await w.clock.settle()
+  await w.clock.advance(5000)
+  expect(w.watchers.length).toBe(3)
+  expect(w.kills).toEqual(w.watchers.map(c => c.pid))
+})
+
+test('a clip child that ends on its own is started again; its old clipboard is not written', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  const first = w.watchers[1]!
+  first.dead = true
+  first.say('')
+  await w.clock.settle()
+  // Picture cells put on the clipboard while no child watched: the count of
+  // the new child at its start is only noted.
+  w.clipboard = COPY
+  w.count++
+  await w.clock.advance(WATCH_RESTART_MS)
+  await w.clock.settle()
+  expect(w.watchers.map(c => c.argv.slice(3))).toEqual([[], ['clip'], ['clip']])
+  expect(w.pastes).toBe(0)
+  w.copy(COPY)
+  await w.clock.settle()
+  expect(w.copies).toEqual([COPIED])
 })

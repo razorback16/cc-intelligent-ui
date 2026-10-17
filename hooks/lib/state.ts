@@ -7,7 +7,7 @@ import type { IuiTheme } from '../../types'
 import type { ThemeInfo } from './themes'
 import type { HostMode, ThemeSetting } from './mode'
 import type { PlanVerdict } from './plan'
-import type { Drawn, Positions } from './copy'
+import type { Drawn } from './copy'
 import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } from './settings'
 
 // The `done` atom (see types/index.d.ts) for refresh. The state scan of
@@ -168,9 +168,6 @@ export const S = {
   planVerdict: null as PlanVerdict | null,
   planAsking: '',
   planCode: null as string | null,
-  // Claude Code's copyOnSelect setting (setUp, config.set): false, a mouse
-  // selection is not copied, so the watcher does not copy it either.
-  copyOnSelect: true,
 }
 // The compile results by key (an LRU: set with `keep` at RESULTS_KEPT).
 export const results = new Map<string, Result | 'failed'>()
@@ -191,8 +188,9 @@ export const running = new Map<string, { job: Job; cancel: () => void; signal: A
 export const epochOpen = () => S.epoch !== S.shownEpoch
 // The key last drawn per message (and its text), so a new size keeps the old
 // picture (at its own box) until the new one is ready instead of the text.
-// The oldest go past RESULTS_KEPT, as `results`.
-export const lastKey = new Map<string, { key: string; textHash: string }>()
+// `job`: the Job of that key as it drew (its env as then, no text), for the
+// probe of a copy. The oldest go past RESULTS_KEPT, as `results`.
+export const lastKey = new Map<string, { key: string; textHash: string; job: Job }>()
 // Over ssh: each page file's PNG as base64 (null: too large to send), read
 // once so a redraw does not read it again; the oldest go past INLINE_KEPT.
 export const inlined = new Map<string, string | null>()
@@ -221,25 +219,24 @@ export const writesLive = new Map<string, number>()
 
 // Copy (copy.ts, probe.ts): the pages drawn this session by their id (an
 // answer's requestId, `plan:<tool_use_id>`, `file:<tool_use_id>:<path>`;
-// oldest first, at most DRAWN_KEPT), and each key folder's word positions
-// once read (the oldest go past DRAWN_KEPT).
-export const drawnAnswers = new Map<string, Drawn>()
+// oldest first, at most DRAWN_KEPT), each with the Job that drew it (the
+// probe's inputs; none when not known).
+export const drawnAnswers = new Map<string, Drawn & { job?: Job }>()
 export const DRAWN_KEPT = 64
-export const positionsByDir = new Map<string, Positions>()
-// The clipboard watcher (register.tsx): its timer and when it last ran,
-// whether its first tick noted the selection there was (`seeded`), the
-// clipboard text last seen and last written (so a write is never read back
-// as new), the last selection handled, the last text with placeholders
-// with its row (`rawRow`, when known) and how it was read (for dump), and
-// the order of the drawings (`seq`).
+// The clipboard (register.tsx): the change count last seen (null: none
+// yet; the first of each watcher child is only noted), whether the watcher
+// found no PerlObjCBridge (`none`), a read that runs (`busy`) and a change
+// that came during it (`again`), the clipboard text last seen and last
+// written (so a write is never read back as new), the last text with
+// placeholders with its row (`rawRow`, when known) and how it was read (for
+// dump), and the order of the drawings (`seq`).
 export const clip = {
-  watch: null as { cancel: () => void } | null,
-  ticked: 0,
-  seeded: false,
+  count: null as number | null,
+  none: false,
   busy: false,
+  again: false,
   seen: '',
   wrote: '',
-  selected: '',
   raw: '',
   rawRow: undefined as string | undefined,
   seq: 0,

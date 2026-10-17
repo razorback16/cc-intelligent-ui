@@ -8,8 +8,8 @@
 // runs of (row, columns) per picture; positionsOf turns the template's probe
 // marks (render/md.typ, `<mdpos>`) into word boxes in PNG pixels; pickPages
 // says which drawn page each run is; textOfRun reads the words under a run.
-// The drawn pages and the probe runs are in probe.ts; the clipboard watcher
-// and the commands are in register.tsx.
+// The drawn pages and the probe of a page are in probe.ts; the clipboard
+// watcher (its change counts) and the commands are in register.tsx.
 
 // kitty's rowcolumn-diacritics.txt: 297 combining marks; mark i means row or
 // column i. (The same table is in Claude Code's binary.)
@@ -140,7 +140,7 @@ export type Item = { i: number; text: string; x0: number; y0: number; x1: number
 // A block: paragraph, heading, code, quote, cell (`cx` its column), item
 // (`prefix`); `first` its first item.
 export type TextBlock = { kind: string; prefix: string; cx?: number; first: number }
-// positions.json: by page (0-based: PNG page N+1).
+// A probe's words by page (0-based: PNG page N+1), and its blocks.
 export type Positions = { ppi: number; blocks: TextBlock[]; pages: Item[][] }
 
 const round = (n: number) => Math.round(n * 100) / 100

@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import {
-  scaledBulletRow, base64Bytes, canDrawIn, COMMIT_MIN_MS, DEFAULT_CELL, fitsInline, INLINE_MAX_BYTES, INLINE_MAX_SIDE, inlineBudget, renderKey, RESIZE_QUIET_MS, SEGMENT_ROWS,
+  scaledBulletRow, base64Bytes, canDrawIn, COMMIT_MIN_MS, DEFAULT_CELL, fitsInline, INLINE_MAX_BYTES, INLINE_MAX_SIDE, inlineBudget, renderKey, RESIZE_QUIET_MS, SEGMENT_ROWS, WATCH_PL,
 } from '../hooks/register'
 
 // ---- Where pictures draw ----------------------------------------------------
@@ -129,13 +129,13 @@ function world(on: any, vars: Record<string, string>, head = HEAD, stored: Recor
   on('process.spawn', async function* ($: any, e: any) {
     const argv: string[] = e.argv
     calls.push(`spawn ${argv[0]}`)
-    if (argv[0] === 'perl') {
+    if (argv[0] === '/usr/bin/perl' && argv[2] === WATCH_PL) {
       if (!tty || tty.watcher !== undefined) return { value: { code: tty?.watcher ?? 1, signal: null } }
-      // The watcher prints the size at its start, then at each change.
-      const lines: string[] = tty.line ? [tty.line] : []
+      // The watcher prints its PID, then the size at its start and at each change.
+      const lines: string[] = ['pid 777', ...(tty.line ? [`size ${tty.line}`] : [])]
       let wake = () => {}
       watchers.push(line => {
-        lines.push(line)
+        lines.push(`size ${line}`)
         wake()
       })
       for (;;) {

@@ -34,7 +34,7 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
 | Command | What it does |
 |---|---|
 | `/iui` | Shows the state, the theme, the text size, the width and the image height, and a problem that keeps pictures away |
-| `/iui details` | Shows all that the mod found: where the mode comes from, the terminal font, the Typst path and why the terminal can or cannot show pictures |
+| `/iui details` | Shows all that the mod found: where the mode comes from, the terminal font, the Typst path, why the terminal can or cannot show pictures, and if the automatic copy is on (`Auto copy:`) |
 | `/iui on` / `off` | Turns the pictures on or off (kept for later sessions) |
 | `/iui setup` / `setup remove` | iTerm2: adds or removes the shell line that turns pictures on (then close the tab and open a new one) |
 | `/iui size <80–200>` | Text size in percent. 100 is the same visual size as your terminal text. |
@@ -53,9 +53,9 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
 
 ## Copy text from a picture
 
-Select the text in a picture (an answer, a plan or a Markdown file that Claude sent) with the mouse, as you do with normal text. The selection puts picture cells on the clipboard. On macOS, while the mod is on and has drawn a picture in this session, the mod reads the mouse selection and the clipboard every 0.3 s. When they have picture cells, the mod puts the text under your selection on the clipboard, and a toast shows the number of characters. In fullscreen mode, if this session has a selection, the mod changes the clipboard only when the clipboard holds that selection. Thus a copy from a different Claude Code session usually stays as it is. Wait approximately 0.3 s after you select, then paste. The mod does not change a clipboard that has no picture cells.
+Select the text in a picture (an answer, a plan or a Markdown file that Claude sent) with the mouse, as you do with normal text. The selection puts picture cells on the clipboard. On macOS, while the mod is on and has drawn a picture in this session, the mod sees each change of the clipboard (in 0.3 s or less). When the clipboard has picture cells, the mod puts the text under your selection on the clipboard, and a toast shows the number of characters. Wait for this toast, then paste. In fullscreen mode, if this session has a selection, the mod changes the clipboard only when the clipboard holds that selection. Thus a copy from a different Claude Code session usually stays as it is. The mod does not change a clipboard that has no picture cells.
 
-The mod finds the position of each word when a copy needs it, or before, when no picture compiles. The first copy from a picture can thus take a short time more.
+The mod finds the position of each word on a page when you copy from that page for the first time. This takes 0.15–0.5 s, and more (2–3 s) for a page with a large Typst drawing. If it takes more than 0.15 s, a toast shows "reading the picture". The mod keeps the positions in memory, so the next copy from the same page is fast.
 
 If the clipboard did not change, use `/iui grab`. It reads the last mouse selection of Claude Code (fullscreen mode only) and copies its text. If the copied text is not correct, `/iui dump` shows the cells that the mod found and the page that it used. It also writes all of this to `copy-debug.json` in the cache folder.
 

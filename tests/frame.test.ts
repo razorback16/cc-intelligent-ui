@@ -2,11 +2,11 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   composeFrame, followWatcher, frameChange, frameFor, frameOfLine, lineSplitter, noteTty, noteView, pictureColumns, quietTimer, setFrame, shownFor,
-  type Frame,
+  WATCH_RESTART_MS, WATCH_RESTARTS, watchFrame, watchLineOf, watchState, type Frame, type WatchLine,
 } from '../hooks/lib/frame'
 import { COMMIT_MIN_MS, DEFAULT_CELL, IMAGE_MAX_COLUMNS, RESIZE_QUIET_MS } from '../hooks/lib/settings'
 import { INLINE_MAX_SIDE } from '../hooks/lib/terminal'
-import { FRAME_PL } from '../hooks/lib/host'
+import { perlFor, WATCH_PL } from '../hooks/lib/host'
 // The module state the Frame reads and sets (this file's copy of the
 // modules is the one imported above).
 import { converting, queue, running, S } from '../hooks/lib/state'
@@ -33,7 +33,7 @@ test('columns go before rows; rows only is a rows change', () => {
 
 // ---- One watcher line ---------------------------------------------------------
 
-test('a watcher line is rows, columns and the cell in device pixels', () => {
+test('a tty size is rows, columns and the cell in device pixels', () => {
   expect(frameOfLine('50 120 2040 1700')).toEqual(frame(120, 50, 17, 34))
   expect(frameOfLine('40 200 3200 1360\n')).toEqual(frame(200, 40, 16, 34))
 })
@@ -54,6 +54,21 @@ test('an absurd or broken line is no Frame', () => {
   expect(frameOfLine('-50 120 2040 1700')).toBe(null)
 })
 
+test('a watcher line is its PID, a size, a clipboard change count or clip none; any other line is none', () => {
+  expect(watchLineOf('pid 4242')).toEqual({ pid: '4242' })
+  expect(watchLineOf('size 50 120 2040 1700')).toEqual({ size: frame(120, 50, 17, 34) })
+  // A bad size is a size line with no Frame (noteTty drops it).
+  expect(watchLineOf('size 50 200 0 0')).toEqual({ size: null })
+  expect(watchLineOf('clip 1394')).toEqual({ clip: 1394 })
+  expect(watchLineOf('clip none\r')).toEqual({ clip: null })
+  expect(watchLineOf('clip -1')).toBe(null)
+  expect(watchLineOf('clip')).toBe(null)
+  expect(watchLineOf('pid x')).toBe(null)
+  // The bare size of one tty read (CELL_SH) is not a watcher line.
+  expect(watchLineOf('50 120 2040 1700')).toBe(null)
+  expect(watchLineOf('')).toBe(null)
+})
+
 // ---- Pieces to lines ----------------------------------------------------------
 
 test('pieces join into lines across their borders', () => {
@@ -71,10 +86,11 @@ const pieces = (texts: Array<{ stream?: 'stdout' | 'stderr'; text: string }>, co
     return { code, signal: null }
   })()
 
-test('the watcher lines go to noteTty as Frames; a bad line goes as null', async () => {
-  const seen: Array<Frame | null> = []
-  const ended = await followWatcher(pieces([{ text: '50 120 20' }, { text: '40 1700\n' }, { stream: 'stderr', text: '1 1 1 1\n' }, { text: 'junk\n40 200 3200 1360\n' }], 0), f => seen.push(f))
-  expect(seen).toEqual([frame(120, 50, 17, 34), null, frame(200, 40, 16, 34)])
+test('the watcher lines are read across pieces; stderr and other lines are dropped', async () => {
+  const seen: WatchLine[] = []
+  const text = [{ text: 'pid 7\nsize 50 120 20' }, { text: '40 1700\nclip 3' }, { stream: 'stderr' as const, text: 'size 1 1 1 1\n' }, { text: '\njunk\nsize 40 200 3200 1360\nclip none\n' }]
+  const ended = await followWatcher(pieces(text, 0), line => seen.push(line))
+  expect(seen).toEqual([{ pid: '7' }, { size: frame(120, 50, 17, 34) }, { clip: 3 }, { size: frame(200, 40, 16, 34) }, { clip: null }])
   expect(ended).toBe('failed')
 })
 
@@ -88,14 +104,31 @@ test('a watcher that exits 1 has no tty; one that can not start failed', async (
 
 // ---- The watcher -----------------------------------------------------------------
 
-test('FRAME_PL sleeps in sigsuspend with SIGWINCH blocked outside it: no select, no poll', () => {
-  expect(FRAME_PL).toContain('POSIX::sigsuspend(')
-  expect(FRAME_PL).toContain('POSIX::sigprocmask(POSIX::SIG_BLOCK()')
-  expect(FRAME_PL).toContain('$n{WINCH}')
-  // The alarm only finds a dead parent.
-  expect(FRAME_PL).toContain('alarm(10)')
-  expect(FRAME_PL).not.toContain('select')
-  expect(FRAME_PL).not.toContain('sleep')
+test('WATCH_PL sleeps in sigsuspend with SIGWINCH and SIGALRM blocked outside it: no select, no sleep', () => {
+  expect(WATCH_PL).toContain('POSIX::sigsuspend(')
+  expect(WATCH_PL).toContain('POSIX::sigprocmask(POSIX::SIG_BLOCK(), POSIX::SigSet->new($n{WINCH}, $n{ALRM}))')
+  // With no clipboard part, the alarm only finds a dead parent; with it, a
+  // 300 ms alarm reads the change count (the same sigsuspend: a SIGWINCH
+  // that comes meanwhile is kept).
+  expect(WATCH_PL).toContain('alarm(10)')
+  expect(WATCH_PL).toContain('Time::HiRes::ualarm(300000)')
+  expect(WATCH_PL).toContain('exit 0 if getppid() != $parent')
+  expect(WATCH_PL).not.toContain('select')
+  expect(WATCH_PL).not.toContain('sleep')
+})
+
+test('WATCH_PL loads the bridge in an eval only with the clip argument, and says clip none when it fails', () => {
+  expect(WATCH_PL).toContain('if (($ARGV[0] // "") eq "clip")')
+  expect(WATCH_PL).toContain('$pb = eval { require Foundation; Foundation->import;')
+  expect(WATCH_PL).toContain('@NSPasteboard::ISA = ("PerlObjCBridge")')
+  expect(WATCH_PL).toContain('print "clip none\\n" or exit 0 unless $pb;')
+  expect(WATCH_PL).toContain('print "clip $c\\n"')
+  expect(WATCH_PL).toContain('print "size $line\\n"')
+  expect(WATCH_PL).toContain('print "pid $$\\n"')
+  // No tty and no clipboard part: exit 1.
+  expect(WATCH_PL).toContain('exit 1 unless $tty || $pb;')
+  expect(perlFor(true)).toBe('/usr/bin/perl')
+  expect(perlFor(false)).toBe('perl')
 })
 
 // ---- The quiet timer ----------------------------------------------------------------
@@ -228,10 +261,33 @@ test('a picture takes the Frame\'s columns less the gutter, capped by the width 
 // clock in memory, a tty read the test sets (and may hold), and the redraws.
 const clock = fakeClock()
 const tty = { line: '50 200 3400 1700', reads: 0, gate: null as Promise<void> | null, refreshes: 0 }
+// The watchers started: each one's argv, `say` (a line it prints) and
+// `end` (its exit); the PIDs killed.
+type Child = { argv: string[]; say: (line: string) => void; end: (code: number) => void }
+const children: Child[] = []
+const kills: string[] = []
+function spawn({ argv }: { argv: string[] }) {
+  const lines: string[] = []
+  let code: number | null = null
+  let wake = () => {}
+  children.push({ argv, say: line => (lines.push(line), wake()), end: c => ((code = c), wake()) })
+  return (async function* () {
+    for (;;) {
+      while (lines.length) yield { stream: 'stdout' as const, text: `${lines.shift()}\n` }
+      if (code !== null) return { code, signal: null }
+      await new Promise<void>(r => (wake = r))
+    }
+  })()
+}
 const $ = {
   clock: { after: clock.after },
   process: {
-    run: async () => {
+    spawn,
+    run: async (argv: string[]) => {
+      if (argv[0] === 'kill') {
+        kills.push(argv[1]!)
+        return { exitCode: 0, stdout: '', stderr: '' }
+      }
       tty.reads++
       if (tty.gate) await tty.gate
       return { exitCode: 0, stdout: tty.line, stderr: '' }
@@ -355,4 +411,100 @@ test('an input during the quiet read stops that settle: the newer quiet settles 
   expect(tty.reads).toBe(2)
   expect(S.epoch).toBe(epoch + 1)
   expect(S.frame).toEqual(frame(140, 50, 17, 34))
+})
+
+// ---- The watcher's restarts ---------------------------------------------------
+
+test('with no watcher, the clipboard part off starts none', () => {
+  watchFrame($, null)
+  expect(children.length).toBe(0)
+  expect(watchState()).toBe(null)
+})
+
+test('the clipboard part starts the watcher again with clip; the old one is killed and its lines dropped; the size again begins no epoch', async () => {
+  await loaded('50 200 3400 1700')
+  noteView($, { columns: 200, rows: 50 })
+  const epoch = S.epoch
+  watchFrame($)
+  const first = children[0]!
+  expect(first.argv).toEqual(['perl', '-e', WATCH_PL])
+  first.say('pid 101')
+  first.say('size 50 200 3400 1700')
+  await flush()
+  expect(watchState()).toEqual({ clip: false, ended: false })
+  // On: a new child with the argument, and a kill of the first.
+  const counts: Array<number | null> = []
+  watchFrame($, n => counts.push(n))
+  const second = children[1]!
+  expect(second.argv).toEqual(['perl', '-e', WATCH_PL, 'clip'])
+  await flush()
+  expect(kills).toEqual(['101'])
+  first.say('size 50 150 2550 1700')
+  second.say('pid 102')
+  second.say('size 50 200 3400 1700')
+  second.say('clip 7')
+  await flush()
+  // The size known: no burst, no read, no epoch.
+  expect(S.resizing).toBe(false)
+  await clock.advance(RESIZE_QUIET_MS * 2)
+  expect(tty.reads).toBe(0)
+  expect(S.epoch).toBe(epoch)
+  expect(S.frame).toEqual(frame(200, 50, 17, 34))
+  expect(counts).toEqual([7])
+  expect(watchState()).toEqual({ clip: true, ended: false })
+  // The same part again, and setUp's start: no new child.
+  watchFrame($, n => counts.push(n))
+  watchFrame($)
+  expect(children.length).toBe(2)
+  second.say('clip 8')
+  second.say('clip none')
+  await flush()
+  expect(counts).toEqual([7, 8, null])
+  // Off: a child with no argument; the one before is killed.
+  watchFrame($, null)
+  expect(children[2]!.argv).toEqual(['perl', '-e', WATCH_PL])
+  await flush()
+  expect(kills).toEqual(['101', '102'])
+  // A child stopped before its PID came is killed when it comes.
+  watchFrame($, n => counts.push(n))
+  children[2]!.say('pid 103')
+  await flush()
+  expect(kills).toEqual(['101', '102', '103'])
+  // A size change from the child now goes on as before.
+  const fourth = children[3]!
+  fourth.say('pid 104')
+  tty.line = '50 150 2550 1700'
+  fourth.say('size 50 150 2550 1700')
+  await flush()
+  expect(S.resizing).toBe(true)
+  await clock.advance(RESIZE_QUIET_MS)
+  expect(S.epoch).toBe(epoch + 1)
+  // A child that ends is noted (details says the copy is off).
+  fourth.end(0)
+  await flush()
+  expect(watchState()).toEqual({ clip: true, ended: true })
+})
+
+test('a clip child that ends on its own starts again after WATCH_RESTART_MS, WATCH_RESTARTS times at most', async () => {
+  // The last child of the test before ended on its own.
+  const before = children.length
+  await clock.advance(WATCH_RESTART_MS - 1)
+  expect(children.length).toBe(before)
+  await clock.advance(1)
+  expect(children.length).toBe(before + 1)
+  expect(children.at(-1)!.argv).toEqual(['perl', '-e', WATCH_PL, 'clip'])
+  expect(watchState()).toEqual({ clip: true, ended: false })
+  for (let i = 1; i < WATCH_RESTARTS; i++) {
+    children.at(-1)!.end(0)
+    await flush()
+    await clock.advance(WATCH_RESTART_MS)
+  }
+  expect(children.length).toBe(before + WATCH_RESTARTS)
+  // The cap: the next end starts none, and neither does a call that wants one.
+  children.at(-1)!.end(0)
+  await flush()
+  await clock.advance(WATCH_RESTART_MS * 5)
+  watchFrame($)
+  expect(children.length).toBe(before + WATCH_RESTARTS)
+  expect(watchState()).toEqual({ clip: true, ended: true })
 })

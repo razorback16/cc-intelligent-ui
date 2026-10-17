@@ -14,14 +14,14 @@
 // mutable state `S`), markdown, terminal, terminals, mode, themes, command,
 // setup, host, typst, draw, stream, answer (one text through the pipeline),
 // env, images, pictures, plan (the plan approval flow), copy (the text under
-// a mouse copy of the pictures) and probe (the drawn pages and their word
-// positions). This file joins them to the hooks, and gives the tests the
-// names they import.
+// a mouse copy of the pictures) and probe (the drawn pages, and the words of
+// a page a copy reads). This file joins them to the hooks, and gives the
+// tests the names they import.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderViewport } from 'claude-code'
 
 import {
-  CLIP_POLL_MS, DEFAULT_THEME, heightText, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT, widthText,
+  DEFAULT_THEME, heightText, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, READING_TOAST_MS, RESULTS_KEPT, TYPST_PROMPT, widthText,
 } from './lib/settings'
 import { clip, drawnAnswers, editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env } from './lib/state'
 import { beginEpoch } from './lib/epoch'
@@ -33,11 +33,11 @@ import { pollHost, PROBE_RUNS, probeOsc11, showMode, USE_OSC11, watchHost } from
 import { measureFonts } from './lib/typst'
 import { drawPages } from './lib/draw'
 import { finalizeAll } from './lib/stream'
-import { noteDrawn, noteDrawnAgain, positionsFor } from './lib/probe'
+import { isProbed, noteDrawn, noteDrawnAgain, wordsOf } from './lib/probe'
 import { codePointsOf, decodeSelection, hasPlaceholders, joinSegments, pickPages, textOfRun, type Pick, type Segment } from './lib/copy'
 import { pagesOf, type Drawing } from './lib/answer'
 import { setUp } from './lib/env'
-import { frameFor, noteView } from './lib/frame'
+import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/frame'
 import { roomColumns } from './lib/terminal'
 import { onScreenOf, pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
 import { pasteDir, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
@@ -54,7 +54,8 @@ export {
 } from './lib/settings'
 export { DEFAULT_METRICS, keep, type Cell, type Design, type FontMetrics, type Frame, type Look, type Metrics, type Room } from './lib/state'
 export {
-  composeFrame, followWatcher, frameChange, frameFor, frameOfLine, lineSplitter, noteTty, pictureColumns, quietTimer, shownFor, type View,
+  composeFrame, followWatcher, frameChange, frameFor, frameOfLine, lineSplitter, noteTty, pictureColumns, quietTimer, shownFor, watchLineOf, type View,
+  type WatchLine,
 } from './lib/frame'
 export { designKey, designPath, designText, loadDesign, parseDesign, recordDesign } from './lib/designs'
 export {
@@ -69,9 +70,9 @@ export {
 } from './lib/themes'
 export { commandSuggestions, parseCommand, type Command, type Suggestion } from './lib/command'
 export { hasSetup, SETUP_END, SETUP_START, setupBlock, shellRcOf, withoutSetup, withSetup, type ShellRc } from './lib/setup'
-export { OSC11_PL } from './lib/host'
+export { OSC11_PL, perlFor, WATCH_PL } from './lib/host'
 export {
-  convertCall, measureCall, noNetworkEnv, pageRowsOf, parseOd, pngSize, probeCall, resultOf, roomInputs, shouldRetrySafe, typstCall, type ProbeJob,
+  convertCall, isSafePage, measureCall, noNetworkEnv, pageRowsOf, parseOd, pngSize, probeCall, resultOf, roomInputs, shouldRetrySafe, typstCall, typstInputs,
 } from './lib/typst'
 export { alignFirstLine, firstLineOf, fontFit, hashOf, renderKey, scaledBulletRow, sizing, type FirstLine } from './lib/draw'
 export { nextJob } from './lib/stream'
@@ -187,13 +188,15 @@ async function planEnv($: EngineInterface): Promise<Env | null> {
 
 // ---- Copy -----------------------------------------------------------------
 // A mouse copy over a picture puts kitty placeholder cells on the clipboard,
-// and no hook sees that copy, so the selection and the clipboard are read
-// afterwards (every CLIP_POLL_MS on macOS) and, when they hold placeholders,
-// the clipboard is written again with the words under them (see
-// lib/copy.ts; the drawn pages and their positions are in lib/probe.ts).
+// and no hook sees that copy. On macOS the watcher (lib/frame.ts) prints the
+// clipboard's change count when it changes; at a change the clipboard is
+// read once (pbpaste) and, when it holds placeholders, written again with
+// the words under them (see lib/copy.ts; the drawn pages and the words of
+// a page are in lib/probe.ts). No timer reads the clipboard or the
+// selection.
 
-// Notes a drawing for a copy (noteDrawn, noteDrawnAgain) and starts the
-// watcher; a failure never stops the row from drawing.
+// Notes a drawing for a copy (noteDrawn, noteDrawnAgain) and turns on the
+// watcher's clipboard part; a failure never stops the row from drawing.
 function noteCopy($: EngineInterface, note: () => void) {
   try {
     note()
@@ -203,33 +206,56 @@ function noteCopy($: EngineInterface, note: () => void) {
 
 type CopyRead = { text: string; segments: Segment[]; picks: Pick[]; runs: number; resolved: number }
 
-// The text for a clipboard (or selection) text with placeholders.
+// The text for a clipboard (or selection) text with placeholders. A page
+// not probed yet is probed now; when that takes longer than
+// READING_TOAST_MS, a toast says so.
 async function readCopy($: EngineInterface, raw: string, requestId?: string): Promise<CopyRead> {
   const segments = decodeSelection(raw)
   const picks = pickPages(segments, [...drawnAnswers.values()], requestId)
   const texts: (string | null)[] = []
   let resolved = 0
-  for (const [i, seg] of segments.entries()) {
-    const pick = picks[i]
-    const d = pick ? drawnAnswers.get(pick.id) : undefined
-    const page = pick && d ? d.pages[pick.page] : undefined
-    if (seg.kind !== 'image' || !pick || !d || !page) {
-      texts.push(null)
-      continue
+  let toast: { cancel: () => void } | null = null
+  try {
+    for (const [i, seg] of segments.entries()) {
+      const pick = picks[i]
+      const d = pick ? drawnAnswers.get(pick.id) : undefined
+      const page = pick && d ? d.pages[pick.page] : undefined
+      if (seg.kind !== 'image' || !pick || !d || !page) {
+        texts.push(null)
+        continue
+      }
+      if (!toast && !isProbed(d, pick.page)) {
+        toast = $.clock.after(READING_TOAST_MS, () => {
+          try {
+            $.ui.toast('Intelligent UI: reading the picture…')
+          } catch {}
+        })
+      }
+      const words = await wordsOf($, d, pick.page)
+      const text = words ? textOfRun(seg.lines, words.items, words.blocks, page) : ''
+      if (text) resolved++
+      texts.push(text || null)
     }
-    const positions = await positionsFor($, d.dir)
-    const text = positions ? textOfRun(seg.lines, positions.pages[pick.page] ?? [], positions.blocks, page) : ''
-    if (text) resolved++
-    texts.push(text || null)
+  } finally {
+    toast?.cancel()
   }
   const runs = segments.filter(seg => seg.kind === 'image').length
   const read = { text: joinSegments(segments, texts), segments, picks, runs, resolved }
-  clip.last = { requestId: requestId ?? null, ...read, drawn: [...drawnAnswers.values()] }
+  clip.last = { requestId: requestId ?? null, ...read, drawn: [...drawnAnswers.values()].map(({ job: _, ...d }) => d) }
   return read
 }
 
+// The clipboard now (pbpaste, UTF-8); null when it can not be read.
+async function clipboardNow($: EngineInterface): Promise<string | null> {
+  const got = await $.process.run(['pbpaste'], { timeoutMs: 2000, env: { LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' } }).catch(() => null)
+  return got && got.exitCode === 0 ? got.stdout : null
+}
+
 // Writes the text read for `raw` (placeholders) to the clipboard, once:
-// our own write is never read back as new.
+// our own write is never read back as new. Just before the write the
+// clipboard is read again: a newer copy (made while the picture was read,
+// or one the watcher has not seen yet) is not written over; it is read
+// next (readClipboard), even when it is the same text again.
 async function copyRead($: EngineInterface, raw: string, requestId?: string) {
   clip.raw = raw
   clip.rawRow = requestId
@@ -238,6 +264,11 @@ async function copyRead($: EngineInterface, raw: string, requestId?: string) {
     // Not read again from the clipboard (one toast).
     clip.seen = raw
     $.ui.toast('Intelligent UI: could not read the selected picture (/iui dump says why)')
+    return
+  }
+  if ((await clipboardNow($)) !== raw) {
+    clip.seen = ''
+    clip.again = true
     return
   }
   clip.wrote = read.text
@@ -250,68 +281,74 @@ async function copyRead($: EngineInterface, raw: string, requestId?: string) {
 // line breaks that the selection does not have, or the other way).
 const sameCopy = (a: string, b: string) => a.replace(/\r\n/g, '\n').replace(/\s+$/, '') === b.replace(/\r\n/g, '\n').replace(/\s+$/, '')
 
-// One tick: first the mouse selection (in-process; a new one is copied only
-// when Claude Code copies on select), else the clipboard (pbpaste).
-// Placeholders that are not our own write are read and written back as
-// text. A clipboard with no placeholders is never touched. When this
-// session has a selection (fullscreen), the clipboard is rewritten only
-// when it is that selection: another session's copy is that session's to
-// read. The first tick of a watcher only notes the selection there is (an
-// old one, after a hot reload), so it is never copied again.
-async function clipTick($: EngineInterface) {
-  if (clip.busy) return
+// A watcher line `clip <count>` (null: `clip none`, no PerlObjCBridge: the
+// automatic copy stays off). The first count of a child (at its start) is
+// only noted: the clipboard then is no new copy (after a hot reload, it can
+// be an old copy of picture cells).
+function clipChanged($: EngineInterface, count: number | null, first: boolean) {
+  if (count === null) {
+    clip.none = true
+    return
+  }
+  clip.count = count
+  if (!first) void readClipboard($).catch(() => undefined)
+}
+
+// The clipboard changed: one read (pbpaste). Placeholders that are not our
+// own write are read and written back as text. A clipboard with no
+// placeholders is never touched. When this session has a selection
+// (fullscreen), the clipboard is rewritten only when it is that selection:
+// another session's copy is that session's to read. A change while a read
+// runs (a probe can take a second) reads once more after it.
+async function readClipboard($: EngineInterface) {
+  if (clip.busy) {
+    clip.again = true
+    return
+  }
   clip.busy = true
   try {
-    const selected = await $.ui.selection().catch(() => undefined)
-    if (!clip.seeded) {
-      clip.seeded = true
-      clip.selected = selected?.text ?? ''
-      return
-    }
-    if (S.copyOnSelect && selected && selected.text !== clip.selected && hasPlaceholders(selected.text)) {
-      clip.selected = selected.text
-      await copyRead($, selected.text, selected.requestId)
-      return
-    }
-    const got = await $.process.run(['pbpaste'], { timeoutMs: 2000, env: { LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' } }).catch(() => null)
-    if (!got || got.exitCode !== 0) return
-    const text = got.stdout
-    if (text === clip.seen) return
-    clip.seen = text
-    if (text === clip.wrote || !hasPlaceholders(text)) return
-    if (selected && !sameCopy(selected.text, text)) return
-    if (selected) clip.selected = selected.text
-    await copyRead($, text, selected?.requestId)
+    do {
+      clip.again = false
+      const text = await clipboardNow($)
+      if (text === null || text === clip.seen) continue
+      clip.seen = text
+      if (text === clip.wrote || !hasPlaceholders(text)) continue
+      const selected = await $.ui.selection().catch(() => undefined)
+      if (selected && !sameCopy(selected.text, text)) continue
+      await copyRead($, text, selected?.requestId)
+    } while (clip.again)
   } finally {
     clip.busy = false
   }
 }
 
-// The watcher: on macOS, on this computer (over ssh pbpaste reads the remote
-// one's clipboard), only while Intelligent UI is on (its callers draw, or
-// read the atom) and a picture is drawn. One per load: a hot reload drops
-// the old load's timers. A timer whose period was refused stops; one silent
-// for 10 periods is started again (`ticked` is when it last ran).
+// The watcher's clipboard part: on macOS, on this computer (over ssh
+// pbpaste reads the remote one's clipboard), only while Intelligent UI is
+// on (its callers draw, or read the atom) and a picture is drawn. It is a
+// new child (the flag is an argument): its first count is only noted. A
+// child that runs is kept; one that ended is started again (watchFrame
+// caps it). With no
+// PerlObjCBridge the child goes on as it is (size only).
 function watchClipboard($: EngineInterface) {
-  if (!S.env?.isMac || S.isRemote || !drawnAnswers.size) return
-  if (clip.watch && Date.now() - clip.ticked < 10 * CLIP_POLL_MS) return
-  clip.watch?.cancel()
-  clip.ticked = Date.now()
-  clip.seeded = false
-  try {
-    clip.watch = $.clock.every(CLIP_POLL_MS, () => {
-      clip.ticked = Date.now()
-      void clipTick($).catch(() => undefined)
-    })
-  } catch {
-    clip.watch = null
-  }
+  if (!S.env?.isMac || S.isRemote || !drawnAnswers.size || clip.none) return
+  watchFrame($, (count, first) => clipChanged($, count, first))
 }
 
-// Intelligent UI off, or the session's end: no reads.
-function stopClipboard() {
-  clip.watch?.cancel()
-  clip.watch = null
+// Intelligent UI off, or a /clear (the process goes on): the watcher again
+// with no clipboard part (no reads).
+function stopClipboard($: EngineInterface) {
+  if (watchState()?.clip && !clip.none) watchFrame($, null)
+}
+
+// The automatic copy now, for /iui details and dump.
+function autoCopyOf(isOn: boolean): string {
+  if (!S.env?.isMac) return 'off (not macOS)'
+  if (S.isRemote) return 'off (ssh)'
+  if (!isOn) return 'off (Intelligent UI is off)'
+  if (clip.none) return 'off (no PerlObjCBridge in /usr/bin/perl)'
+  if (!drawnAnswers.size) return 'off (no picture yet)'
+  const now = watchState()
+  return now?.clip && !now.ended ? 'on' : 'off (the watcher does not run)'
 }
 
 // /iui grab: the last mouse selection, read and copied.
@@ -321,7 +358,6 @@ async function grab($: EngineInterface): Promise<string> {
   if (!hasPlaceholders(selected.text)) return `Intelligent UI: the selection has no picture cells; it is ${selected.text.length} chars of text already.`
   clip.raw = selected.text
   clip.rawRow = selected.requestId
-  clip.selected = selected.text
   const read = await readCopy($, selected.text, selected.requestId)
   if (!read.resolved) return `Intelligent UI: found ${read.runs} picture run(s) but could not read them (see /iui dump).`
   clip.wrote = read.text
@@ -333,10 +369,11 @@ async function grab($: EngineInterface): Promise<string> {
 }
 
 // /iui dump: the last placeholder text seen, as code points, how it was
-// read, and the same in full in <cache>/copy-debug.json.
-async function dump($: EngineInterface): Promise<string> {
-  const watcher = clip.watch ? 'on' : 'off'
-  if (!clip.raw) return `Intelligent UI: no clipboard text with picture cells seen yet (watcher ${watcher}; ${drawnAnswers.size} pictures drawn).`
+// read, and the same in full in <cache>/copy-debug.json. `on`: Intelligent
+// UI is on.
+async function dump($: EngineInterface, on: boolean): Promise<string> {
+  const auto = autoCopyOf(on)
+  if (!clip.raw) return `Intelligent UI: no clipboard text with picture cells seen yet (auto copy ${auto}; ${drawnAnswers.size} pictures drawn).`
   const read = await readCopy($, clip.raw, clip.rawRow)
   const runs = read.segments
     .map((seg, i) => {
@@ -352,7 +389,7 @@ async function dump($: EngineInterface): Promise<string> {
     await $.fs.write(`${cache}/copy-debug.json`, JSON.stringify(full, null, 1)).catch(() => undefined)
   }
   return [
-    `Intelligent UI: last clipboard with picture cells (${Array.from(clip.raw).length} code points; watcher ${watcher}):`,
+    `Intelligent UI: last clipboard with picture cells (${Array.from(clip.raw).length} code points; auto copy ${auto}):`,
     codePointsOf(clip.raw, 40),
     runs,
     `Read as ${read.text.length} chars: ${JSON.stringify(read.text.slice(0, 200))}`,
@@ -369,8 +406,12 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // A /clear or a resume: the process goes on, with no clipboard reads until
+  // the next picture. Any other end (/exit): the watcher stops, and no new
+  // child starts.
   on('session.end', async ($, e, next) => {
-    stopClipboard()
+    if (e.reason === 'clear' || e.reason === 'resume') stopClipboard($)
+    else stopWatch()
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -384,8 +425,7 @@ export const register: Register = on => {
     clip.rawRow = selected?.text === e.text ? selected.requestId : undefined
     const read = await readCopy($, e.text, clip.rawRow)
     if (!read.resolved) return next(e)
-    // The watcher does not copy the same selection again.
-    if (selected?.text === e.text) clip.selected = e.text
+    // The clipboard change of this write is not read again.
     clip.wrote = read.text
     clip.seen = read.text
     return next({ ...e, text: read.text })
@@ -403,11 +443,11 @@ export const register: Register = on => {
   on('command.run', { command: 'iui' }, async ($, e) => {
     const asked = parseCommand(e.args)
     if (asked.kind === 'grab') return { text: await grab($) }
-    if (asked.kind === 'dump') return { text: await dump($) }
+    if (asked.kind === 'dump') return { text: await dump($, await read($, isOn)) }
     if (asked.kind === 'on' || asked.kind === 'off') {
       await update($, isOn, () => asked.kind === 'on')
-      // On: the watcher starts with the next picture drawn.
-      if (asked.kind === 'off') stopClipboard()
+      // On: the clipboard part starts with the next picture drawn.
+      if (asked.kind === 'off') stopClipboard($)
       await $.store.set('enabled', asked.kind === 'on')
       return { text: `Intelligent UI is ${asked.kind}.` }
     }
@@ -485,7 +525,8 @@ export const register: Register = on => {
       const terminal = ready.canDraw
         ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
         : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+ and Rio 0.5.27+ with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
-      return { text: `Intelligent UI is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, ${font}. ${typst}; ${terminal}.` }
+      const auto = `Auto copy: ${autoCopyOf(state === 'on')}`
+      return { text: `Intelligent UI is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, ${font}. ${typst}; ${terminal}.\n${auto}` }
     }
     // The short state: what is set, and only the problems that keep pictures away.
     const sized = (v: number | 'full' | 'half', unit: string) => (typeof v === 'number' ? `${v} ${unit}` : v)
@@ -506,13 +547,6 @@ export const register: Register = on => {
     if (S.setting === 'auto') void pollHost($).catch(() => undefined)
     else showMode($)
     watchHost($)
-    return set
-  }).catch(($, e, next) => next(e))
-
-  // Claude Code's copyOnSelect: off, the watcher does not copy a selection.
-  on('config.set', { key: 'copyOnSelect' }, async ($, e, next) => {
-    const set = await next(e)
-    if (set.value !== undefined) S.copyOnSelect = set.value !== false
     return set
   }).catch(($, e, next) => next(e))
 
@@ -587,14 +621,14 @@ export const register: Register = on => {
     const k = { text: e.props.text, extra: bullet ? 'bullet' : '', stamp: stampOf(ready, e.viewport), onScreen }
     const kept = memoOf(answers, e.requestId, k)
     if (kept) {
-      noteCopy($, () => noteDrawnAgain($, e.requestId, roomColumns(e.viewport)))
+      noteCopy($, () => noteDrawnAgain(e.requestId, roomColumns(e.viewport)))
       return kept
     }
     const drawing = await pagesOf($, { id: e.requestId, text: e.props.text, frame: frameFor(e.viewport), env: ready.env, canStream: true, onScreen })
     if (drawing.kind === 'pages') {
       const tree = drawPages($, e, drawing.result, drawing.bytes, { bullet })
       const { result } = drawing
-      noteCopy($, () => noteDrawn($, e.requestId, result, roomColumns(e.viewport)))
+      noteCopy($, () => noteDrawn(e.requestId, result, roomColumns(e.viewport)))
       memoSet(answers, e.requestId, k, tree)
       return tree
     }
@@ -624,7 +658,7 @@ export const register: Register = on => {
         const kept = memoOf(unders, id, k, requestId => requestId.startsWith(`file:${id}:`))
         if (kept) {
           under = kept
-          for (const u of under) if ('drawing' in u) noteCopy($, () => noteDrawnAgain($, u.id, roomColumns(e.viewport)))
+          for (const u of under) if ('drawing' in u) noteCopy($, () => noteDrawnAgain(u.id, roomColumns(e.viewport)))
         } else {
           under = await sentOf($, e, { ready: ready.env, markdown, files, id, at: { done: ready.done, row: e.requestId } })
           if (under.length && under.every(u => !('drawing' in u) || u.drawing.kind === 'pages')) memoSet(unders, id, k, under)
@@ -632,7 +666,7 @@ export const register: Register = on => {
           for (const u of under) {
             if (!('drawing' in u) || u.drawing.kind !== 'pages') continue
             const { result } = u.drawing
-            noteCopy($, () => noteDrawn($, u.id, result, roomColumns(e.viewport)))
+            noteCopy($, () => noteDrawn(u.id, result, roomColumns(e.viewport)))
           }
         }
       }
@@ -683,7 +717,7 @@ export const register: Register = on => {
   // The main loop's running turn, which "clear context" ends.
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) S.mainTurnId = e.turnId
-    // The watcher again if it went silent.
+    // The clipboard part, if it is not on (a picture drawn while it was off).
     if (await read($, isOn)) watchClipboard($)
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -704,7 +738,7 @@ export const register: Register = on => {
       // requestId can be an answer's own).
       if (drawing.kind === 'pages') {
         const { result } = drawing
-        noteCopy($, () => noteDrawn($, `plan:${e.props.tool_use_id}`, result, roomColumns(e.viewport)))
+        noteCopy($, () => noteDrawn(`plan:${e.props.tool_use_id}`, result, roomColumns(e.viewport)))
       }
       return drawPlanUse($, e, row, drawing)
     } catch {

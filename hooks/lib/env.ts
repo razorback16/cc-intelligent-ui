@@ -58,7 +58,6 @@ export function setUp($: EngineInterface): Promise<Env> {
     const raw = rows.find(row => row.key === 'theme')?.value
     S.settingRaw = typeof raw === 'string' ? raw : ''
     S.setting = settingOf(raw)
-    S.copyOnSelect = rows.find(row => row.key === 'copyOnSelect')?.value !== false
     S.hostOs = os.trim()
     S.termProgram = program
     S.termName = term

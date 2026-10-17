@@ -306,7 +306,8 @@ export async function runTypst($: EngineInterface, job: Job, segments: readonly 
 // ---- The probe: where the words are ---------------------------------------
 
 // `typst query` of the template's <mdpos> marks with probe=1: the PNG
-// compile's own inputs, root, package path and env (no ppi, format or out).
+// compile's own inputs (and `page`), root, package path and env (no ppi,
+// format or out).
 export function probeCall(o: { typst: string; root: string; cache: string; inputs: Readonly<Record<string, string | number>> }): { argv: string[]; env: Record<string, string> } {
   const argv = [
     o.typst, 'query',
@@ -321,24 +322,34 @@ export function probeCall(o: { typst: string; root: string; cache: string; input
   return { argv, env: noNetworkEnv(o.cache) }
 }
 
-// What a page set's probe needs, kept as probe.json beside pages.json: the
-// probe runs only when a copy needs it or when nothing compiles (probe.ts),
-// in this load or a later one.
-export type ProbeJob = { argv: string[]; env: Record<string, string>; ppi: number }
+// A drawn page's file says how it was compiled: `b` and `d` (the split
+// retry) are the safe mode's tags.
+export const isSafePage = (file: string) => /\/[bd]-\d+\.png$/.test(file)
 
-// Runs the probe and writes positions.json: the positions, null when it
-// failed, 'cancelled' when `signal` stopped it.
-export async function runProbe($: EngineInterface, dir: string, probe: ProbeJob, signal?: AbortSignal): Promise<Positions | null | 'cancelled'> {
-  const ran = await runKillable($, probe.argv, { env: probe.env, timeoutMs: COMPILE_TIMEOUT_MS, ...(signal ? { signal } : {}) })
-  if (ran.isCancelled) return 'cancelled'
+// The word positions of page `page` (0-based) of a key folder: the probe
+// of that page only (page=<n>), with the inputs of the PNG compile, built
+// from the Job that drew it and the segments in its doc.json. Null when it
+// fails, or when doc.json does not hold one segment per page drawn (a split
+// retry that failed keeps the pages of the first compile).
+export async function probePage(
+  $: EngineInterface, job: Job, dir: string, o: { page: number; pages: number; isSafe: boolean },
+): Promise<Positions | null> {
+  let segments: unknown
+  try {
+    segments = (JSON.parse((await $.fs.read(`${dir}/doc.json`)) as string) as { segments?: unknown }).segments
+  } catch {
+    return null
+  }
+  if (!Array.isArray(segments) || segments.length !== o.pages || !job.env.typst) return null
+  const { inputs, ppi } = typstInputs(job, segments as string[], dir, o.isSafe)
+  const { argv, env } = probeCall({ typst: job.env.typst, root: job.env.root, cache: job.env.cache, inputs: { ...inputs, page: o.page + 1 } })
+  const ran = await runKillable($, argv, { env, timeoutMs: COMPILE_TIMEOUT_MS })
   if (ran.exitCode !== 0) {
-    await logDebug($, dir.replace(/\/[^/]*$/, ''), `probe ${dir} failed:\n${ran.stderr}`)
+    await logDebug($, job.env.cache, `probe ${dir} page ${o.page + 1} failed:\n${ran.stderr}`)
     return null
   }
   try {
-    const positions = positionsOf(JSON.parse(ran.stdout) as Mark[], probe.ppi)
-    await $.fs.write(`${dir}/positions.json`, JSON.stringify(positions))
-    return positions
+    return positionsOf(JSON.parse(ran.stdout) as Mark[], ppi)
   } catch {
     return null
   }
@@ -418,22 +429,13 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
       if (split) {
         pages = split
         segments = cut
-      } else {
-        await logDebug($, job.env.cache, `compile ${job.key}: the split retry failed:\n${again.stderr}`)
-        // The probe reads doc.json: the segments of the pages kept.
-        await $.fs.write(`${dir}/doc.json`, JSON.stringify({ base, segments, images }))
-      }
+      } else await logDebug($, job.env.cache, `compile ${job.key}: the split retry failed:\n${again.stderr}`)
     }
     pages = pages.map(p => ({ ...p, rows: Math.min(MAX_IMAGE_ROWS, p.rows) }))
   }
   const { rowPt } = sizing(job.columns, job.cell, fontFit(job.env.metrics, job.size).columnPt)
   const { bulletRow } = alignFirstLine(firstLineOf(segments[0] ?? ''), rowPt)
   const result: Result = { pages, bulletRow, ...(note ? { note } : {}) }
-  // Only what the probe needs, no process: it runs later (probe.ts). Before
-  // pages.json, so a kept key has it.
-  const { inputs, ppi } = typstInputs(job, segments, dir, isSafe)
-  const probe: ProbeJob = { ...probeCall({ typst: job.env.typst!, root: job.env.root, cache: job.env.cache, inputs }), ppi }
-  await $.fs.write(`${dir}/probe.json`, JSON.stringify(probe))
   await $.fs.write(`${dir}/pages.json`, JSON.stringify(result))
   return result
 }

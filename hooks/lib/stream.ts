@@ -2,8 +2,7 @@
 // final when its request moves on (or its text is still), then compiled, at
 // most MAX_RUNNING at once: rows on screen first, then the newest. No job
 // starts during a burst (S.resizing); a job that ends calls jobDone (no
-// redraw while an epoch is open: the epoch commits). A job enqueued stops
-// the probe ahead (probe.ts); the last job that ends arms it again.
+// redraw while an epoch is open: the epoch commits).
 import type { EngineInterface } from 'claude-code'
 
 import { BLANK_AFTER_LIVE_MS, MAX_RUNNING, RESULTS_KEPT } from './settings'
@@ -12,7 +11,6 @@ import { hashOf } from './draw'
 import { noteDesign, recordDesign } from './designs'
 import { compile, logDebug } from './typst'
 import { extendEpoch, jobDone, jobQueued } from './epoch'
-import { probeLater, stopProbe } from './probe'
 
 // The order of enqueue calls: a higher `order` is newer.
 let enqueued = 0
@@ -59,7 +57,6 @@ export function pump($: EngineInterface) {
         // A cancelled compile draws nothing new: no redraw.
         if (result !== 'cancelled') jobDone($)
         pump($)
-        if (!queue.length && !running.size) probeLater($)
       })
   }
 }
@@ -78,7 +75,6 @@ export function enqueue($: EngineInterface, job: Job) {
   if (stale >= 0) queue.splice(stale, 1)
   job.epoch = S.epoch
   job.order = ++enqueued
-  stopProbe()
   queue.push(job)
   jobQueued(job)
   // A job of the open epoch: its rows still come, the commit waits for them.

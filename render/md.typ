@@ -21,6 +21,8 @@
 //   design-h=<pt>        the design room height: the `height` at the first
 //                        compile of the text (default = height)
 //   safe=1               the retry mode (optional; below)
+//   page=<n>             only the n-th segment (1-based, = the PNG's {0p});
+//                        the probe of one page (below)
 //
 // Live ```typst blocks are laid out in the design space (theme.width,
 // theme.height, theme.page-width are the design values) and drawn scaled by
@@ -42,6 +44,8 @@
 #let inp = sys.inputs
 #let dark = inp.at("theme", default: "dark") != "light"
 #let safe = inp.at("safe", default: "0") not in ("", "0", "false", "no", "off")
+// One segment only (page=<n>, 1-based); 0 = all of them.
+#let only = int(inp.at("page", default: "0"))
 #let page-w = float(inp.at("width", default: "600")) * 1pt
 // No left margin, so the text starts in the column normal replies start in.
 #let margin-left = 0pt
@@ -300,6 +304,9 @@
 //      (column `cx`), list item (`prefix`: "- ", "1. ", "- [x] ").
 // Math and live ```typst drawings have no marks (a drawing is scaled, so
 // its marks would not be where it is drawn).
+// With page=<n>, only that segment is laid out, as in the whole document
+// (each segment is a page of its own: its own margins and labels), so a
+// copy probes only the pages it reads; `p` is still the PNG's page.
 // Each mark has its page `p` (1-based, = the PNG's {0p}) and the text size
 // `s`; all lengths in pt from the page's top-left. A bare (unboxed) mark at
 // the start of a wrapped line is placed at the end of the line above, and
@@ -307,7 +314,7 @@
 #let probe = inp.at("probe", default: "0") not in ("", "0", "false", "no", "off")
 #let mark(kind, ..extra) = context {
   let at = here().position()
-  [#metadata((k: kind, p: at.page, x: at.x / 1pt, y: at.y / 1pt, s: text.size.to-absolute() / 1pt, ..extra.named()))<mdpos>]
+  [#metadata((k: kind, p: at.page + calc.max(0, only - 1), x: at.x / 1pt, y: at.y / 1pt, s: text.size.to-absolute() / 1pt, ..extra.named()))<mdpos>]
 }
 // Block code sets this so the word rule leaves its text to the line marks;
 // math and live drawings set no-marks. The orphan cost changes nothing
@@ -768,34 +775,55 @@
 )
 
 // ---------- render ----------
+// The content of segment `i`; `scope` over the template's own functions.
+#let render-md(md, i, math: md-math, scope: (:)) = cmarker.render(
+  md,
+  smart-punctuation: false,
+  raw-typst: false,
+  math: math,
+  label-prefix: "s" + str(i) + "-",
+  html: (
+    img: ("void", html-img),
+    a: html-a,
+    table: html-table,
+    td: html-cell,
+    th: (attrs, body) => html-cell(attrs, strong(body)),
+    tbody: (attrs, body) => [#metadata(("<tbody>", attrs))#body],
+    kbd: kbd,
+  ),
+  scope: (
+    image: md-image,
+    raw: md-raw,
+    ref: md-ref,
+    link: md-link,
+    list: md-list,
+    enum: md-enum,
+    rule: md-rule,
+    ..scope,
+  ),
+)
+// The footnotes in a content tree (not a reference to one: its body is a
+// label).
+#let notes-in(c) = if type(c) != content { 0 } else if c.func() == footnote {
+  if type(c.body) == content { 1 + notes-in(c.body) } else { 0 }
+} else {
+  c.fields().values().map(v => if type(v) == array { v.map(notes-in).sum(default: 0) } else { notes-in(v) }).sum(default: 0)
+}
+// page=<n>: the footnotes of the segments before it (no drawing, math or
+// image made), so its own have the numbers of the whole document.
+#let notes-before = if only > 1 {
+  let none-of(..args) = []
+  segments.slice(0, calc.min(only - 1, segments.len())).enumerate().map(((i, seg)) => {
+    notes-in(render-md(if type(seg) == str { seg } else { str(seg) }, i, math: (src, block: false) => [], scope: (image: none-of, raw: none-of)))
+  }).sum(default: 0)
+} else { 0 }
+
 #for (i, seg) in segments.enumerate() {
+  if only > 0 and i + 1 != only { continue }
   let md = if type(seg) == str { seg } else { str(seg) }
   let top = if i == 0 { first-top } else { margin-y }
-  let body = cmarker.render(
-    md,
-    smart-punctuation: false,
-    raw-typst: false,
-    math: md-math,
-    label-prefix: "s" + str(i) + "-",
-    html: (
-      img: ("void", html-img),
-      a: html-a,
-      table: html-table,
-      td: html-cell,
-      th: (attrs, body) => html-cell(attrs, strong(body)),
-      tbody: (attrs, body) => [#metadata(("<tbody>", attrs))#body],
-      kbd: kbd,
-    ),
-    scope: (
-      image: md-image,
-      raw: md-raw,
-      ref: md-ref,
-      link: md-link,
-      list: md-list,
-      enum: md-enum,
-      rule: md-rule,
-    ),
-  )
+  let body = render-md(md, i)
+  if notes-before > 0 { body = { counter(footnote).update(notes-before); body } }
   // Pad the bottom so the page is a whole number of terminal rows.
   context {
     // No bottom margin: text is measured to its descenders, so the last line

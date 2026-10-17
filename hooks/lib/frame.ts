@@ -1,6 +1,7 @@
 // The Frame: the terminal's columns, rows and cell, the one source of truth
 // for every size. A small watcher prints the tty size (TIOCGWINSZ) at each
-// SIGWINCH that changed it; the render hooks note the viewport (the
+// SIGWINCH that changed it (and, on macOS once a picture is drawn, the
+// clipboard's change count: register.tsx); the render hooks note the viewport (the
 // transcript can be narrower than the tty). Both restart one quiet timer:
 // during a burst no job starts, and once it is quiet one tty read settles
 // it. A changed Frame begins an epoch (epoch.ts), so a drag or a font size
@@ -12,7 +13,7 @@ import { DEFAULT_METRICS, S, type Frame, type Metrics } from './state'
 import { beginEpoch, holdJobs, releaseJobs } from './epoch'
 import { pump } from './stream'
 import { columnsFor, sizeOf } from './terminal'
-import { CELL_SH, FRAME_PL, termFontOf } from './host'
+import { CELL_SH, perlFor, termFontOf, WATCH_PL } from './host'
 import { measureFonts } from './typst'
 
 export type { Cell, Frame } from './state'
@@ -20,13 +21,26 @@ export type { Cell, Frame } from './state'
 // The viewport a render hook gives: its columns and rows.
 export type View = { columns: number; rows: number }
 
-// One watcher line `rows cols xpixel ypixel` as a Frame; null when it is not
-// 4 whole numbers or its cell can not be right (the rule of sizeOf: no
-// pixels, or a cell under 4 or over 64 px wide).
+// One tty size `rows cols xpixel ypixel` (a read, a watcher's size line) as
+// a Frame; null when it is not 4 whole numbers or its cell can not be right
+// (the rule of sizeOf: no pixels, or a cell under 4 or over 64 px wide).
 export function frameOfLine(line: string): Frame | null {
   if (!/^\d+ \d+ \d+ \d+$/.test(line.trim())) return null
   const size = sizeOf(line)
   return size?.cell ? { columns: size.columns, rows: size.rows, cell: size.cell } : null
+}
+
+// One watcher line (WATCH_PL): `pid <n>`, `size <rows> <cols> <xpixel>
+// <ypixel>` (a Frame, null when bad: frameOfLine), `clip <count>` or `clip
+// none` (count null: no PerlObjCBridge). Null for any other line.
+export type WatchLine = { pid: string } | { size: Frame | null } | { clip: number | null }
+export function watchLineOf(line: string): WatchLine | null {
+  const m = /^(pid|size|clip) (.*)$/.exec(line.trim())
+  if (!m) return null
+  const [, tag, value] = m as unknown as [string, string, string]
+  if (tag === 'size') return { size: frameOfLine(value) }
+  if (/^\d+$/.test(value)) return tag === 'pid' ? { pid: value } : { clip: Number(value) }
+  return tag === 'clip' && value === 'none' ? { clip: null } : null
 }
 
 // What changed from `a` to `b`: the cell (a font size change), else the
@@ -184,27 +198,101 @@ export function noteView($: EngineInterface, view: View) {
   else if (counts) burst($)
 }
 
-// The watcher (started once per load: a hot reload kills the child with the
-// old module).
-let watching = false
+// The watcher's child now (one at a time): whether it reads the clipboard,
+// whether it ended (`final`: with no tty and no bridge, or it could not
+// start; never again), and its stop (a kill by its PID; its later lines are
+// dropped). A hot reload kills the child with the old module. Where the
+// clip lines go (register.tsx): a change count, or null for `clip none`,
+// and whether it is the first line of its child (the count at its start).
+let watcher: { clip: boolean; ended: boolean; final?: boolean; stop: () => void } | null = null
+let clipTo: ((count: number | null, first: boolean) => void) | null = null
 
-// Starts the Frame watcher: one long-lived child (the engine kills it when
-// the module unloads). When it can not start, or it ends, nothing takes its
-// place: a viewport change still reads the tty once it is quiet.
-export function watchFrame($: EngineInterface) {
-  if (watching) return
-  watching = true
+// The watcher now, for /iui details: null when none was started.
+export const watchState = (): { clip: boolean; ended: boolean } | null => (watcher ? { clip: watcher.clip, ended: watcher.ended } : null)
+
+// The children that ended on their own and were started again, at most
+// WATCH_RESTARTS per load: a perl that dies at once is not started in a loop.
+let restarts = 0
+export const WATCH_RESTARTS = 3
+export const WATCH_RESTART_MS = 1000
+
+// Starts the watcher (setUp: no `clip`, the clipboard part as it is), or
+// starts it again when the clipboard part turns on (`clip`: where its lines
+// go) or off (null): the arguments of a child are fixed at its start. The
+// old child is stopped first; the new one prints the size again (the value
+// known: no burst, no epoch). A clip child that ends on its own is started
+// again (WATCH_RESTARTS times at most), and so is any child that ended, at
+// the next call that wants it; until then a viewport change still reads
+// the tty once it is quiet. True when a child was started.
+export function watchFrame($: EngineInterface, clip?: ((count: number | null, first: boolean) => void) | null): boolean {
+  if (clip !== undefined) clipTo = clip
+  const isClip = !!clipTo
+  // Nothing to change: the child runs as wanted, or none runs (setUp did
+  // not start one) and the clipboard part is off.
+  if (watcher && watcher.clip === isClip) {
+    if (!watcher.ended || watcher.final || restarts >= WATCH_RESTARTS) return false
+    restarts++
+  }
+  if (!watcher && clip !== undefined && !isClip) return false
+  watcher?.stop()
+  // The stop: a kill once its PID is known (its first line).
+  let pid = ''
+  let stopped = false
+  let counted = false
+  const kill = () => {
+    if (stopped && pid) void Promise.resolve($.process.run(['kill', pid], { timeoutMs: 5000 })).catch(() => undefined)
+  }
+  const stop = () => {
+    if (stopped) return
+    stopped = true
+    kill()
+  }
+  const me: NonNullable<typeof watcher> = { clip: isClip, ended: false, stop }
+  watcher = me
   try {
-    void followWatcher($.process.spawn({ argv: ['perl', '-e', FRAME_PL] }), f => noteTty($, f))
-  } catch {}
+    const child = $.process.spawn({ argv: [perlFor(S.hostOs === 'Darwin'), '-e', WATCH_PL, ...(isClip ? ['clip'] : [])] })
+    void followWatcher(child, line => {
+      if ('pid' in line) {
+        pid = line.pid
+        kill()
+      } else if (stopped) return
+      else if ('size' in line) noteTty($, line.size)
+      else if (me.clip) {
+        clipTo?.(line.clip, !counted)
+        counted = true
+      }
+    }).then(got => {
+      me.ended = true
+      if (got === 'no tty') me.final = true
+      // A clip child that ended on its own (no stop): again after
+      // WATCH_RESTART_MS, while it is still the child now.
+      if (stopped || me.final || !me.clip) return
+      try {
+        $.clock.after(WATCH_RESTART_MS, () => {
+          if (watcher === me) watchFrame($)
+        })
+      } catch {}
+    }).catch(() => undefined)
+  } catch {
+    me.ended = me.final = true
+  }
+  return true
 }
 
-// Reads the watcher's pieces as lines, each to `note` as a Frame (null when
-// bad), until it ends: 'no tty' when it exits 1, else 'failed' (it did not
-// start: the first pull rejects; or it ended in another way).
+// The session ends (not a /clear): the child is killed and none takes its
+// place.
+export function stopWatch() {
+  watcher?.stop()
+  if (watcher) watcher = { clip: watcher.clip, ended: true, stop: () => {} }
+  restarts = WATCH_RESTARTS
+}
+
+// Reads the watcher's pieces as lines, each to `note` (other lines are
+// dropped), until it ends: 'no tty' when it exits 1, else 'failed' (it did
+// not start: the first pull rejects; or it ended in another way).
 export async function followWatcher(
   child: AsyncIterator<{ stream: 'stdout' | 'stderr'; text: string }, { code: number | null } | undefined>,
-  note: (frame: Frame | null) => void,
+  note: (line: WatchLine) => void,
 ): Promise<'no tty' | 'failed'> {
   const lines = lineSplitter()
   try {
@@ -212,7 +300,10 @@ export async function followWatcher(
       const got = await child.next()
       if (got.done) return got.value?.code === 1 ? 'no tty' : 'failed'
       if (got.value.stream !== 'stdout') continue
-      for (const line of lines(got.value.text)) note(frameOfLine(line))
+      for (const line of lines(got.value.text)) {
+        const read = watchLineOf(line)
+        if (read) note(read)
+      }
     }
   } catch {
     return 'failed'

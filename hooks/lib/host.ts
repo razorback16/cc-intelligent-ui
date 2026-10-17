@@ -1,10 +1,10 @@
 // Work on the host: the shell snippets Intelligent UI runs, the tty size (one
-// read, and the Frame watcher's loop), the terminal's font, and light or dark for auto (the terminal's settings, then
+// read, and the watcher's loop: the size and the clipboard), the terminal's font, and light or dark for auto (the terminal's settings, then
 // COLORFGBG, then the OS appearance), read again by a poll.
 import type { EngineInterface } from 'claude-code'
 
 import type { IuiTheme } from '../../types'
-import { HOST_CHECK_MS, HOST_POLL_MS, MODES } from './settings'
+import { CLIP_WAKE_MS, HOST_CHECK_MS, HOST_POLL_MS, MODES } from './settings'
 import { S } from './state'
 import { beginEpoch } from './epoch'
 import { luminanceOf, modeOfColorFgBg, modeOfGnome, modeOfLuminance, modeOfMacAppearance, parseOsc11, resolveMode, type HostMode } from './mode'
@@ -18,32 +18,54 @@ import { firstLine } from './markdown'
 
 // One tty size read: `rows cols xpixel ypixel` (TIOCGWINSZ); exit 1 with no tty.
 export const CELL_SH = `perl -e 'open(T, "</dev/tty") or exit 1; my $w = " " x 8; ioctl(T, ($^O eq "darwin" ? 0x40087468 : 0x5413), $w) or exit 1; print join(" ", unpack("S4", $w))'`
-// The Frame watcher (frame.ts): prints a line `rows cols xpixel ypixel`
-// at start and at each change. It sleeps in sigsuspend with SIGWINCH and
-// SIGALRM blocked outside it, so a SIGWINCH that comes while it reads is
-// kept for the next sleep (never lost), and it does no work between
-// signals: no poll. Each 10 s an alarm wakes it to see that its parent
-// still runs. Exit 1 when /dev/tty does not open; exit 0 when the parent
-// dies (its parent id changes) or stdout breaks.
-export const FRAME_PL = [
-  'use POSIX (); use Config;',
+// The watcher (frame.ts): one long-lived perl for the tty size and the
+// clipboard. It prints `pid <n>` first, then a line `size rows cols xpixel
+// ypixel` at start and at each change. With the argument `clip` (macOS
+// only: /usr/bin/perl, which has PerlObjCBridge) it also prints `clip <n>`,
+// the clipboard's change count, at start and at each change, read every
+// CLIP_WAKE_MS; `clip none` once when the bridge does not load (then only
+// the size). It sleeps in sigsuspend with SIGWINCH and SIGALRM blocked
+// outside it, so a SIGWINCH that comes while it reads is kept for the next
+// sleep (never lost), and it does no work between signals. With no clip,
+// an alarm each 10 s wakes it only to see that its parent still runs. Exit
+// 1 when /dev/tty does not open (and no clip); exit 0 when the parent dies
+// (its parent id changes) or stdout breaks.
+export const WATCH_PL = [
+  'use POSIX (); use Config; use Time::HiRes ();',
   'my %n; @n{split " ", $Config{sig_name}} = split " ", $Config{sig_num};',
-  'open(my $t, "<", "/dev/tty") or exit 1;',
+  'my $tty = open(my $t, "<", "/dev/tty");',
   'my $req = $^O eq "darwin" ? 0x40087468 : 0x5413;',
-  'my $parent = getppid(); my $last = ""; $| = 1;',
+  'my $parent = getppid(); my $last = ""; my $seen = ""; $| = 1;',
   '$SIG{PIPE} = sub { exit 0 }; $SIG{WINCH} = sub {}; $SIG{ALRM} = sub {};',
+  'print "pid $$\\n" or exit 0;',
+  'my $pb;',
+  'if (($ARGV[0] // "") eq "clip") {',
+  '  $pb = eval { require Foundation; Foundation->import;',
+  '    NSBundle->bundleWithPath_("/System/Library/Frameworks/AppKit.framework")->load;',
+  '    @NSPasteboard::ISA = ("PerlObjCBridge"); my $p = NSPasteboard->generalPasteboard; defined $p->changeCount ? $p : undef };',
+  '  print "clip none\\n" or exit 0 unless $pb;',
+  '}',
+  'exit 1 unless $tty || $pb;',
   'POSIX::sigprocmask(POSIX::SIG_BLOCK(), POSIX::SigSet->new($n{WINCH}, $n{ALRM}));',
   'my $none = POSIX::SigSet->new();',
   'while (1) {',
   '  my $w = " " x 8;',
-  '  if (ioctl($t, $req, $w)) {',
+  '  if ($tty && ioctl($t, $req, $w)) {',
   '    my $line = join(" ", unpack("S4", $w));',
-  '    if ($line ne $last) { print "$line\\n" or exit 0; $last = $line; }',
+  '    if ($line ne $last) { print "size $line\\n" or exit 0; $last = $line; }',
+  '  }',
+  '  if ($pb) {',
+  '    my $c = eval { $pb->changeCount };',
+  '    if (defined $c && "$c" ne $seen) { print "clip $c\\n" or exit 0; $seen = "$c"; }',
   '  }',
   '  exit 0 if getppid() != $parent;',
-  '  alarm(10); POSIX::sigsuspend($none);',
+  `  if ($pb) { Time::HiRes::ualarm(${CLIP_WAKE_MS * 1000}); } else { alarm(10); }`,
+  '  POSIX::sigsuspend($none);',
   '}',
 ].join(' ')
+// The perl that runs the watcher: on macOS the system's (a Homebrew perl
+// has no PerlObjCBridge), else the one on the PATH.
+export const perlFor = (isMac: boolean) => (isMac ? '/usr/bin/perl' : 'perl')
 const ITERM_BOOKMARKS_SH = `defaults export com.googlecode.iterm2 - | plutil -extract "New Bookmarks" json -o - -`
 const ITERM_DEFAULT_SH = `defaults read com.googlecode.iterm2 "Default Bookmark Guid"`
 // A PostScript name (argv[0]) to its family name.

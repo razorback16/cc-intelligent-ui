@@ -144,7 +144,9 @@ export async function pagesOf($: EngineInterface, o: PagesInput): Promise<Drawin
       touchLater($, `${env.cache}/${key}`)
     }
     forget(id)
-    keep(lastKey, id, { key, textHash }, RESULTS_KEPT)
+    // Its Job as it draws, for the probe of a copy: no text (the probe reads
+    // doc.json), and its env as now (a font read later changes the env).
+    keep(lastKey, id, { key, textHash, job: { ...job, text: '', env: { ...env } } }, RESULTS_KEPT)
     return withBytes($, env, got)
   }
   // Live: its text streams (inside a request we saw, or changing since we
