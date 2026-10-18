@@ -8,6 +8,7 @@ import type { ThemeInfo } from './themes'
 import type { HostMode, ThemeSetting } from './mode'
 import type { PlanVerdict } from './plan'
 import type { Drawn } from './copy'
+import type { GridMetrics } from './grid'
 import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } from './settings'
 import { uiInvalidate } from './api'
 
@@ -32,8 +33,9 @@ export type Room = { heightPt: number; design: Design; designKey: string; isNew:
 // `avg` the mean advance over a lowercase pangram.
 export type FontMetrics = { adv: number; xh: number; avg: number }
 // `term` the terminal's font (null when unknown or not installed), `menlo`
-// the template's code font, `body` its text font.
-export type Metrics = { term: FontMetrics | null; menlo: FontMetrics; body: FontMetrics }
+// the template's code font, `body` its text font, `grid` the row grid's
+// numbers (DEFAULT_GRID when not given).
+export type Metrics = { term: FontMetrics | null; menlo: FontMetrics; body: FontMetrics; grid?: GridMetrics }
 // Measured with Typst on macOS: Menlo and SF Pro Text.
 export const DEFAULT_METRICS: Metrics = {
   term: null,

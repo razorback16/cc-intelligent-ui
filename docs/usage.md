@@ -87,8 +87,10 @@ The terminal draws a mouse selection as full cells, thus a selection covers full
 
 `/iui grid on` puts each line of text on the terminal rows:
 
-- Each line of body text, a list, a quote or a table uses one row (or more rows if the text is large). The text is in the middle of its rows.
+- Each line of body text, a list, a quote or a table uses one row (or more rows if the text is large). The middle of the text is in the middle of a row.
 - Each heading, each code line and each gap between blocks uses full rows.
+- The middle of a line that uses 2 rows (or 4 rows) is on the border between two rows. Thus the mod moves such a line down by half a row, and adds half a row above and below the block that holds it. For example, a level-2 heading uses 3 rows, and its text is in the middle row. Thus a selection of one row covers the full height of the text.
+- The reply bullet is on the row that holds the middle of the first line. For example, the bullet is on the second row of a level-1 heading.
 - Some blocks have a height that the mod cannot set, for example display math, an image or a Typst drawing. The mod adds space to such a block, so that its height is a number of full rows.
 
 Thus the selection covers the text that the mod copies. The lines are closer together than without the grid, so the look is not the same as VS Code. The grid is off by default. For the limits, refer to [Limitations](limitations.md).

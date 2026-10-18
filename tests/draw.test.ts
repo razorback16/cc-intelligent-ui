@@ -357,7 +357,7 @@ test('grid on is kept and begins an epoch: another key, compiled with grid=1 and
   expect(images(await ui.drawn())[0].props.source.file).toBe(first.props.source.file)
 })
 
-test('a kept grid on draws a heading on the grid, its bullet on row 0; grid with no value shows it', async ($, on) => {
+test('a kept grid on draws a heading on the grid, its bullet on the row of its text; grid with no value shows it', async ($, on) => {
   const { clock, compiles } = world(on, { TERM: 'xterm-kitty' }, HEAD, { grid: true })
   const shown = await $.command.run({ command: 'iui', args: 'grid' } as any)
   expect(shown.text).toContain('The row grid is on (each line of text on whole terminal rows)')
@@ -365,7 +365,23 @@ test('a kept grid on draws a heading on the grid, its bullet on row 0; grid with
   await clock.settle()
   await ui.redraw(props('# Title'))
   expect(compiles[0]).toMatchObject({ grid: '1', top: '0' })
-  expect(bulletRowOf(await ui.drawn())).toBe(0)
+  // An h1 of 3 rows: its text in row 1.
+  expect(bulletRowOf(await ui.drawn())).toBe(1)
+})
+
+test('with the grid on, the bullet row comes from the grid numbers that the font measure gives', async ($, on) => {
+  // Body text that needs 2 rows (a large size): its line is half a row down, its text in row 1.
+  const measured = (body: number) => JSON.stringify({
+    term: null, menlo: { adv: 0.602, xh: 0.547, avg: 0.602 }, body: { adv: 0.63, xh: 0.526, avg: 0.483 },
+    grid: { body, heading: [31.8, 20.4, 14.2, 11.4, 9.9, 9.7], code: 1.0775, 'code-size': 1, pad: { quote: 6.05, code: 12.57, table: 3.93 } },
+  })
+  const { clock, compiles } = world(on, { TERM: 'xterm-kitty' }, HEAD, { grid: true }, undefined, { metrics: () => measured(20) })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await $.ui.mount(message('g-4', 'Some text.'))
+  await clock.settle()
+  await ui.redraw(props('Some text.'))
+  expect(compiles[0]).toMatchObject({ grid: '1', top: '0' })
+  expect(bulletRowOf(await ui.drawn())).toBe(1)
 })
 
 test('a heading with the grid off keeps its bullet row and top margin', async ($, on) => {

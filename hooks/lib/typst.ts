@@ -6,7 +6,8 @@ import { COMPILE_TIMEOUT_MS, MAX_IMAGE_ROWS, NO_NETWORK, SEGMENT_ROWS, TOUCH_FLU
 import { DEFAULT_METRICS, type Cell, type FontMetrics, type Job, type Metrics, type Page, type Result } from './state'
 import { firstLine, imagePathOf, localImages, plainOf, splitInTwo, splitSegments } from './markdown'
 import { inlineBudget } from './terminal'
-import { alignFirstLine, firstLineOf, fontFit, sizing } from './draw'
+import { fontFit, placeFirstLine, sizing } from './draw'
+import { DEFAULT_GRID, gridOf } from './grid'
 import { HEADERS_SH } from './host'
 import { logDebug } from './log'
 import { positionsOf, type Mark, type Positions } from './copy'
@@ -130,7 +131,7 @@ export async function measureFonts($: EngineInterface, typst: string, root: stri
   try {
     const m = JSON.parse(got?.stdout ?? '') as Metrics
     const ok = (x: FontMetrics | null | undefined) => !!x && x.adv > 0 && x.xh > 0 && x.avg > 0
-    if (ok(m.menlo) && ok(m.body)) return { term: ok(m.term) ? m.term : null, menlo: m.menlo, body: m.body }
+    if (ok(m.menlo) && ok(m.body)) return { term: ok(m.term) ? m.term : null, menlo: m.menlo, body: m.body, grid: gridOf(m.grid) ?? DEFAULT_GRID }
   } catch {}
   return DEFAULT_METRICS
 }
@@ -277,12 +278,20 @@ export async function runKillable(
   return { exitCode: code, stdout, stderr }
 }
 
+// The first page's top margin and bullet row of a job's text.
+export function firstLinePlace(job: Job, segments: readonly string[]) {
+  const fit = fontFit(job.env.metrics, job.size)
+  const { rowPt } = sizing(job.columns, job.cell, fit.columnPt)
+  const grid = job.grid ? { metrics: job.env.metrics.grid ?? DEFAULT_GRID, code: fit.code } : undefined
+  return placeFirstLine(segments[0] ?? '', rowPt, grid)
+}
+
 // The template's inputs for a job and its ppi (the PNG compile and the
 // probe share them). With the row grid, `grid` is 1 and `top` 0.
 export function typstInputs(job: Job, segments: readonly string[], dir: string, isSafe: boolean) {
   const fit = fontFit(job.env.metrics, job.size)
   const { widthPt, ppi, rowPt } = sizing(job.columns, job.cell, fit.columnPt)
-  const { topPt } = alignFirstLine(firstLineOf(segments[0] ?? ''), rowPt, job.grid)
+  const { topPt } = firstLinePlace(job, segments)
   const inputs: Record<string, string | number> = {
     theme: job.theme,
     width: widthPt,
@@ -439,7 +448,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     }
     pages = pages.map(p => ({ ...p, rows: Math.min(MAX_IMAGE_ROWS, p.rows) }))
   }
-  const { bulletRow } = alignFirstLine(firstLineOf(segments[0] ?? ''), rowPt, job.grid)
+  const { bulletRow } = firstLinePlace(job, segments)
   const result: Result = { pages, bulletRow, ...(note ? { note } : {}) }
   await fsWrite($, `${dir}/pages.json`, JSON.stringify(result))
   return result

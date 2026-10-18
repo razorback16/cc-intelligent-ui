@@ -42,8 +42,10 @@
 // of whole rows covers whole lines. Each line box is a whole number of rows
 // with its text centred, every block starts and ends on a row boundary, and
 // blocks of free height (display math, live drawings, images) are made a
-// whole number of rows. Every page's top margin is 0 (`top` is not used).
-// With row=0, grid=1 does nothing.
+// whole number of rows. A line box of an even number of rows is half a row
+// down (phase-pad), so the centre of every line is on the middle of a row.
+// Every page's top margin is 0 (`top` is not used). With row=0, grid=1 does
+// nothing.
 
 #import "@preview/cmarker:0.1.6"
 #import "@preview/mitex:0.2.7": mitex-convert, mitex-scope
@@ -100,7 +102,7 @@
 #import "theme.typ": T, C, syntax, at-level
 #let px = 11pt / 14
 // The font lists live in fonts.typ, which render/measure.typ reads too.
-#import "fonts.typ": sans, mono-base
+#import "fonts.typ": sans, mono-base, line-ink
 // The terminal's own font first for code, so code looks like the terminal
 // (unless the theme sets fonts.use-terminal-font to false).
 #let term-font = inp.at("term-font", default: "")
@@ -174,13 +176,34 @@
 // the least number of rows that this ink and a gap of 0.1em need: 1 for the
 // body text at the usual sizes (its ascender-to-descender box is then a
 // little more than the row; only the ink must not touch). With par leading
-// 0, the lines of a paragraph are then exactly `rows` rows apart.
+// 0, the lines of a paragraph are then exactly `rows` rows apart. The hooks
+// module finds the same `rows` from measure.typ (the bullet's row).
 #let grid-edges() = {
-  let up = measure(text(top-edge: "bounds", bottom-edge: "baseline", "bdfhkl")).height
-  let down = measure(text(top-edge: "baseline", bottom-edge: "bounds", "gjpqy")).height
-  let n = calc.max(1, calc.ceil((up + down + 0.1em.to-absolute()) / row - 0.001))
+  let (up, down, need) = line-ink()
+  let n = calc.max(1, calc.ceil(need / row - 0.001))
   let mid = (up - down) / 2
   (top: mid + n * row / 2, bottom: mid - n * row / 2, rows: n)
+}
+// The half-row phase: the centre of a line box of an even number of rows
+// is on a row boundary. Such lines go half a row down: their block gets
+// half a row more above and below (still whole rows). The block marks its
+// content with a text cost (no effect here, like the probe's flags), so a
+// block in it with lines of the same parity does not move again, and one
+// with the other parity moves back.
+#let half-cost = 103%
+#let is-half(costs) = costs.widow == half-cost
+#let half-costs(half) = (widow: if half { half-cost } else { 100% })
+// The rows of the line box here, from the grid's fixed edges (needs context).
+#let line-rows() = if type(text.top-edge) == length and type(text.bottom-edge) == length {
+  calc.max(1, int(calc.round((text.top-edge - text.bottom-edge).to-absolute() / row)))
+} else { 1 }
+// Half a row when lines of parity `half` are in a flow of the other phase.
+#let phase-pad(half) = if half != is-half(text.costs) { row / 2 } else { 0pt }
+// `body`, lines of the text here, in their phase.
+#let in-phase(body) = context {
+  let half = calc.even(line-rows())
+  let pad = phase-pad(half)
+  if pad == 0pt { body } else { block(inset: (y: pad), { set text(costs: half-costs(half)); body }) }
 }
 
 // ---------- headings ----------
@@ -192,21 +215,24 @@
   let above = at-level(H.above-em, lvl - 1) * 11pt
   let below = at-level(H.below-em, lvl - 1) * 11pt
   if on-grid {
-    // The grid: a line box of whole rows (3 for h1 and 2 for h2 at the
-    // usual sizes: Typst's own heading rule makes h1 1.4em and h2 1.2em of
-    // the theme's size, so h1 is 30.8pt), whole-row gaps (at least one), and
-    // the rule on the bottom row boundary (no padding under the text: it
-    // would add height).
+    // The grid: a line box of whole rows (3 for h1 and 2 for h2 and h3 at
+    // the usual sizes: Typst's own heading rule makes h1 1.4em and h2 1.2em
+    // of the theme's size, so h1 is 30.8pt), whole-row gaps (at least one),
+    // and the rule on the bottom row boundary (no padding under the text: it
+    // would add height). An even number of rows is half a row down
+    // (phase-pad): an h2 is then 3 rows, its text in the middle one.
     return {
       set text(size: size, weight: H.weight)
       context {
         let g = grid-edges()
-        set text(top-edge: g.top, bottom-edge: g.bottom)
+        let half = calc.even(g.rows)
+        let pad = phase-pad(half)
+        set text(top-edge: g.top, bottom-edge: g.bottom, costs: half-costs(half))
         show raw: set text(top-edge: g.top, bottom-edge: g.bottom)
         set par(leading: 0pt)
         block(
           width: 100%, above: calc.max(row, rows-near(above)), below: calc.max(row, rows-near(below)), sticky: true,
-          stroke: if lvl <= H.rule-levels { (bottom: px + C.border) },
+          inset: (y: pad), stroke: if lvl <= H.rule-levels { (bottom: px + C.border) },
           it.body,
         )
       }
@@ -296,14 +322,17 @@
   let CB = E.code-block
   if on-grid {
     // The grid: each code line exactly one row (the code is the terminal's
-    // font at its size), padding of whole rows (16px is about one row).
+    // font at its size), padding of whole rows (16px is about one row), and
+    // half a row more when its lines are not in the flow's phase (phase-pad).
     let g = grid-edges()
+    let half = calc.even(g.rows)
+    let pad = phase-pad(half)
     return {
-      set text(top-edge: g.top, bottom-edge: g.bottom)
+      set text(top-edge: g.top, bottom-edge: g.bottom, costs: half-costs(half))
       set par(leading: 0pt, justify: false)
       block(
         width: 100%, fill: C.code-bg, stroke: CB.border-px * px + C.code-border,
-        radius: CB.radius-px * px, inset: (x: CB.pad-px * px, y: rows-near(CB.pad-px * px)), above: row, below: row,
+        radius: CB.radius-px * px, inset: (x: CB.pad-px * px, y: rows-near(CB.pad-px * px) + pad), above: row, below: row,
         text(fill: fg, it),
       )
     }
@@ -327,14 +356,24 @@
   // The grid: whole-row gaps and padding (0.55em is nearer to no row than
   // to one, so the bar is as tall as the text's rows), and one row between
   // the blocks in it (Typst's own quote rule gives them 2.4em above and
-  // 1.8em below).
-  let gap = if on-grid { row } else { E.text.paragraph-em * 1em }
+  // 1.8em below). Its lines in their phase (phase-pad).
+  if on-grid {
+    return context {
+      let half = calc.even(line-rows())
+      block(
+        width: 100%, fill: C.quote-bg, radius: Q.radius-px * px, above: row, below: row,
+        stroke: (left: Q.bar-px * px + C.quote-border),
+        inset: (left: (Q.pad-left-px + Q.bar-px) * px, right: Q.pad-right-px * px, y: rows-near(Q.pad-y-em * 11pt) + phase-pad(half)),
+        { set block(spacing: row); set text(costs: half-costs(half)); it.body },
+      )
+    }
+  }
   block(
     width: 100%, fill: C.quote-bg, radius: Q.radius-px * px,
-    above: gap, below: gap,
+    above: E.text.paragraph-em * 1em, below: E.text.paragraph-em * 1em,
     stroke: (left: Q.bar-px * px + C.quote-border),
-    inset: (left: (Q.pad-left-px + Q.bar-px) * px, right: Q.pad-right-px * px, y: if on-grid { rows-near(Q.pad-y-em * 11pt) } else { Q.pad-y-em * 1em }),
-    if on-grid { set block(spacing: row); it.body } else { it.body },
+    inset: (left: (Q.pad-left-px + Q.bar-px) * px, right: Q.pad-right-px * px, y: Q.pad-y-em * 1em),
+    it.body,
   )
 }
 
@@ -692,7 +731,7 @@
 #let loose(items) = items.any(it => type(it) == content and it.func() == [].func() and it.children.any(c => c.func() == parbreak))
 #let item-gap(items) = if on-grid and loose(items) { (spacing: row) } else { (:) }
 
-#let md-list(..args) = {
+#let list-of(..args) = {
   let items = args.pos()
   let gap = item-gap(items)
   let tasks = items.map(task-split)
@@ -722,7 +761,7 @@
 }
 
 // "1. [x] done": keep the number, put the checkbox after it.
-#let md-enum(..args) = {
+#let enum-of(..args) = {
   let start = args.named().at("start", default: 1)
   let start = if type(start) == int { start } else { 1 }
   let gap = item-gap(args.pos())
@@ -733,6 +772,10 @@
   })
   enum(..args.named(), ..gap, ..items)
 }
+
+// On the grid, a list with its nested lists is one block in its phase.
+#let md-list(..args) = if on-grid { in-phase(list-of(..args)) } else { list-of(..args) }
+#let md-enum(..args) = if on-grid { in-phase(enum-of(..args)) } else { enum-of(..args) }
 
 // ---------- ```typst fences: live Typst ----------
 #let live-langs = ("typst", "typ")
@@ -761,8 +804,8 @@
     // segment must stay one page); a column break is dropped.
     let drawing = {
       show colbreak: none
-      // The probe: no marks (see no-marks).
-      set text(costs: (orphan: 102%)) if probe
+      // The probe: no marks (see no-marks). The grid: no half-row phase.
+      set text(costs: (orphan: 102%)) if probe or on-grid
       eval(src, mode: "markup", scope: (theme: live-theme))
     }
     std.block(width: 100%, above: if on-grid { row } else { 1.2em }, below: if on-grid { row } else { 1.2em }, layout(size => {
@@ -911,6 +954,14 @@
   // the text's (its smaller text has the body's fixed edges, so each of its
   // lines is g.rows rows too).
   show footnote.entry: set par(leading: 0pt)
+  // Each paragraph and table cell in its phase (phase-pad; a cell's rules
+  // stay on row boundaries), not a live drawing's. A footnote entry always
+  // starts on a row (under the separator's row), whatever refers to it.
+  show par: it => context if no-marks(text.costs) { it } else { in-phase(it) }
+  show table.cell: in-phase
+  show footnote.entry: it => context if calc.even(line-rows()) {
+    block(inset: (y: row / 2), { set text(costs: half-costs(true)); it })
+  } else { it }
   set footnote.entry(
     clearance: 0pt, gap: 0pt,
     separator: block(height: row, align(horizon, line(length: 30%, stroke: px + C.border))),

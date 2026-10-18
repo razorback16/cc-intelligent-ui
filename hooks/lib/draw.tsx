@@ -5,8 +5,9 @@
 import type { EngineInterface, RenderComponent, RenderSurface, RenderViewport, ResolveInput } from 'claude-code'
 
 import type { IuiTheme } from '../../types'
-import { BODY_PT, bulletOf, GUTTER, LINK_FILES_KEPT, MARGIN_TOP, TEMPLATE_VERSION } from './settings'
+import { BODY_PT, bulletOf, GRID_VERSION, GUTTER, LINK_FILES_KEPT, MARGIN_TOP, TEMPLATE_VERSION } from './settings'
 import { INLINE_KEPT, inlined, keep, linkFiles, S, type Cell, type Look, type Metrics, type Result, type Room } from './state'
+import { gridFirstRow, type GridMetrics } from './grid'
 import { FENCE, imagePathOf } from './markdown'
 import { linksOf, type LinkItem } from './links'
 import { fitBox, fitsInline, roomColumns } from './terminal'
@@ -73,8 +74,8 @@ export function renderKey(o: {
   // the room height and the design. A plain text's key does not change
   // with the rows.
   room?: Room
-  // `/iui grid` on: the lines on the row grid, another picture. Off adds
-  // nothing, so the keys of before stay.
+  // `/iui grid` on: the lines on the row grid, another picture (with
+  // GRID_VERSION). Off adds nothing, so the keys of before stay.
   grid?: boolean
 }): string {
   const { room } = o
@@ -83,7 +84,7 @@ export function renderKey(o: {
     o.templateStamp, o.look.name, o.look.dir, o.look.stamp, TEMPLATE_VERSION, ...(o.inline ? ['inline'] : []),
     ...(o.base ? ['base', o.base] : []),
     ...(room ? ['room', room.heightPt, room.design.widthPt, room.design.heightPt] : []),
-    ...(o.grid ? ['grid'] : []),
+    ...(o.grid ? ['grid', GRID_VERSION] : []),
   ])
 }
 
@@ -102,9 +103,10 @@ const FIRST_LINE: Record<FirstLine, { centre: number; inkTop: number }> = {
   table: { centre: 11.27, inkTop: 6.18 },
 }
 
+const HEADING = /^ {0,3}(#{1,6})\s/
 export function firstLineOf(md: string): FirstLine {
   const line = md.split('\n').find(l => l.trim()) ?? ''
-  const heading = /^ {0,3}(#{1,6})\s/.exec(line)
+  const heading = HEADING.exec(line)
   if (heading) return (['h1', 'h2', 'h3'] as const)[heading[1]!.length - 1] ?? 'h4'
   if (/^ {0,3}>/.test(line)) return 'quote'
   if (FENCE.test(line)) return 'code'
@@ -116,13 +118,20 @@ export function firstLineOf(md: string): FirstLine {
 // the first line of text on the centre of a terminal row, and which row that
 // is: row 0 when the line fits there, else the first row its ink can reach
 // without being cut at the picture's top. The bullet is drawn on that row.
-// With the row grid (`grid`), the first line box is row 0 at the page's top:
-// no margin, and the bullet on row 0.
-export function alignFirstLine(kind: FirstLine, rowPt: number, grid = false): { topPt: number; bulletRow: number } {
-  if (grid) return { topPt: 0, bulletRow: 0 }
+export function alignFirstLine(kind: FirstLine, rowPt: number): { topPt: number; bulletRow: number } {
   const { centre, inkTop } = FIRST_LINE[kind]
   const bulletRow = Math.max(0, Math.ceil((centre - inkTop + 0.5) / rowPt - 0.5 - 1e-9))
   return { topPt: Math.round(((bulletRow + 0.5) * rowPt - centre) * 100) / 100, bulletRow }
+}
+
+// The first page's top margin and bullet row. With the row grid (the
+// fonts' grid numbers and the job's code size): no margin, and the row of
+// the first line's ink centre (gridFirstRow).
+export function placeFirstLine(md: string, rowPt: number, grid?: { metrics: GridMetrics; code: number }): { topPt: number; bulletRow: number } {
+  const kind = firstLineOf(md)
+  if (!grid) return alignFirstLine(kind, rowPt)
+  const level = HEADING.exec(md.split('\n').find(l => l.trim()) ?? '')?.[1]!.length ?? 0
+  return { topPt: 0, bulletRow: gridFirstRow(kind, level, rowPt, grid.metrics, grid.code) }
 }
 
 // Over ssh: every page's PNG as base64 for a `{ png }` source, or null when

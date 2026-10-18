@@ -63,7 +63,7 @@ Example: pink inline code, rounder boxes.
 
 With `/iui grid on`, the lines of text lie on the terminal's rows. Then some keys change their effect:
 
-- `text.leading-em`, `text.paragraph-em`, `heading.leading-em`, `heading.rule-pad-em`, `list.item-spacing-em` and `code-block.line-height` are not used. Each line is one row (a large heading is two or more rows). The gap between paragraphs and blocks is one row. The items of a tight list have no gap. The items of a loose list (a list with a blank line between its items or in an item) have a gap of one row.
+- `text.leading-em`, `text.paragraph-em`, `heading.leading-em`, `heading.rule-pad-em`, `list.item-spacing-em` and `code-block.line-height` are not used. Each line is one row (a large heading is two or more rows; a line of an even number of rows is half a row down, with half a row more above and below its block). The gap between paragraphs and blocks is one row. The items of a tight list have no gap. The items of a loose list (a list with a blank line between its items or in an item) have a gap of one row.
 - `heading.above-em` and `below-em`, `rule.gap-em`, `code-block.pad-px`, `quote.pad-y-em` and `table.pad-y-px` are rounded to the nearest whole number of rows. Gaps above and below headings and rules are one row or more.
 
 ## Licence

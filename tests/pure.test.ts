@@ -14,6 +14,8 @@ import {
 import { DRAWING_ROWS } from '../hooks/lib/settings'
 import { wrapPid } from '../hooks/lib/typst'
 import type { Env, Job } from '../hooks/lib/state'
+import { placeFirstLine } from '../hooks/lib/draw'
+import { DEFAULT_GRID, gridFirstRow, gridOf, gridRowsOf } from '../hooks/lib/grid'
 
 const para = (i: number) => `Paragraph ${i} ${'word '.repeat(40)}`.trim()
 const fence = (info: string, lines: number) => ['```' + info, ...Array.from({ length: lines }, (_, i) => `line ${i}`), '```'].join('\n')
@@ -250,13 +252,62 @@ test('the first line of text is centred on the bullet row', () => {
   }
 })
 
-test('with the row grid, the first line box is row 0: no top margin, the bullet on row 0', () => {
-  for (const kind of ['para', 'h1', 'h2', 'h3', 'h4', 'quote', 'code', 'table'] as const) {
-    for (const rowPt of [9, 11, 13.2, 16]) {
-      expect(alignFirstLine(kind, rowPt, true)).toEqual({ topPt: 0, bulletRow: 0 })
-      expect(alignFirstLine(kind, rowPt, false)).toEqual(alignFirstLine(kind, rowPt))
-    }
+test('with the row grid, no top margin and the bullet on the row of the first line\'s ink centre', () => {
+  const grid = { metrics: DEFAULT_GRID, code: 0.8785 }
+  // The rows of a 36 px cell at /iui size 100, 117, 125, 150 and 200%, and
+  // the row of the first line in the template's pictures at those sizes.
+  const rowsPt = [13.091, 11.1888, 10.4726, 8.7273, 6.5455]
+  const drawn: Record<string, number[]> = {
+    '# Title': [1, 1, 2, 2, 2],
+    '## Part': [1, 1, 1, 1, 2],
+    '### Part': [1, 1, 1, 1, 1],
+    '#### Part': [0, 1, 1, 1, 1],
+    '##### Part': [0, 0, 0, 1, 1],
+    '###### Part': [0, 0, 0, 1, 1],
+    'Some text': [0, 1, 1, 1, 1],
+    '- item': [0, 1, 1, 1, 1],
+    '> quote': [0, 2, 2, 2, 2],
+    '```\ncode\n```': [1, 2, 2, 2, 3],
+    '| a | b |\n|---|---|': [0, 1, 1, 1, 2],
   }
+  for (const [md, rows] of Object.entries(drawn)) {
+    rowsPt.forEach((rowPt, i) => expect([md, placeFirstLine(md, rowPt, grid)]).toEqual([md, { topPt: 0, bulletRow: rows[i] }]))
+  }
+  // Grid off: the margin and row of before.
+  for (const md of Object.keys(drawn)) expect(placeFirstLine(md, 11)).toEqual(alignFirstLine(firstLineOf(md), 11))
+})
+
+test('a line box of n rows has its ink centre on row floor(n / 2), under the padding in whole rows', () => {
+  const row = 10
+  const g = (body: number, pad = 0) => ({ ...DEFAULT_GRID, body, pad: { quote: pad, code: pad, table: pad } })
+  // n = 1, 2, 3, 4: an even box is half a row down, so its centre is in row n / 2.
+  expect([9, 19, 29, 39].map(need => gridFirstRow('para', 0, row, g(need), 1))).toEqual([0, 1, 1, 2])
+  expect(gridRowsOf(20, row)).toBe(2)
+  expect(gridRowsOf(20.005, row)).toBe(2)
+  expect(gridRowsOf(20.02, row)).toBe(3)
+  // Padding rounds to the nearest whole rows.
+  expect(gridFirstRow('quote', 0, row, g(19, 14), 1)).toBe(1 + 1)
+  expect(gridFirstRow('table', 0, row, g(9, 4), 1)).toBe(0)
+  // Code: the code font's need per pt at the theme's size, or at `code` for "terminal".
+  const code = { ...DEFAULT_GRID, code: 1.5, pad: { ...DEFAULT_GRID.pad, code: 0 } }
+  expect(gridFirstRow('code', 0, row, code, 0.5)).toBe(1)
+  expect(gridFirstRow('code', 0, row, { ...code, codeSize: null }, 0.5)).toBe(0)
+})
+
+test('the grid numbers of the font measure are read, and a bad one is refused', () => {
+  const measured = {
+    body: 11.2836, heading: [31.8, 20.4, 14.2, 11.4, 9.9, 9.7], code: 1.0775, 'code-size': null,
+    pad: { quote: 6.05, code: 12.57, table: 3.93 },
+  }
+  expect(gridOf(measured)).toEqual({
+    body: 11.2836, heading: [31.8, 20.4, 14.2, 11.4, 9.9, 9.7], code: 1.0775, codeSize: null, pad: { quote: 6.05, code: 12.57, table: 3.93 },
+  })
+  expect(gridOf({ ...measured, 'code-size': 1 })?.codeSize).toBe(1)
+  expect(gridOf(undefined)).toBe(null)
+  expect(gridOf({ ...measured, heading: [1, 2] })).toBe(null)
+  expect(gridOf({ ...measured, body: '11' })).toBe(null)
+  expect(gridOf({ ...measured, pad: { quote: 1 } })).toBe(null)
+  expect(gridOf({ ...measured, 'code-size': 'terminal' })).toBe(null)
 })
 
 test('pages are padded to whole rows, so rows round; a page keeps the box it was compiled for', () => {
