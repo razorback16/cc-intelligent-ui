@@ -567,6 +567,21 @@ test('a Markdown file Claude sends draws as pictures under the row, its images b
   expect(docs).toEqual([{ base: '/t/docs', segments: [text], images: ['pic.png', '/t/docs/pic.png'] }])
 })
 
+test("a Markdown file's links, files and commands draw under its pages; its relative paths start from its own folder", async ($, on) => {
+  const text = '# Notes\n\nSee `pic.png`, `gone.ts` and https://typst.app.\n\n```sh\nnpm test\n```'
+  const { clock } = world(on, { typst: true, files: { '/t/docs/pic.png': HEAD }, texts: { '/t/docs/notes.md': text } })
+  await ready($)
+  const ui = await $.ui.mount(sent(attachAll('/t/docs/notes.md')))
+  await clock.settle()
+  await ui.redraw(sent(attachAll('/t/docs/notes.md')).props)
+  const tree: any = await ui.drawn()
+  const all = (t: any, type: string): any[] =>
+    t && typeof t === 'object' ? [...(t.type === type ? [t] : []), ...(t.children ?? []).flatMap((c: any) => all(c, type))] : []
+  expect(all(tree, 'Link').map(l => l.props.href)).toEqual(['file:///t/docs/pic.png', 'https://typst.app'])
+  const [button] = all(tree, 'Button')
+  expect(button.props.key).toMatch(/^file0-link-[0-9a-f]{8}$/)
+})
+
 test('the same Markdown in two folders compiles twice; an answer still uses the session folder', async ($, on) => {
   const { clock, docs } = world(on, { typst: true, texts: { '/t/a/n.md': '# Same', '/t/b/n.md': '# Same' } })
   await ready($)

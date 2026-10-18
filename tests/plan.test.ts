@@ -264,6 +264,20 @@ test('the ExitPlanMode row draws the plan as pictures under the engine row, at a
   expect(texts(tree).join('\n')).not.toContain(PLAN_DRAWING)
 })
 
+test("the plan's links and commands draw under its pictures", async ($, on) => {
+  const { clock } = world($, on)
+  await ready($)
+  const plan = `${PLAN}\n\nRead https://typst.app/docs first.\n\n\`\`\`sh\nnpm test\n\`\`\``
+  const row = use({ input: { plan, planFilePath: FILE } })
+  const ui = await $.ui.mount(row)
+  await clock.settle()
+  await ui.redraw(row.props)
+  const tree: any = await ui.drawn()
+  expect(images(tree).length).toBe(1)
+  expect(texts(tree)).toContain('https://typst.app/docs')
+  expect((await ui.findAll({ type: 'Button' })).length).toBe(1)
+})
+
 test('a redraw of the plan row with a new onScreen draws the engine row again and compiles nothing', async ($, on) => {
   let rows = 0
   on('ui.render', { component: 'ToolUse' }, async ($: any, e: any, next: any) => (rows++, next(e)))

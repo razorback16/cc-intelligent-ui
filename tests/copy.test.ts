@@ -231,6 +231,18 @@ test("a sent file's pages have the rows of the pictures and files after it under
   expect(rowsAfter([pages, picture], 1, 50)).toBe(0)
 })
 
+test("a sent file's link rows are under its pages too, and under the pages of each file before it", () => {
+  const result = { pages: [{ file: '/a-1.png', width: 1600, height: 640, alt: '', columns: 100, rows: 20 }], bulletRow: 0 }
+  const links = [{ kind: 'web', label: 'x', href: 'https://x.org' }, { kind: 'command', label: 'ls', text: 'ls' }] as const
+  const linked = { id: 'file:t:a.md', drawing: { kind: 'pages', result }, links } as Under
+  const blank = { id: 'file:t:b.md', drawing: { kind: 'blank' }, links } as Under
+  // Its own 2 link rows; then the next file's 10 page rows and 2 link rows.
+  expect(rowsAfter([linked, linked], 0, 50)).toBe(2 + 10 + 2)
+  expect(rowsAfter([linked, linked], 1, 50)).toBe(2)
+  // A blank draws no link rows.
+  expect(rowsAfter([linked, blank], 0, 50)).toBe(2)
+})
+
 // ---- A real probe -----------------------------------------------------------
 
 const REAL = positionsOf(SMALL_MARKS as unknown as Mark[], SMALL_PPI)
@@ -481,6 +493,24 @@ test('a compile writes no probe file and runs no probe; a copy probes only its p
   expect(w.queries).toEqual([{ ...w.compiles[0], probe: '1', page: '1' }])
   // Nothing is written for it.
   expect(names(w.files)).toEqual(['doc.json', 'pages.json'])
+})
+
+test("an answer's link rows are under its pages: the page on screen is found above them", async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const long = Array.from({ length: 240 }, (_, i) => `Paragraph ${i} with a few words in it.`).join('\n\n')
+  const text = `${long}\n\nSee https://typst.app/docs.\n\n\`\`\`sh\nbrew install typst\n\`\`\``
+  const ui = await drawAnswer($, w, 'ans-1', text)
+  const pages = (JSON.parse(w.files.get([...w.files.keys()].find(k => k.endsWith('/doc.json'))!)!) as { segments: string[] }).segments.length
+  // 16 rows a page under the top margin, then 2 link rows: page 2 is rows 17 to 32.
+  const of = 1 + 16 * pages + 2
+  await ui.redraw({ ...props(text), onScreen: { first: 17, last: 32, of } })
+  await w.clock.settle()
+  w.copy([cells(2, 0, 97), cells(3, 0, 97)].join('\n'))
+  await w.clock.settle()
+  expect(w.queries.map(q => q.page)).toEqual(['2'])
+  const dumped = await $.command.run({ command: 'iui', args: 'dump' } as any)
+  expect(dumped.text).toContain(`-> answer ans-1 page 1 (rows 17-32 of ${of} on screen, page top 17)`)
 })
 
 test('a compile retried in safe mode gives the probe safe=1 (its page files say so)', async ($, on) => {

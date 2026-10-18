@@ -209,6 +209,9 @@ export const converted = new Map<string, string | null>()
 export const converting = new Map<string, Promise<string | null>>()
 export const lastConverted = new Map<string, { stamp: string; png: string }>()
 export const sentTexts = new Map<string, { stamp: string; text: string | null }>()
+// The link rows (draw.tsx): whether each absolute path is a file (at most
+// LINK_FILES_KEPT).
+export const linkFiles = new Map<string, boolean>()
 // The plan: the text edited in Intelligent UI's flow, by the call's tool_use_id
 // (its rows draw it), and the ExitPlanMode calls of subagents (drawn as the
 // engine draws them).

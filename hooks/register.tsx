@@ -32,7 +32,7 @@ import { commandSuggestions, parseCommand, registerCommand } from './lib/command
 import { runSetup } from './lib/setup'
 import { pollHost, PROBE_RUNS, probeOsc11, showMode, USE_OSC11, watchHost } from './lib/host'
 import { measureFonts } from './lib/typst'
-import { drawPages } from './lib/draw'
+import { drawPages, linksFor, type ShownLink } from './lib/draw'
 import { finalizeAll } from './lib/stream'
 import { noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf } from './lib/probe'
 import { codePointsOf, decodeSelection, hasPlaceholders, joinSegments, pageTopsOf, pickPages, textOfRun, type Pick, type Segment } from './lib/copy'
@@ -76,7 +76,9 @@ export { OSC11_PL, perlFor, WATCH_PL } from './lib/host'
 export {
   convertCall, isSafePage, measureCall, noNetworkEnv, pageRowsOf, parseOd, pngSize, probeCall, resultOf, roomInputs, shouldRetrySafe, typstCall, typstInputs,
 } from './lib/typst'
-export { alignFirstLine, firstLineOf, fontFit, hashOf, renderKey, scaledBulletRow, sizing, type FirstLine } from './lib/draw'
+export {
+  alignFirstLine, fileHref, firstLineOf, fontFit, hashOf, renderKey, resolveLinks, scaledBulletRow, sizing, type FirstLine, type ShownLink,
+} from './lib/draw'
 export { nextJob } from './lib/stream'
 export * from './lib/images'
 export * from './lib/copy'
@@ -134,8 +136,10 @@ const stampOf = (ready: { env: Env; done: number }, view?: RenderViewport) =>
 // `text` the row's text (a string kept as given, so the compare is mostly
 // one pointer), `extra` its other inputs.
 type Memo<T> = { text: string; extra: string; stamp: string; onScreen: boolean | undefined; value: T }
-const answers = new Map<string, Memo<RenderElement>>()
-const plans = new Map<string, Memo<Drawing>>()
+// An answer's tree is kept with its link rows' count (the copy counts them
+// under its pages), a plan's drawing with its link rows.
+const answers = new Map<string, Memo<{ tree: RenderElement; links: number }>>()
+const plans = new Map<string, Memo<{ drawing: Drawing; links: ShownLink[] }>>()
 const unders = new Map<string, Memo<Under[]>>()
 const pasted = new Map<string, Memo<Shown[]>>()
 
@@ -160,20 +164,24 @@ function memoSet<T>(memo: Map<string, Memo<T>>, id: string, k: MemoKey, value: T
   keep(memo, id, { ...k, value }, RESULTS_KEPT)
 }
 
-// A plan's drawing (both its rows: ToolUse and ToolResult), kept while it
-// is drawn pages (memoOf).
+// A plan's drawing (both its rows: ToolUse and ToolResult) and the link
+// rows under its pages, kept while it is drawn pages (memoOf).
 async function planDrawing(
   $: EngineInterface, e: { viewport?: RenderViewport; props: { onScreen?: unknown } }, toolUseId: string, plan: string, ready: { env: Env; done: number },
-): Promise<Drawing> {
+): Promise<{ drawing: Drawing; links: ShownLink[] }> {
   const id = `plan:${toolUseId}`
   const onScreen = onScreenOf(e.props.onScreen)
   const k = { text: plan, extra: '', stamp: stampOf(ready, e.viewport), onScreen }
   const kept = memoOf(plans, id, k)
   if (kept) return kept
   const drawing = await pagesOf($, { id, text: plan, frame: frameFor(e.viewport), env: ready.env, canStream: false, onScreen })
-  if (drawing.kind === 'pages') memoSet(plans, id, k, drawing)
-  else plans.delete(id)
-  return drawing
+  if (drawing.kind !== 'pages') {
+    plans.delete(id)
+    return { drawing, links: [] }
+  }
+  const drawn = { drawing, links: await linksFor($, plan, ready.env.cwd) }
+  memoSet(plans, id, k, drawn)
+  return drawn
 }
 
 // Intelligent UI's own plan question: only on the main loop of a session drawn
@@ -620,25 +628,25 @@ export const register: Register = on => {
     const onScreen = onScreenOf(e.props.onScreen)
     const k = { text: e.props.text, extra: bullet ? 'bullet' : '', stamp: stampOf(ready, e.viewport), onScreen }
     const kept = memoOf(answers, e.requestId, k)
-    // Its pages are under the top margin (drawPages); the rows on screen at
-    // each draw, a memo hit too.
-    const at = { top: MARGIN_TOP }
+    // Its pages are under the top margin (drawPages) with its link rows
+    // under them; the rows on screen at each draw, a memo hit too.
     if (kept) {
       noteCopy($, () => {
-        noteDrawnAgain(e.requestId, roomColumns(e.viewport), at)
+        noteDrawnAgain(e.requestId, roomColumns(e.viewport), { top: MARGIN_TOP, after: kept.links })
         noteOnScreen(e.requestId, e.props.onScreen)
       })
-      return kept
+      return kept.tree
     }
     const drawing = await pagesOf($, { id: e.requestId, text: e.props.text, frame: frameFor(e.viewport), env: ready.env, canStream: true, onScreen })
     if (drawing.kind === 'pages') {
-      const tree = drawPages($, e, drawing.result, drawing.bytes, { bullet })
+      const links = await linksFor($, e.props.text, ready.env.cwd)
+      const tree = drawPages($, e, drawing.result, drawing.bytes, { bullet, links })
       const { result } = drawing
       noteCopy($, () => {
-        noteDrawn(e.requestId, result, roomColumns(e.viewport), at)
+        noteDrawn(e.requestId, result, roomColumns(e.viewport), { top: MARGIN_TOP, after: links.length })
         noteOnScreen(e.requestId, e.props.onScreen)
       })
-      memoSet(answers, e.requestId, k, tree)
+      memoSet(answers, e.requestId, k, { tree, links: links.length })
       return tree
     }
     answers.delete(e.requestId)
@@ -755,19 +763,20 @@ export const register: Register = on => {
       const plan = planShownOf(editedPlans.get(e.props.tool_use_id), e.props.output, e.props.input)
       const ready = plan ? await answerEnv($, e) : null
       if (!ready) return row
-      const drawing = await planDrawing($, e, e.props.tool_use_id, plan, ready)
+      const { drawing, links } = await planDrawing($, e, e.props.tool_use_id, plan, ready)
       // Its pages can be copied as an answer's, by the call's id (the row's
       // requestId can be an answer's own). The engine's row is above them:
-      // their place is read from the bottom (pageTopsOf).
+      // their place is read from the bottom (pageTopsOf), under them its
+      // link rows.
       if (drawing.kind === 'pages') {
         const { result } = drawing
         const id = `plan:${e.props.tool_use_id}`
         noteCopy($, () => {
-          noteDrawn(id, result, roomColumns(e.viewport))
+          noteDrawn(id, result, roomColumns(e.viewport), { after: links.length })
           noteOnScreen(id, e.props.onScreen)
         })
       }
-      return drawPlanUse($, e, row, drawing)
+      return drawPlanUse($, e, row, drawing, links)
     } catch {
       return row
     }
@@ -783,7 +792,7 @@ export const register: Register = on => {
     try {
       const plan = planOf(e.props.output) ? planShownOf(editedPlans.get(e.props.tool_use_id), e.props.output, undefined) : ''
       const ready = plan ? await answerEnv($, e) : null
-      const drawing = ready ? await planDrawing($, e, e.props.tool_use_id, plan, ready) : null
+      const drawing = ready ? (await planDrawing($, e, e.props.tool_use_id, plan, ready)).drawing : null
       const filePath = (e.props.output as { filePath?: unknown }).filePath
       if (drawing && drawing.kind !== 'text') drawn = drawPlanResult($, e, typeof filePath === 'string' ? filePath : undefined)
     } catch {

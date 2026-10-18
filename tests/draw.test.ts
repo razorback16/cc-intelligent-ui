@@ -1,7 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import {
-  scaledBulletRow, base64Bytes, canDrawIn, COMMIT_MIN_MS, DEFAULT_CELL, fitsInline, INLINE_MAX_BYTES, INLINE_MAX_SIDE, inlineBudget, renderKey, RESIZE_QUIET_MS, SEGMENT_ROWS, WATCH_PL,
+  scaledBulletRow, base64Bytes, canDrawIn, COMMIT_MIN_MS, DEFAULT_CELL, fileHref, fitsInline, INLINE_MAX_BYTES, INLINE_MAX_SIDE, inlineBudget, renderKey,
+  RESIZE_QUIET_MS, resolveLinks, SEGMENT_ROWS, WATCH_PL,
 } from '../hooks/register'
 
 // ---- Where pictures draw ----------------------------------------------------
@@ -197,6 +198,8 @@ function world(on: any, vars: Record<string, string>, head = HEAD, stored: Recor
   })
   on('fs.exists', async ($: any, e: any, next: any) => {
     calls.push('fs.exists')
+    // The project's files (the link rows' paths): the ones written.
+    if (e.path.startsWith('/w/app/')) return { value: files.has(e.path) }
     return e.path.includes('/designs/') ? { value: design !== undefined || files.has(e.path) } : next(e)
   })
   on('fs.list', async ($: any, e: any, next: any) => {
@@ -207,9 +210,10 @@ function world(on: any, vars: Record<string, string>, head = HEAD, stored: Recor
     calls.push('fs.stat')
     return next(e)
   })
-  on('ui.toast', async () => ({ value: undefined }))
+  const toasts: string[] = []
+  on('ui.toast', async ($: any, e: any) => (toasts.push(String(e.text)), { value: undefined }))
   on('ui.render', () => ENGINE as any)
-  return { clock, reads, kept, compiles, files, hold, release, emit, sizeReads, kills, calls, logs }
+  return { clock, reads, kept, compiles, files, hold, release, emit, sizeReads, kills, calls, logs, toasts }
 }
 
 const ENGINE = { type: 'Text', props: {}, children: ['engine drawing'] }
@@ -715,4 +719,99 @@ test('a diagram with a kept design scales from it, and the design is not written
   expect(compiles[0]!['design-w']).toBe('500')
   expect(compiles[0]!['design-h']).toBe('200')
   expect([...files.keys()].filter(path => path.includes('/designs/'))).toEqual([])
+})
+
+// ---- Link rows --------------------------------------------------------------
+
+// The elements of a type in a drawn tree, outermost first.
+const all = (tree: any, type: string): any[] =>
+  tree && typeof tree === 'object' ? [...(tree.type === type ? [tree] : []), ...(tree.children ?? []).flatMap((c: any) => all(c, type))] : []
+const textOf = (tree: any): string => (typeof tree === 'string' ? tree : (tree?.children ?? []).map(textOf).join(''))
+
+test('a file path is made absolute and kept only when it is a file; ~/ is the home folder; the href is encoded', async () => {
+  const asked: string[] = []
+  const $ = { fs: { exists: async (path: string) => (asked.push(path), path !== '/w/app/gone.ts') } } as any
+  const items = [
+    { kind: 'web', label: 'Docs', href: 'https://typst.app/docs' },
+    { kind: 'file', label: 'src/a b.ts:42', path: 'src/a b.ts' },
+    { kind: 'file', label: 'gone.ts', path: 'gone.ts' },
+    { kind: 'file', label: '~/x#1.md', path: '~/x#1.md' },
+    { kind: 'file', label: '/abs/y.md', path: '/abs/y.md' },
+    { kind: 'command', label: 'npm test', text: 'npm test' },
+  ] as const
+  const shown = await resolveLinks($, items, '/w/app/', '/h')
+  expect(shown).toEqual([
+    items[0],
+    { kind: 'file', label: 'src/a b.ts:42', path: '/w/app/src/a b.ts', href: 'file:///w/app/src/a%20b.ts' },
+    { kind: 'file', label: '~/x#1.md', path: '/h/x#1.md', href: 'file:///h/x%231.md' },
+    { kind: 'file', label: '/abs/y.md', path: '/abs/y.md', href: 'file:///abs/y.md' },
+    items[5],
+  ])
+  // Each path is checked once.
+  await resolveLinks($, items, '/w/app', '/h')
+  expect(asked).toEqual(['/w/app/src/a b.ts', '/w/app/gone.ts', '/h/x#1.md', '/abs/y.md'])
+  expect(fileHref('/a/b?c.md')).toBe('file:///a/b%3Fc.md')
+})
+
+const LINKED = [
+  'See [Typst docs](https://typst.app/docs) and https://github.com/o/r/pull/42.',
+  '',
+  'The copy is in `hooks/lib/copy.ts:42`; `hooks/lib/gone.ts` is not.',
+  '',
+  '```bash',
+  '$ brew install typst',
+  '```',
+  '',
+  '```sh',
+  'npm test',
+  'npm run lint',
+  '```',
+].join('\n')
+
+test('an answer draws its links, files and commands under its pages, one dim row each; a press copies the command', async ($, on) => {
+  const { clock, files, toasts } = world(on, { TERM: 'xterm-kitty' })
+  files.set('/w/app/hooks/lib/copy.ts', '')
+  on('session.cwd', async () => ({ value: '/w/app' }))
+  const copies: string[] = []
+  on('ui.copy', async ($: any, e: any) => (copies.push(`${e.surface}:${e.text}`), { value: { isCopied: true } }))
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await $.ui.mount(message('links-1', LINKED))
+  await clock.settle()
+  await ui.redraw(props(LINKED))
+  const tree: any = await ui.drawn()
+  // The column of the pages: the page, then one row per item.
+  const column = tree.children.at(-1)
+  expect(column.children.length).toBe(images(tree).length + 5)
+  const rows = column.children.slice(images(tree).length)
+  expect(rows.map(textOf)).toEqual([
+    '↗ Typst docs  https://typst.app/docs',
+    '↗ https://github.com/o/r/pull/42',
+    '↗ hooks/lib/copy.ts:42',
+    '$ brew install typst',
+    '$ npm test (+1 line)',
+  ])
+  for (const row of rows.slice(0, 3)) expect(row.props).toMatchObject({ dimColor: true, wrap: 'truncate-end' })
+  expect(all(tree, 'Link').map(l => l.props.href)).toEqual(['https://typst.app/docs', 'https://github.com/o/r/pull/42', 'file:///w/app/hooks/lib/copy.ts'])
+  const buttons = all(tree, 'Button')
+  expect(buttons.length).toBe(2)
+  for (const b of buttons) expect(b.props).toMatchObject({ plain: true, dimColor: true })
+  expect(buttons[0].props.key).toMatch(/^link-[0-9a-f]{8}$/)
+  // A command row is one row: a Box one row high, its text cut at the end.
+  expect(rows[4].props).toMatchObject({ height: 1, overflow: 'hidden' })
+  expect(all(rows[4], 'Text')[0].props).toMatchObject({ wrap: 'truncate-end' })
+  await ui.press({ key: buttons[1].props.key })
+  expect(copies).toEqual(['terminal:npm test\nnpm run lint'])
+  expect(toasts).toContain('Copied')
+})
+
+test('an answer with no links draws as before: no row under its pages', async ($, on) => {
+  const { clock } = world(on, { TERM: 'xterm-kitty' })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await $.ui.mount(message('links-2', 'Some **bold** text.'))
+  await clock.settle()
+  await ui.redraw(props('Some **bold** text.'))
+  const tree: any = await ui.drawn()
+  expect(tree.children.at(-1).children.length).toBe(1)
+  expect(all(tree, 'Link')).toEqual([])
+  expect(all(tree, 'Button')).toEqual([])
 })

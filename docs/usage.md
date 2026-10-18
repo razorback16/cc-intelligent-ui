@@ -51,6 +51,23 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
 | `/iui dump` | Shows the last clipboard text with picture cells and how the mod read it (for a bug report). It also writes this to `copy-debug.json` in the cache folder. |
 | `/iui probe` | Asks the terminal for its background colour with OSC 11 and shows the raw answers. Refer to [How `auto` is resolved](how-it-works.md#how-auto-is-resolved). |
 
+## Links, file paths and commands
+
+A picture has no text for the terminal, so a click on a link in the picture does not open it. Thus the mod shows the links, file paths and commands of an answer, a plan or a Markdown file that Claude sent in dim rows under its picture. These rows show only when the text has links, file paths or commands. Each item uses one row:
+
+```
+↗ Typst docs  https://typst.app/docs
+↗ https://github.com/o/r/pull/42
+↗ hooks/lib/copy.ts:42
+$ brew install typst
+```
+
+- **A web link** (`http:`, `https:` or `mailto:`): the link text, then the URL. If the link text is the URL, the URL shows one time. A cmd+click on the link (or the click that your terminal uses for links) opens it.
+- **A file path**, for example `hooks/lib/copy.ts:42`: a cmd+click opens the file. A relative path starts from the session's folder (for a Markdown file that Claude sent, from the folder of that file). A row shows only when the file exists.
+- **A command** from a `bash`, `sh`, `zsh`, `shell`, `console` or `shell-session` code block, or from inline code that starts with `! `: a click on the row copies the full command, and a toast shows "Copied". A command with more lines shows its first line and the number of the other lines. The click works only where Claude Code gets mouse clicks (fullscreen mode).
+
+The mod does not take web links from code blocks, inline code or math. It takes file paths from the text and from inline code, but not from code blocks.
+
 ## Copy text from a picture
 
 Select the text in a picture (an answer, a plan or a Markdown file that Claude sent) with the mouse, as you do with normal text. The selection puts picture cells on the clipboard. On macOS, while the mod is on and has drawn a picture in this session, the mod sees each change of the clipboard (in 0.3 s or less). When the clipboard has picture cells, the mod puts the text under your selection on the clipboard, and a toast shows the number of characters. Wait for this toast, then paste. In fullscreen mode, if this session has a selection, the mod changes the clipboard only when the clipboard holds that selection. Thus a copy from a different Claude Code session usually stays as it is. The mod does not change a clipboard that has no picture cells.

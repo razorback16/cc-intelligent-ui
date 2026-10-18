@@ -14,7 +14,7 @@ import { GUTTER, bulletOf } from './settings'
 import { S, writesLive } from './state'
 import { firstLine } from './markdown'
 import type { Drawing } from './answer'
-import { drawPages } from './draw'
+import { drawPages, type ShownLink } from './draw'
 import { clockAfter, commandRun, fsRead, processRun, promptSubmit, turnAbort, uiAsk, uiResolve } from './api'
 
 // The question's chip and its two wordings.
@@ -241,16 +241,17 @@ export function scheduleClear($: EngineInterface, plan: string, turnId: string) 
 
 type Terminal = ResolveInput<RenderComponent, 'terminal'> & { viewport?: RenderViewport }
 
-// The ExitPlanMode ToolUse row: the engine's row, then the plan's pages (a
-// dim line while they compile; the engine's row alone when they fail).
-export function drawPlanUse($: EngineInterface, e: Terminal, row: RenderElement, drawing: Drawing): RenderElement {
+// The ExitPlanMode ToolUse row: the engine's row, then the plan's pages and
+// their link rows (a dim line while they compile; the engine's row alone
+// when they fail).
+export function drawPlanUse($: EngineInterface, e: Terminal, row: RenderElement, drawing: Drawing, links: readonly ShownLink[] = []): RenderElement {
   if (drawing.kind === 'text') return row
   const { Box, Text } = uiResolve($, e)
   return (
     <Box flexDirection="column">
       {row}
       {drawing.kind === 'pages' ? (
-        drawPages($, e, drawing.result, drawing.bytes, { bullet: true })
+        drawPages($, e, drawing.result, drawing.bytes, { bullet: true, links })
       ) : (
         <Box marginTop={1} marginLeft={GUTTER}>
           <Text dimColor>{PLAN_DRAWING}</Text>

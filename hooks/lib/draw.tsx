@@ -1,14 +1,16 @@
 // The pictures of an answer: the key of its inputs, the page width and ppi
 // that match the terminal's text, where its first line sits, and the
-// drawing of its pages beside the reply bullet.
-import type { EngineInterface, RenderComponent, RenderViewport, ResolveInput } from 'claude-code'
+// drawing of its pages beside the reply bullet, with the rows of its links
+// under them.
+import type { EngineInterface, RenderComponent, RenderSurface, RenderViewport, ResolveInput } from 'claude-code'
 
 import type { IuiTheme } from '../../types'
-import { BODY_PT, bulletOf, GUTTER, MARGIN_TOP, TEMPLATE_VERSION } from './settings'
-import { INLINE_KEPT, inlined, S, type Cell, type Look, type Metrics, type Result, type Room } from './state'
-import { FENCE } from './markdown'
+import { BODY_PT, bulletOf, GUTTER, LINK_FILES_KEPT, MARGIN_TOP, TEMPLATE_VERSION } from './settings'
+import { INLINE_KEPT, inlined, keep, linkFiles, S, type Cell, type Look, type Metrics, type Result, type Room } from './state'
+import { FENCE, imagePathOf } from './markdown'
+import { linksOf, type LinkItem } from './links'
 import { fitBox, fitsInline, roomColumns } from './terminal'
-import { fsRead, uiResolve } from './api'
+import { fsExists, fsRead, uiCopy, uiResolve, uiToast } from './api'
 
 // FNV-1a over the parts, twice with different offsets: 16 hex digits.
 export function hashOf(parts: readonly (string | number)[]): string {
@@ -144,8 +146,9 @@ export async function inlineOf($: EngineInterface, result: Result): Promise<stri
 
 // How a set of pages sits: `bullet` the reply bullet in the gutter (on the
 // first line's row), `gutter` its width (0: none), `marginTop` the rows above,
-// `keys` a prefix for its Images' keys (several sets in one tree).
-export type PagesLayout = { bullet?: boolean; gutter?: number; marginTop?: number; keys?: string }
+// `keys` a prefix for its Images' and Buttons' keys (several sets in one
+// tree), `links` the link rows under the pages (one row each).
+export type PagesLayout = { bullet?: boolean; gutter?: number; marginTop?: number; keys?: string; links?: readonly ShownLink[] }
 
 // The bullet's row when the page is drawn `factor` as wide.
 export function scaledBulletRow(bulletRow: number, factor: number): number {
@@ -187,7 +190,83 @@ export function drawPages(
           )
         })}
         {result.note ? <Text dimColor wrap="truncate-end">Typst error: {result.note}</Text> : null}
+        {layout.links?.length ? drawLinks($, e, layout.links, layout.keys ?? '') : null}
       </Box>
     </Box>
   )
+}
+
+// ---- Links ------------------------------------------------------------------
+// A click on a picture cannot open a link (an Image is a leaf: no Link holds
+// it, and a press on it gives no cell). So the links, file paths and commands
+// of a text are drawn under its pages, one row each.
+
+// A link row: a web link, a file found (`path` its absolute path, `href` its
+// file:// URL), or a command.
+export type ShownLink = Exclude<LinkItem, { kind: 'file' }> | { kind: 'file'; label: string; path: string; href: string }
+
+// The file:// URL of an absolute path, percent-encoded (`#` and `?` too).
+export const fileHref = (path: string) => `file://${encodeURI(path).replace(/[?#]/g, encodeURIComponent)}`
+
+// The items as link rows: each file path made absolute from `base` (the
+// folder relative paths start from; `~/` is the home folder) and kept only
+// when it is a file now (each path checked once: linkFiles).
+export async function resolveLinks($: EngineInterface, items: readonly LinkItem[], base: string, home = S.env?.home ?? ''): Promise<ShownLink[]> {
+  const shown: ShownLink[] = []
+  for (const item of items) {
+    if (item.kind !== 'file') {
+      shown.push(item)
+      continue
+    }
+    const path = home && item.path.startsWith('~/') ? `${home.replace(/\/+$/, '')}${item.path.slice(1)}` : imagePathOf(item.path, base)
+    let isFile = linkFiles.get(path)
+    if (isFile === undefined) {
+      isFile = await fsExists($, path).catch(() => false)
+      keep(linkFiles, path, isFile, LINK_FILES_KEPT)
+    }
+    if (isFile) shown.push({ kind: 'file', label: item.label, path, href: fileHref(path) })
+  }
+  return shown
+}
+
+// The link rows of a Markdown text (`base` as resolveLinks); none when it
+// cannot be read for them.
+export async function linksFor($: EngineInterface, text: string, base: string): Promise<ShownLink[]> {
+  try {
+    return await resolveLinks($, linksOf(text), base)
+  } catch {
+    return []
+  }
+}
+
+// Copies a command at a press of its row, with a toast.
+async function copyCommand($: EngineInterface, text: string, surface: RenderSurface) {
+  const copied = await uiCopy($, { text, surface }).catch(() => null)
+  uiToast($, copied?.isCopied ? 'Copied' : `Could not copy${copied ? `: ${copied.reason}` : ''}`)
+}
+
+// One row per link, all dim and cut at the row's end (the copy counts them
+// as one row each): a web link (its URL after it when the label is not the
+// URL), a file, or a command as a Button that copies it.
+export function drawLinks($: EngineInterface, e: ResolveInput<RenderComponent, 'terminal'>, links: readonly ShownLink[], keys: string) {
+  const { Box, Text, Link, Button } = uiResolve($, e)
+  return links.map(link => {
+    if (link.kind === 'command') {
+      const { text } = link
+      return (
+        <Box height={1} overflow="hidden">
+          <Button key={`${keys}link-${hashOf([text]).slice(0, 8)}`} plain dimColor onPress={press => void copyCommand($, text, press.surface)}>
+            <Text wrap="truncate-end">$ {link.label}</Text>
+          </Button>
+        </Box>
+      )
+    }
+    const href = link.href
+    return (
+      <Text dimColor wrap="truncate-end">
+        ↗ <Link href={href}>{link.label}</Link>
+        {link.kind === 'web' && link.label !== href ? `  ${href}` : null}
+      </Text>
+    )
+  })
 }

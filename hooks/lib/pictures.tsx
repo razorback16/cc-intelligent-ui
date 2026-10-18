@@ -10,7 +10,7 @@ import { jobDone } from './epoch'
 import { fitBox, fitsInline, INLINE_MAX_BYTES, roomColumns } from './terminal'
 import { convertBox, convertedPath, folderOf, onScreenOf, pasteDirOf, pictureCells, pictureRowsFor, type PixelBox, type SentFile } from './images'
 import { imagePathOf } from './markdown'
-import { drawPages, hashOf } from './draw'
+import { drawPages, hashOf, linksFor, type ShownLink } from './draw'
 import { convertCall, logDebug, parseOd, pngSize } from './typst'
 import { pagesOf, type Drawing } from './answer'
 import { HEADERS_SH } from './host'
@@ -21,8 +21,9 @@ export type Picture = { file: string; stamp: string; bytes: number; width: numbe
 export type Shown = { source: ImageSource; columns: number; rows: number; alt: string }
 // What draws under a SendUserFile row: a picture, or a Markdown file's
 // pages (`blank`: an empty space while they compile; an older, wider page
-// draws smaller to fit) with its pagesOf id (a copy reads them by it).
-export type Under = Shown | { drawing: Exclude<Drawing, { kind: 'text' }>; id: string }
+// draws smaller to fit) with its pagesOf id (a copy reads them by it) and
+// the link rows under its pages (none while blank).
+export type Under = Shown | { drawing: Exclude<Drawing, { kind: 'text' }>; id: string; links?: readonly ShownLink[] }
 export type RowInput = RenderInput<'ToolResult' | 'UserMessage', 'terminal'>
 
 // Where a stat is read: the `done` value the row read and the row's
@@ -231,7 +232,8 @@ export async function sentOf(
         id, text, frame: frameFor(e.viewport), env: o.markdown, canStream: false, base: folderOf(full),
         onScreen: onScreenOf(e.props.onScreen),
       })
-      if (drawing.kind !== 'text') under.push({ drawing, id })
+      if (drawing.kind === 'pages') under.push({ drawing, id, links: await linksFor($, text, folderOf(full)) })
+      else if (drawing.kind !== 'text') under.push({ drawing, id })
       continue
     }
     if (f.kind !== 'png' && next && (next.width !== box.width || next.height !== box.height)) {
@@ -251,17 +253,22 @@ export async function sentOf(
 const boxOf = (frame: Frame, inline: boolean, height: Height): PixelBox =>
   convertBox(pictureColumns(frame, inline), pictureRowsFor(frame.rows, height), frame.cell)
 
-// The rows underRow draws after `under[i]`: a picture its rows, a Markdown
-// file its pages at their drawn box (fitBox in `room`, as drawPages) and a
-// Typst error line, a blank none.
+// The rows underRow draws under the pages of `under[i]` besides its Typst
+// error line: its link rows, then all after it (a picture its rows, a
+// Markdown file its pages at their drawn box (fitBox in `room`, as
+// drawPages), a Typst error line and its link rows, a blank none).
 export function rowsAfter(under: readonly Under[], i: number, room: number): number {
-  return under.slice(i + 1).reduce((sum, u) => {
+  const own = under[i]
+  return linkRows(own) + under.slice(i + 1).reduce((sum, u) => {
     if ('source' in u) return sum + u.rows
     if (u.drawing.kind !== 'pages') return sum
     const { pages, note } = u.drawing.result
-    return sum + pages.reduce((n, p) => n + fitBox(p, room).rows, 0) + (note ? 1 : 0)
+    return sum + pages.reduce((n, p) => n + fitBox(p, room).rows, 0) + (note ? 1 : 0) + linkRows(u)
   }, 0)
 }
+
+// The link rows drawn under a Markdown file's pages (one row each).
+const linkRows = (u: Under | undefined) => (u && 'drawing' in u && u.drawing.kind === 'pages' ? (u.links?.length ?? 0) : 0)
 
 // The engine's row, then the pictures under it.
 export function underRow($: EngineInterface, e: RowInput, row: RenderElement, under: readonly Under[]) {
@@ -276,7 +283,7 @@ export function underRow($: EngineInterface, e: RowInput, row: RenderElement, un
           if (drawing.kind === 'blank') return <Box key={`blank-${i}`} />
           return (
             <Box key={`pages-${i}`} flexDirection="column">
-              {drawPages($, e, drawing.result, drawing.bytes, { gutter: 0, marginTop: 0, keys: `file${i}-` })}
+              {drawPages($, e, drawing.result, drawing.bytes, { gutter: 0, marginTop: 0, keys: `file${i}-`, links: s.links })}
             </Box>
           )
         })}

@@ -44,6 +44,7 @@ In other terminals, the mod shows the normal text. Refer to [Install](docs/insta
 - **Live diagrams, charts and plots.** Claude writes Typst with CeTZ, cetz-plot and fletcher. The drawings use your theme's colours and work offline.
 - **Images and files.** Images in an answer, images that Claude sends, Markdown files that Claude sends, and images that you paste show in the transcript.
 - **Copy text from pictures.** Select and copy text with the mouse, as you do with normal text.
+- **Links you can click.** The links, file paths and commands of an answer show in rows under its picture. A cmd+click on a link opens it. A click on a command copies it.
 - **Plans you can read.** In plan mode, the plan shows rendered, with an approve, edit or reject question under it.
 - **Themes that follow light and dark.** Claude Code's own colours by default, or VS Code's Markdown preview. You can make your own.
 

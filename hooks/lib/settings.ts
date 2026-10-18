@@ -101,6 +101,9 @@ export const heightText = (height: Height) =>
   : height === 'full' ? `full (the terminal height less ${PICTURE_ROOM_ROWS} rows)`
   : `${height} rows`
 export const PICTURES_KEPT = 64
+// The file paths of the link rows under a picture: whether each one is a
+// file, kept for this many paths (the oldest go).
+export const LINK_FILES_KEPT = 512
 // The compile results kept in memory (an LRU); the oldest go past this.
 export const RESULTS_KEPT = 1024
 // A resize or a font size change is settled when no new tty line and no
