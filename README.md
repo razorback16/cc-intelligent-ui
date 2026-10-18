@@ -33,7 +33,8 @@ You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15 and macOS
 | Rio 0.5.27+ | Yes (not tested) | Set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` |
 | ssh | Yes, from kitty or Ghostty | Refer to [Install](docs/install.md#terminals) |
 | tmux, screen | No | — |
-| WezTerm, Warp, Konsole, Terminal.app, Alacritty, VS Code, Windows Terminal, GNOME Terminal, others | No | — |
+| Warp | Not yet | Support comes when [warpdotdev/warp#16312](https://github.com/warpdotdev/warp/pull/16312) is merged |
+| WezTerm, Konsole, Terminal.app, Alacritty, VS Code, Windows Terminal, GNOME Terminal, others | No | — |
 
 In other terminals, the mod shows the normal text. Refer to [Install](docs/install.md#terminals) for all the details, and run `/iui details` to see why pictures do or do not show.
 
