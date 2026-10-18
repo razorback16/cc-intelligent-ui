@@ -8,6 +8,7 @@ import { BODY_PT, bulletOf, GUTTER, MARGIN_TOP, TEMPLATE_VERSION } from './setti
 import { INLINE_KEPT, inlined, S, type Cell, type Look, type Metrics, type Result, type Room } from './state'
 import { FENCE } from './markdown'
 import { fitBox, fitsInline, roomColumns } from './terminal'
+import { fsRead, uiResolve } from './api'
 
 // FNV-1a over the parts, twice with different offsets: 16 hex digits.
 export function hashOf(parts: readonly (string | number)[]): string {
@@ -123,7 +124,7 @@ export async function inlineOf($: EngineInterface, result: Result): Promise<stri
   for (const page of result.pages) {
     if (!fitsInline(page)) return null
     if (!inlined.has(page.file)) {
-      const got = await $.fs.read(page.file, { as: 'bytes' }).catch(() => null)
+      const got = await fsRead($, page.file, { as: 'bytes' }).catch(() => null)
       const base64 = got && fitsInline(page, got.base64) ? got.base64 : null
       if (got) inlined.set(page.file, base64)
       for (const old of inlined.keys()) {
@@ -159,7 +160,7 @@ export function scaledBulletRow(bulletRow: number, factor: number): number {
 export function drawPages(
   $: EngineInterface, e: ResolveInput<RenderComponent, 'terminal'> & { viewport?: RenderViewport }, result: Result, inline?: readonly string[], layout: PagesLayout = {},
 ) {
-  const { Box, Text, Image } = $.ui.resolve(e)
+  const { Box, Text, Image } = uiResolve($, e)
   const gutter = layout.gutter ?? GUTTER
   const room = roomColumns(e.viewport)
   const first = result.pages[0]

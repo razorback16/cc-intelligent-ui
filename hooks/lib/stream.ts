@@ -11,6 +11,7 @@ import { hashOf } from './draw'
 import { noteDesign, recordDesign } from './designs'
 import { compile, logDebug } from './typst'
 import { extendEpoch, jobDone, jobQueued } from './epoch'
+import { clockAfter } from './api'
 
 // The order of enqueue calls: a higher `order` is newer.
 let enqueued = 0
@@ -106,7 +107,7 @@ export function waitBlank($: EngineInterface, requestId: string, textHash: strin
   if (pending.get(requestId)?.textHash === textHash) return
   pending.get(requestId)?.timer.cancel()
   const entry = { textHash, showText: false, timer: { cancel: () => {} } }
-  entry.timer = $.clock.after(ms, () => {
+  entry.timer = clockAfter($, ms, () => {
     entry.showText = true
     refresh($)
   })

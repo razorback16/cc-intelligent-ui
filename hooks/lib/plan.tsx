@@ -15,6 +15,7 @@ import { S, writesLive } from './state'
 import { firstLine } from './markdown'
 import type { Drawing } from './answer'
 import { drawPages } from './draw'
+import { clockAfter, commandRun, fsRead, processRun, promptSubmit, turnAbort, uiAsk, uiResolve } from './api'
 
 // The question's chip and its two wordings.
 export const PLAN_HEADER = 'Plan'
@@ -160,7 +161,7 @@ async function findCode($: EngineInterface): Promise<string> {
   if (S.planCode !== null) return S.planCode
   let found = ''
   for (const flag of ['-lc', '-c']) {
-    const got = await $.process.run(['sh', flag, 'command -v code'], { timeoutMs: 5000 }).catch(() => null)
+    const got = await processRun($, ['sh', flag, 'command -v code'], { timeoutMs: 5000 }).catch(() => null)
     const path = got?.exitCode === 0 ? firstLine(got.stdout) : ''
     if (path.startsWith('/')) {
       found = path
@@ -193,7 +194,7 @@ export async function decidePlan(
     let answer: string
     S.planAsking = question
     try {
-      answer = await $.ui.ask(question, { header: PLAN_HEADER, options: planOptions(canEdit) })
+      answer = await uiAsk($, question, { header: PLAN_HEADER, options: planOptions(canEdit) })
     } catch {
       return { kind: 'verdict', verdict: { kind: 'deny', message: PLAN_REJECTED } }
     } finally {
@@ -202,8 +203,8 @@ export async function decidePlan(
     const choice = choiceOf(answer, canEdit)
     if (choice.kind === 'feedback') return { kind: 'feedback', message: feedbackOf(choice.text) }
     if (choice.kind !== 'edit') return { kind: 'verdict', verdict: verdictOf(choice, plan, plan !== o.callPlan)! }
-    await $.process.run(argv!, { timeoutMs: EDIT_TIMEOUT_MS }).catch(() => null)
-    const text = await $.fs.read(o.file).catch(() => null)
+    await processRun($, argv!, { timeoutMs: EDIT_TIMEOUT_MS }).catch(() => null)
+    const text = await fsRead($, o.file).catch(() => null)
     if (typeof text === 'string' && text.trim() && text !== plan) {
       plan = text
       isEdited = text !== o.plan
@@ -219,9 +220,9 @@ export async function decidePlan(
 export async function currentPlan($: EngineInterface, file: string, fallback: string): Promise<string> {
   if (!file) return fallback
   for (let waited = 0; (writesLive.get(file) ?? 0) > 0 && waited < PLAN_WRITE_WAIT_MS; waited += PLAN_WRITE_POLL_MS) {
-    await new Promise<void>(resolve => $.clock.after(PLAN_WRITE_POLL_MS, resolve))
+    await new Promise<void>(resolve => clockAfter($, PLAN_WRITE_POLL_MS, resolve))
   }
-  const text = await $.fs.read(file).catch(() => null)
+  const text = await fsRead($, file).catch(() => null)
   return typeof text === 'string' && text.trim() ? text : fallback
 }
 
@@ -229,10 +230,10 @@ export async function currentPlan($: EngineInterface, file: string, fallback: st
 // /clear and sends the plan as the new context's first prompt. Detached, as
 // `$.command.run` rejects inside a hook the turn waits on.
 export function scheduleClear($: EngineInterface, plan: string, turnId: string) {
-  $.clock.after(CLEAR_DELAY_MS, async () => {
-    if (turnId) await $.turn.abort({ turnId }).catch(() => undefined)
-    await $.command.run({ command: 'clear' }).catch(() => undefined)
-    await $.prompt.submit({ text: `${PLAN_IMPLEMENT}\n\n${plan}`, asUser: true }).catch(() => undefined)
+  clockAfter($, CLEAR_DELAY_MS, async () => {
+    if (turnId) await turnAbort($, { turnId }).catch(() => undefined)
+    await commandRun($, { command: 'clear' }).catch(() => undefined)
+    await promptSubmit($, { text: `${PLAN_IMPLEMENT}\n\n${plan}`, asUser: true }).catch(() => undefined)
   })
 }
 
@@ -244,7 +245,7 @@ type Terminal = ResolveInput<RenderComponent, 'terminal'> & { viewport?: RenderV
 // dim line while they compile; the engine's row alone when they fail).
 export function drawPlanUse($: EngineInterface, e: Terminal, row: RenderElement, drawing: Drawing): RenderElement {
   if (drawing.kind === 'text') return row
-  const { Box, Text } = $.ui.resolve(e)
+  const { Box, Text } = uiResolve($, e)
   return (
     <Box flexDirection="column">
       {row}
@@ -262,7 +263,7 @@ export function drawPlanUse($: EngineInterface, e: Terminal, row: RenderElement,
 // The approved plan's result row without the plan (the ToolUse row above
 // draws it): the engine's header and the plan file's path.
 export function drawPlanResult($: EngineInterface, e: Terminal, filePath?: string): RenderElement {
-  const { Box, Text } = $.ui.resolve(e)
+  const { Box, Text } = uiResolve($, e)
   const saved = filePath ? shortPath(filePath, S.env?.home ?? '') : ''
   return (
     <Box flexDirection="column" marginTop={1}>
@@ -283,7 +284,7 @@ export function drawPlanResult($: EngineInterface, e: Terminal, filePath?: strin
 
 // The line Intelligent UI adds above its own question.
 export function drawAskLine($: EngineInterface, e: ResolveInput<'AskUserQuestion', 'terminal'>, dialog: RenderElement): RenderElement {
-  const { Box, Text } = $.ui.resolve(e)
+  const { Box, Text } = uiResolve($, e)
   return (
     <Box flexDirection="column">
       <Text dimColor wrap="truncate-end">{PLAN_ASK_LINE}</Text>

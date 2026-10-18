@@ -9,6 +9,7 @@ import type { EngineInterface } from 'claude-code'
 import { COMMIT_MAX_MS, COMMIT_MIN_MS } from './settings'
 import { converting, epochOpen, queue, refresh, running, S, type Frame, type Job } from './state'
 import { traceDebug } from './log'
+import { clockAfter } from './api'
 
 // The open epoch: `ready` once COMMIT_MIN_MS passed with no new activity
 // (a row drawn, a job enqueued: extendEpoch), `overdue` once COMMIT_MAX_MS
@@ -46,7 +47,7 @@ export function beginEpoch($: EngineInterface, frame?: Frame | null) {
   ready = false
   overdue = false
   maxTimer?.cancel()
-  maxTimer = $.clock.after(COMMIT_MAX_MS, () => {
+  maxTimer = clockAfter($, COMMIT_MAX_MS, () => {
     if (S.epoch !== epoch) return
     overdue = true
     maybeCommit($)
@@ -72,7 +73,7 @@ export function jobQueued(job: Job) {
 function armReady($: EngineInterface) {
   const epoch = S.epoch
   minTimer?.cancel()
-  minTimer = $.clock.after(COMMIT_MIN_MS, () => {
+  minTimer = clockAfter($, COMMIT_MIN_MS, () => {
     if (S.epoch !== epoch) return
     ready = true
     maybeCommit($)

@@ -4,6 +4,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { S } from './state'
 import { readText } from './host'
+import { envGet, fsWrite, processRun, storeGet, storeSet, uiAsk, uiLog, uiToast } from './api'
 
 // Claude Code turns pictures on by itself in kitty and Ghostty only; iTerm2
 // needs CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 when Claude Code starts (a mod's
@@ -58,10 +59,10 @@ export function withSetup(text: string, kind: ShellRc['kind']): string {
 // The shell start file for this user, or null when the shell is not known.
 async function shellRc($: EngineInterface): Promise<ShellRc | null> {
   return shellRcOf({
-    shell: (await $.env.get('SHELL')) ?? '',
-    home: (await $.env.get('HOME')) ?? '',
-    zdotdir: (await $.env.get('ZDOTDIR')) || undefined,
-    xdgConfig: (await $.env.get('XDG_CONFIG_HOME')) || undefined,
+    shell: (await envGet($, 'SHELL')) ?? '',
+    home: (await envGet($, 'HOME')) ?? '',
+    zdotdir: (await envGet($, 'ZDOTDIR')) || undefined,
+    xdgConfig: (await envGet($, 'XDG_CONFIG_HOME')) || undefined,
     isMac: S.hostOs === 'Darwin',
   })
 }
@@ -75,12 +76,12 @@ export async function runSetup($: EngineInterface, remove: boolean): Promise<str
   const restart = 'Close this tab, open a new iTerm2 tab, and start Claude Code there to see pictures.'
   if (remove) {
     if (!hasSetup(text)) return `${rc.path} has no Intelligent UI block.`
-    await $.fs.write(rc.path, withoutSetup(text))
+    await fsWrite($, rc.path, withoutSetup(text))
     return `Removed the Intelligent UI block from ${rc.path}. New iTerm2 tabs show answers as text.`
   }
   if (hasSetup(text)) return `${rc.path} already has the Intelligent UI block. ${restart}`
-  if (rc.kind === 'fish') await $.process.run(['mkdir', '-p', rc.path.replace(/\/[^/]*$/, '')]).catch(() => null)
-  await $.fs.write(rc.path, withSetup(text, rc.kind))
+  if (rc.kind === 'fish') await processRun($, ['mkdir', '-p', rc.path.replace(/\/[^/]*$/, '')]).catch(() => null)
+  await fsWrite($, rc.path, withSetup(text, rc.kind))
   return `Added the Intelligent UI block to ${rc.path}. ${restart} Undo with /iui setup remove.`
 }
 
@@ -88,22 +89,22 @@ export async function runSetup($: EngineInterface, remove: boolean): Promise<str
 export async function offerSetup($: EngineInterface) {
   if (S.setupAsked) return
   S.setupAsked = true
-  if ((await $.store.get('setup').catch(() => undefined)) === 'never') return
+  if ((await storeGet($, 'setup').catch(() => undefined)) === 'never') return
   const rc = await shellRc($)
   if (rc && hasSetup((await readText($, rc.path)) ?? '')) return
-  const file = rc ? rc.path.replace((await $.env.get('HOME')) ?? '\u0000', '~') : "your shell's start file"
-  const answer = await $.ui.ask(
+  const file = rc ? rc.path.replace((await envGet($, 'HOME')) ?? '\u0000', '~') : "your shell's start file"
+  const answer = await uiAsk($, 
     `Intelligent UI draws answers as pictures, but in iTerm2 Claude Code needs CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 when it starts. Add one line to ${file} that sets it in iTerm2 only (not in tmux or screen)?`,
     { header: 'iui', options: ['Add the line', 'Not now', 'Never ask'] },
   )
-  if (answer === 'Never ask') await $.store.set('setup', 'never')
+  if (answer === 'Never ask') await storeSet($, 'setup', 'never')
   if (answer !== 'Add the line') return
   const said = await runSetup($, false)
   // The toast box is small: a short line there, the whole text in the transcript.
   try {
-    $.ui.log(said)
+    uiLog($, said)
   } catch {}
   try {
-    $.ui.toast(said.startsWith('Added') ? 'Close this tab and open a new iTerm2 tab to see pictures.' : 'See the transcript for the setup.', { timeoutMs: 10000 })
+    uiToast($, said.startsWith('Added') ? 'Close this tab and open a new iTerm2 tab to see pictures.' : 'See the transcript for the setup.', { timeoutMs: 10000 })
   } catch {}
 }

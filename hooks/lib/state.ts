@@ -9,6 +9,7 @@ import type { HostMode, ThemeSetting } from './mode'
 import type { PlanVerdict } from './plan'
 import type { Drawn } from './copy'
 import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } from './settings'
+import { uiInvalidate } from './api'
 
 // The `done` atom (see types/index.d.ts) for refresh. The state scan of
 // `claude plugin validate` reads an atom only from a const in the file that
@@ -255,5 +256,5 @@ export function keep<T>(cache: Map<string, T>, key: string, value: T, max: numbe
 
 // Redraws every reader of `done`; an invalidate where the write is refused.
 export function refresh($: EngineInterface) {
-  void update($, done, n => n + 1).catch(() => $.ui.invalidate('ui.render'))
+  void update($, done, n => n + 1).catch(() => uiInvalidate($, 'ui.render'))
 }

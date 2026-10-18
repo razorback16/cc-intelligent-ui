@@ -7,6 +7,7 @@ import {
   type Height, type Width,
 } from './settings'
 import { isThemeName, type ThemeInfo } from './themes'
+import { commandRegister } from './api'
 
 // `/iui` arguments: on, off, size <80-200>, width [40-400|full],
 // height [6-200|half|full], details (all Intelligent UI found), grab (copy
@@ -130,7 +131,7 @@ export function commandSuggestions(
 // /iui; registered at session start and again in setUp, so it is
 // there after a hot reload too.
 export async function registerCommand($: EngineInterface) {
-  await $.command.register({
+  await commandRegister($, {
     name: 'iui',
     description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image or a Typst drawing takes), theme [name] (list or switch themes), grab (copy the selected pictures' text), dump (copy diagnostics)",
     argumentHint: '[on|off|size <percent>|width [columns|full]|height [rows|half|full]|theme [name]|grab|dump]',

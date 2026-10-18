@@ -10,6 +10,7 @@ import { alignFirstLine, firstLineOf, fontFit, sizing } from './draw'
 import { HEADERS_SH } from './host'
 import { logDebug } from './log'
 import { positionsOf, type Mark, type Positions } from './copy'
+import { clockAfter, envGet, fsExists, fsList, fsRead, fsWrite, processRun, processSpawn } from './api'
 
 // The typst command and its environment. Network off (see NO_NETWORK) and a
 // package cache of our own, so only the vendored packages load.
@@ -102,15 +103,15 @@ export function shouldRetrySafe(exitCode: number): boolean {
 
 export async function findTypst($: EngineInterface): Promise<string | null> {
   for (const flag of ['-lc', '-c']) {
-    const got = await $.process.run(['sh', flag, 'command -v typst'], { timeoutMs: 5000 }).catch(() => null)
+    const got = await processRun($, ['sh', flag, 'command -v typst'], { timeoutMs: 5000 }).catch(() => null)
     const path = got?.exitCode === 0 ? firstLine(got.stdout) : ''
     if (path.startsWith('/')) return path
   }
-  const home = (await $.env.get('HOME').catch(() => undefined)) ?? ''
+  const home = (await envGet($, 'HOME').catch(() => undefined)) ?? ''
   for (const each of TYPST_FALLBACKS) {
     if (each.startsWith('~/') && !home) continue
     const path = each.startsWith('~/') ? `${home}${each.slice(1)}` : each
-    if (await $.fs.exists(path).catch(() => false)) return path
+    if (await fsExists($, path).catch(() => false)) return path
   }
   return null
 }
@@ -125,7 +126,7 @@ export const measureCall = (typst: string, root: string, family: string, themeDi
 // The fonts' metrics from render/measure.typ; the macOS defaults when that fails.
 export async function measureFonts($: EngineInterface, typst: string, root: string, cache: string, family: string, themeDir: string): Promise<Metrics> {
   const argv = measureCall(typst, root, family, themeDir)
-  const got = await $.process.run(argv, { timeoutMs: 10000, env: noNetworkEnv(cache) }).catch(() => null)
+  const got = await processRun($, argv, { timeoutMs: 10000, env: noNetworkEnv(cache) }).catch(() => null)
   try {
     const m = JSON.parse(got?.stdout ?? '') as Metrics
     const ok = (x: FontMetrics | null | undefined) => !!x && x.adv > 0 && x.xh > 0 && x.avg > 0
@@ -142,7 +143,7 @@ export async function existingImages($: EngineInterface, segments: readonly stri
   const found: string[] = []
   for (const path of new Set(segments.flatMap(localImages))) {
     const full = imagePathOf(path, base)
-    if (await $.fs.exists(full).catch(() => false)) found.push(path, full)
+    if (await fsExists($, full).catch(() => false)) found.push(path, full)
   }
   return found
 }
@@ -185,11 +186,11 @@ export function touchLater($: EngineInterface, path: string) {
   if (toTouch.size >= TOUCH_KEPT && !toTouch.has(path)) return
   toTouch.add(path)
   if (touchTimer) return
-  touchTimer = $.clock.after(TOUCH_FLUSH_MS, () => {
+  touchTimer = clockAfter($, TOUCH_FLUSH_MS, () => {
     touchTimer = null
     const paths = [...toTouch].slice(0, TOUCH_BATCH)
     for (const each of paths) toTouch.delete(each)
-    if (paths.length) void Promise.resolve($.process.run(['touch', '-c', ...paths], { timeoutMs: 5000 })).catch(() => undefined)
+    if (paths.length) void Promise.resolve(processRun($, ['touch', '-c', ...paths], { timeoutMs: 5000 })).catch(() => undefined)
     if (toTouch.size) touchLater($, toTouch.values().next().value!)
   })
 }
@@ -228,7 +229,7 @@ export async function runKillable(
   const killNow = () => {
     if (!why || !pid || isKillSent) return
     isKillSent = true
-    void Promise.resolve($.process.run(['kill', pid], { timeoutMs: 5000 })).catch(() => undefined)
+    void Promise.resolve(processRun($, ['kill', pid], { timeoutMs: 5000 })).catch(() => undefined)
   }
   const stop = (reason: 'cancel' | 'timeout') => {
     if (why) return
@@ -237,10 +238,10 @@ export async function runKillable(
   }
   const onAbort = () => stop('cancel')
   o.signal?.addEventListener('abort', onAbort, { once: true })
-  const timer = $.clock.after(o.timeoutMs, () => stop('timeout'))
+  const timer = clockAfter($, o.timeoutMs, () => stop('timeout'))
   let code: number | null = 1
   try {
-    const child = $.process.spawn({ argv: wrapPid(argv), ...(o.env ? { env: o.env } : {}) })
+    const child = processSpawn($, { argv: wrapPid(argv), ...(o.env ? { env: o.env } : {}) })
     for (;;) {
       const got = await child.next()
       if (got.done) {
@@ -336,7 +337,7 @@ export async function probePage(
 ): Promise<Positions | null> {
   let segments: unknown
   try {
-    segments = (JSON.parse((await $.fs.read(`${dir}/doc.json`)) as string) as { segments?: unknown }).segments
+    segments = (JSON.parse((await fsRead($, `${dir}/doc.json`)) as string) as { segments?: unknown }).segments
   } catch {
     return null
   }
@@ -358,13 +359,13 @@ export async function probePage(
 // The pages of one run: its PNGs (by tag) in order, with their sizes and
 // the box each takes. Null when there are none or a size can not be read.
 async function pagesOfRun($: EngineInterface, job: Job, dir: string, tag: string, segments: readonly string[]): Promise<Page[] | null> {
-  const files = (await $.fs.list(dir))
+  const files = (await fsList($, dir))
     .filter(f => f.kind === 'file' && f.name.startsWith(`${tag}-`) && f.name.endsWith('.png'))
     .map(f => f.name)
     .sort((x, y) => Number(x.replace(/\D/g, '')) - Number(y.replace(/\D/g, '')))
     .map(name => `${dir}/${name}`)
   if (!files.length) return null
-  const heads = await $.process.run(['sh', '-c', HEADERS_SH, 'sh', ...files])
+  const heads = await processRun($, ['sh', '-c', HEADERS_SH, 'sh', ...files])
   const sizes = parseOd(heads.stdout).map(pngSize)
   if (sizes.length !== files.length || sizes.some(s => !s)) {
     await logDebug($, job.env.cache, `compile ${job.key}: could not read PNG sizes`)
@@ -380,7 +381,7 @@ async function pagesOfRun($: EngineInterface, job: Job, dir: string, tag: string
 // result: nothing is kept).
 export async function compile($: EngineInterface, job: Job, signal?: AbortSignal): Promise<Result | 'failed' | 'cancelled'> {
   const dir = `${job.env.cache}/${job.key}`
-  const kept = await $.fs.read(`${dir}/pages.json`).catch(() => null)
+  const kept = await fsRead($, `${dir}/pages.json`).catch(() => null)
   const keptResult = kept ? resultOf(kept) : null
   if (keptResult) {
     touchLater($, dir)
@@ -395,7 +396,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
   let segments = splitSegments(job.text, job.columns, job.env.inline ? inlineBudget(job.cell) : SEGMENT_ROWS, job.size, roomRows)
   const base = job.base ?? job.env.cwd
   const images = await existingImages($, segments, base)
-  await $.fs.write(`${dir}/doc.json`, JSON.stringify({ base, segments, images }))
+  await fsWrite($, `${dir}/doc.json`, JSON.stringify({ base, segments, images }))
 
   let tag = 'a'
   let isSafe = false
@@ -426,7 +427,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     const cut = segments.flatMap((seg, i) => (pages![i]!.rows > MAX_IMAGE_ROWS ? splitInTwo(seg, job.columns, job.size, roomRows) : [seg]))
     if (cut.length > segments.length) {
       if (signal?.aborted) return 'cancelled'
-      await $.fs.write(`${dir}/doc.json`, JSON.stringify({ base, segments: cut, images }))
+      await fsWrite($, `${dir}/doc.json`, JSON.stringify({ base, segments: cut, images }))
       const again = await runTypst($, job, cut, dir, isSafe ? 'd' : 'c', isSafe, signal)
       if (again.isCancelled) return 'cancelled'
       const split = again.exitCode === 0 ? await pagesOfRun($, job, dir, isSafe ? 'd' : 'c', cut) : null
@@ -439,6 +440,6 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
   }
   const { bulletRow } = alignFirstLine(firstLineOf(segments[0] ?? ''), rowPt)
   const result: Result = { pages, bulletRow, ...(note ? { note } : {}) }
-  await $.fs.write(`${dir}/pages.json`, JSON.stringify(result))
+  await fsWrite($, `${dir}/pages.json`, JSON.stringify(result))
   return result
 }

@@ -42,6 +42,7 @@ import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/fra
 import { roomColumns } from './lib/terminal'
 import { onScreenOf, pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
 import { pasteDir, rowsAfter, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
+import { fsWrite, processRun, sessionSurfaces, storeSet, uiCopy, uiResolve, uiSelection, uiToast } from './lib/api'
 import {
   currentPlan, decidePlan, decisionOf, drawAskLine, drawPlanResult, drawPlanUse, isPlanQuestion, planFileOf, planInputOf, planOf,
   planShownOf, scheduleClear, type PlanVerdict,
@@ -181,7 +182,7 @@ async function planDrawing(
 // dialog asks, as with no mod.
 async function planEnv($: EngineInterface): Promise<Env | null> {
   if (!(await read($, isOn))) return null
-  const surfaces = await $.session.surfaces().catch(() => [] as readonly string[])
+  const surfaces = await sessionSurfaces($).catch(() => [] as readonly string[])
   if (!surfaces.includes('terminal')) return null
   const ready = S.env ?? (await setUp($).catch(() => null))
   return ready?.typst && ready.canDraw ? ready : null
@@ -235,7 +236,7 @@ async function readCopy($: EngineInterface, raw: string, requestId?: string): Pr
 
 // The clipboard now (pbpaste, UTF-8); null when it can not be read.
 async function clipboardNow($: EngineInterface): Promise<string | null> {
-  const got = await $.process.run(['pbpaste'], { timeoutMs: 2000, env: { LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' } }).catch(() => null)
+  const got = await processRun($, ['pbpaste'], { timeoutMs: 2000, env: { LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' } }).catch(() => null)
   return got && got.exitCode === 0 ? got.stdout : null
 }
 
@@ -251,7 +252,7 @@ async function copyRead($: EngineInterface, raw: string, requestId?: string) {
   if (!read.resolved) {
     // Not read again from the clipboard (one toast).
     clip.seen = raw
-    $.ui.toast('Intelligent UI: could not read the selected picture (/iui dump says why)')
+    uiToast($, 'Intelligent UI: could not read the selected picture (/iui dump says why)')
     return
   }
   if ((await clipboardNow($)) !== raw) {
@@ -261,8 +262,8 @@ async function copyRead($: EngineInterface, raw: string, requestId?: string) {
   }
   clip.wrote = read.text
   clip.seen = read.text
-  await $.ui.copy({ text: read.text })
-  $.ui.toast(`Intelligent UI: copied ${read.text.length} chars of text`)
+  await uiCopy($, { text: read.text })
+  uiToast($, `Intelligent UI: copied ${read.text.length} chars of text`)
 }
 
 // A selection and a clipboard text are the same copy (a copy can end in
@@ -301,7 +302,7 @@ async function readClipboard($: EngineInterface) {
       if (text === null || text === clip.seen) continue
       clip.seen = text
       if (text === clip.wrote || !hasPlaceholders(text)) continue
-      const selected = await $.ui.selection().catch(() => undefined)
+      const selected = await uiSelection($).catch(() => undefined)
       if (selected && !sameCopy(selected.text, text)) continue
       await copyRead($, text, selected?.requestId)
     } while (clip.again)
@@ -341,7 +342,7 @@ function autoCopyOf(isOn: boolean): string {
 
 // /iui grab: the last mouse selection, read and copied.
 async function grab($: EngineInterface): Promise<string> {
-  const selected = await $.ui.selection().catch(() => undefined)
+  const selected = await uiSelection($).catch(() => undefined)
   if (!selected) return 'Intelligent UI: no mouse selection (it needs fullscreen mode; select over a picture first).'
   if (!hasPlaceholders(selected.text)) return `Intelligent UI: the selection has no picture cells; it is ${selected.text.length} chars of text already.`
   clip.raw = selected.text
@@ -350,7 +351,7 @@ async function grab($: EngineInterface): Promise<string> {
   if (!read.resolved) return `Intelligent UI: found ${read.runs} picture run(s) but could not read them (see /iui dump).`
   clip.wrote = read.text
   clip.seen = read.text
-  const copied = await $.ui.copy({ text: read.text })
+  const copied = await uiCopy($, { text: read.text })
   return copied.isCopied
     ? `Intelligent UI: copied ${read.text.length} chars (${read.resolved} of ${read.runs} picture runs read${selected.requestId ? `, row ${selected.requestId}` : ''}).`
     : `Intelligent UI: the copy failed: ${copied.reason}.`
@@ -385,7 +386,7 @@ async function dump($: EngineInterface, on: boolean): Promise<string> {
   const cache = S.env?.cache ?? ''
   if (cache) {
     const full = { raw: clip.raw, codePoints: codePointsOf(clip.raw, 100000), ...(clip.last as object) }
-    await $.fs.write(`${cache}/copy-debug.json`, JSON.stringify(full, null, 1)).catch(() => undefined)
+    await fsWrite($, `${cache}/copy-debug.json`, JSON.stringify(full, null, 1)).catch(() => undefined)
   }
   return [
     `Intelligent UI: last clipboard with picture cells (${Array.from(clip.raw).length} code points; auto copy ${auto}):`,
@@ -419,7 +420,7 @@ export const register: Register = on => {
   // hold no placeholders and pass on as they are.
   on('ui.copy', async ($, e, next) => {
     if (!hasPlaceholders(e.text) || !drawnAnswers.size) return next(e)
-    const selected = await $.ui.selection().catch(() => undefined)
+    const selected = await uiSelection($).catch(() => undefined)
     clip.raw = e.text
     clip.rawRow = selected?.text === e.text ? selected.requestId : undefined
     const read = await readCopy($, e.text, clip.rawRow)
@@ -447,7 +448,7 @@ export const register: Register = on => {
       await update($, isOn, () => asked.kind === 'on')
       // On: the clipboard part starts with the next picture drawn.
       if (asked.kind === 'off') stopClipboard($)
-      await $.store.set('enabled', asked.kind === 'on')
+      await storeSet($, 'enabled', asked.kind === 'on')
       return { text: `Intelligent UI is ${asked.kind}.` }
     }
     if (asked.kind === 'size') {
@@ -455,7 +456,7 @@ export const register: Register = on => {
       // open (the store write waits for the host).
       S.size = asked.percent
       beginEpoch($)
-      await $.store.set('size', S.size)
+      await storeSet($, 'size', S.size)
       return { text: `Intelligent UI draws text at ${S.size}% of the terminal's text size (100% matches it).` }
     }
     if (asked.kind === 'width') {
@@ -463,7 +464,7 @@ export const register: Register = on => {
       else {
         S.width = asked.width
         beginEpoch($)
-        await $.store.set('width', S.width)
+        await storeSet($, 'width', S.width)
       }
       const most = typeof S.width === 'number' && S.width > IMAGE_MAX_COLUMNS ? ` (a picture is ${IMAGE_MAX_COLUMNS} columns at most)` : ''
       const head = asked.width === undefined ? 'The most columns a picture takes' : 'Intelligent UI pictures now take at most'
@@ -474,7 +475,7 @@ export const register: Register = on => {
       else {
         S.height = asked.height
         beginEpoch($)
-        await $.store.set('height', S.height)
+        await storeSet($, 'height', S.height)
       }
       const head = asked.height === undefined ? 'The most rows an image or a Typst drawing takes' : 'Intelligent UI images and Typst drawings now take at most'
       return { text: `${head}: ${heightText(S.height)}. This applies to images (sent or pasted) and to Typst drawings in answers. Use /iui height half (the default), /iui height full, or /iui height <${MIN_HEIGHT}-${MAX_HEIGHT}> (never more than full).` }
@@ -510,7 +511,7 @@ export const register: Register = on => {
         if (ready.typst && S.look) ready.metrics = await measureFonts($, ready.typst, ready.root, ready.cache, ready.termFont, S.look.dir)
         beginEpoch($)
       }
-      if (asked.name) await $.store.set('theme-name', chosen.name)
+      if (asked.name) await storeSet($, 'theme-name', chosen.name)
       const head = asked.name ? `Intelligent UI uses the theme ${chosen.name}.\n` : ''
       return { text: `${head}${themeListing(themes, problems, chosen.name, userThemesOf(ready.home))}` }
     }
@@ -642,7 +643,7 @@ export const register: Register = on => {
     }
     answers.delete(e.requestId)
     if (drawing.kind === 'text') return next(e)
-    const { Box } = $.ui.resolve(e)
+    const { Box } = uiResolve($, e)
     return <Box />
   })
 
