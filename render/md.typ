@@ -43,8 +43,10 @@
 // with its text centred, every block starts and ends on a row boundary, and
 // blocks of free height (display math, live drawings, images) are made a
 // whole number of rows. A line box of an even number of rows is half a row
-// down (phase-pad), so the centre of every line is on the middle of a row.
-// Every page's top margin is 0 (`top` is not used). With row=0, grid=1 does
+// down, so the centre of every line is on the middle of a row: when a line
+// of body text is an even number of rows, the page's top margin is half a
+// row, else 0 (`top` is not used), and a block of lines of the other parity
+// gets half a row above and below (phase-pad). With row=0, grid=1 does
 // nothing.
 
 #import "@preview/cmarker:0.1.6"
@@ -204,6 +206,48 @@
   let pad = phase-pad(half)
   if pad == 0pt { body } else { block(inset: (y: pad), { set text(costs: half-costs(half)); body }) }
 }
+// The phase of a page's flow is the body text's: true when a line of body
+// text is an even number of rows (needs context, at the body's size). Then
+// the page starts half a row down, and the lines of body text (paragraphs,
+// lists, table cells, quotes, footnotes) need no half row of their own;
+// only a block of the other parity (a heading, code) gets one.
+#let flow-half() = calc.even(grid-edges().rows)
+// The half row under a heading of the other phase is its gap to the block
+// under it, so there is no gap there (the gap above stays). The heading
+// sets its padding here; heading-gaps puts a strong -1 row after it, which
+// takes away its gap below (one row; with a larger gap above the next block,
+// for example a heading's, that gap less one row).
+#let heading-pad = state("grid-heading-pad", 0pt)
+// `body` (a flow: the page's, a quote's) with that -1 row after each
+// heading that has a block after it. After the last block it would make
+// the page one row too short, which cuts the heading.
+#let heading-gaps(body, page: false) = {
+  if type(body) != content or body.func() != [].func() { return body }
+  let kids = body.children
+  let blank = c => c.func() in ([ ].func(), parbreak)
+  let last = kids.len() - 1
+  while last >= 0 and blank(kids.at(last)) { last -= 1 }
+  let first = 0
+  while first <= last and blank(kids.at(first)) { first += 1 }
+  let out = kids.enumerate().map(((i, c)) => if c.func() == heading and i < last {
+    (c, context if heading-pad.get() > 0pt { v(-row) })
+  } else { (c,) }).flatten()
+  // page: true for a page's flow. When it has the half-row phase and starts
+  // with a heading of the other phase, the page's half row and the
+  // heading's half row above are an empty row: -1 row takes it away (the
+  // heading's line box starts the page, as in a flow of its own phase).
+  // The heading moves half a row more than the others when its height
+  // (whole rows) in the other phase is less.
+  if page and first <= last and kids.at(first).func() == heading {
+    let c = kids.at(first)
+    out.insert(0, context if flow-half() {
+      let here = measure(block(width: content-w, c)).height
+      let other = measure(block(width: content-w, { set text(costs: half-costs(false)); c })).height
+      if here > other { v(-row) }
+    })
+  }
+  out.join()
+}
 
 // ---------- headings ----------
 #set heading(numbering: none)
@@ -217,22 +261,27 @@
     // The grid: a line box of whole rows (3 for h1 and 2 for h2 and h3 at
     // the usual sizes: Typst's own heading rule makes h1 1.4em and h2 1.2em
     // of the theme's size, so h1 is 30.8pt), whole-row gaps (at least one),
-    // and the rule on the bottom row boundary (no padding under the text: it
-    // would add height). An even number of rows is half a row down
-    // (phase-pad): an h2 is then 3 rows, its text in the middle one.
+    // and the rule on the bottom of the line box (no padding under the
+    // text: it would add height). A line box of the other parity than the
+    // flow is half a row down (phase-pad): at 100%, an h2 is then 3 rows,
+    // its text in the middle one. Such a heading has no gap below
+    // (heading-gaps): the half row under its line box is the gap, and its
+    // rule is on the bottom of the line box, above that half row.
     return {
       set text(size: size, weight: H.weight)
       context {
         let g = grid-edges()
         let half = calc.even(g.rows)
         let pad = phase-pad(half)
+        let rule = if lvl <= H.rule-levels { (bottom: px + C.border) }
         set text(top-edge: g.top, bottom-edge: g.bottom, costs: half-costs(half))
         show raw: set text(top-edge: g.top, bottom-edge: g.bottom)
         set par(leading: 0pt)
+        heading-pad.update(pad)
         block(
-          width: 100%, above: calc.max(row, rows-near(above)), below: calc.max(row, rows-near(below)), sticky: true,
-          inset: (y: pad), stroke: if lvl <= H.rule-levels { (bottom: px + C.border) },
-          it.body,
+          width: 100%, above: calc.max(row, rows-near(above)), below: if pad > 0pt { row } else { calc.max(row, rows-near(below)) },
+          sticky: true, inset: (y: pad), stroke: if pad == 0pt { rule },
+          if pad == 0pt { it.body } else { block(width: 100%, stroke: rule, it.body) },
         )
       }
     }
@@ -363,7 +412,7 @@
         width: 100%, fill: C.quote-bg, radius: Q.radius-px * px, above: row, below: row,
         stroke: (left: Q.bar-px * px + C.quote-border),
         inset: (left: (Q.pad-left-px + Q.bar-px) * px, right: Q.pad-right-px * px, y: rows-near(Q.pad-y-em * 11pt) + phase-pad(half)),
-        { set block(spacing: row); set text(costs: half-costs(half)); it.body },
+        { set block(spacing: row); set text(costs: half-costs(half)); heading-gaps(it.body) },
       )
     }
   }
@@ -934,8 +983,8 @@
   // Body text: line boxes of exactly g.rows rows (fixed edges, no leading),
   // one row between paragraphs and blocks. Any smaller text (inline code,
   // footnotes, sub- and superscripts) gets the same fixed edges, so it never
-  // makes its line taller.
-  set text(top-edge: g.top, bottom-edge: g.bottom)
+  // makes its line taller. The flow has the body text's phase (flow-half).
+  set text(top-edge: g.top, bottom-edge: g.bottom, costs: half-costs(calc.even(g.rows)))
   show raw: set text(top-edge: g.top, bottom-edge: g.bottom)
   // Raised and lowered text (footnote numbers): x-height to baseline edges,
   // which stay inside the line box, so it never makes its line taller.
@@ -953,14 +1002,14 @@
   // the text's (its smaller text has the body's fixed edges, so each of its
   // lines is g.rows rows too).
   show footnote.entry: set par(leading: 0pt)
-  // Each paragraph and table cell in its phase (phase-pad; a cell's rules
-  // stay on row boundaries), not a live drawing's. A footnote entry always
-  // starts on a row (under the separator's row), whatever refers to it.
+  // Each paragraph and table cell in its phase (phase-pad), not a live
+  // drawing's: in a flow of the body text's phase it does not move. A
+  // footnote entry has the phase of the page's flow, whatever refers to it
+  // (its lines are g.rows rows, and the separator and the entries are whole
+  // rows under the flow), so it does not move either.
   show par: it => context if no-marks(text.costs) { it } else { in-phase(it) }
   show table.cell: in-phase
-  show footnote.entry: it => context if calc.even(line-rows()) {
-    block(inset: (y: row / 2), { set text(costs: half-costs(true)); it })
-  } else { it }
+  show footnote.entry: set text(costs: half-costs(calc.even(g.rows)))
   set footnote.entry(
     clearance: 0pt, gap: 0pt,
     separator: block(height: row, align(horizon, line(length: 30%, stroke: px + C.border))),
@@ -1047,12 +1096,14 @@
 #for (i, seg) in segments.enumerate() {
   if only > 0 and i + 1 != only { continue }
   let md = if type(seg) == str { seg } else { str(seg) }
-  // On the grid, every page starts on a row: no top margin.
-  let top = if on-grid { 0pt } else if i == 0 { first-top } else { margin-y }
   let body = render-md(md, i)
+  if on-grid { body = heading-gaps(body, page: true) }
   if notes-before > 0 { body = { counter(footnote).update(notes-before); body } }
   // Pad the bottom so the page is a whole number of terminal rows.
   context {
+    // On the grid, every page starts on a row (no top margin), or half a
+    // row lower when the flow has the half-row phase (grid-rules).
+    let top = if on-grid { if flow-half() { row / 2 } else { 0pt } } else if i == 0 { first-top } else { margin-y }
     // No bottom margin: text is measured to its descenders, so the last line
     // ends the page and the next row is the engine's own gap.
     let total = top + measure(block(width: content-w, body)).height

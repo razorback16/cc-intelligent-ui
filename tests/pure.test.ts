@@ -289,9 +289,14 @@ test('a line box of n rows has its ink centre on row floor(n / 2), under the pad
   expect(gridFirstRow('quote', 0, row, g(19, 14), 1)).toBe(1 + 1)
   expect(gridFirstRow('table', 0, row, g(9, 4), 1)).toBe(0)
   // Code: the code font's need per pt at the theme's size, or at `code` for "terminal".
-  const code = { ...DEFAULT_GRID, code: 1.5, pad: { ...DEFAULT_GRID.pad, code: 0 } }
+  const code = { ...DEFAULT_GRID, body: 9, code: 1.5, pad: { ...DEFAULT_GRID.pad, code: 0 } }
   expect(gridFirstRow('code', 0, row, code, 0.5)).toBe(1)
   expect(gridFirstRow('code', 0, row, { ...code, codeSize: null }, 0.5)).toBe(0)
+  // Body text of 2 rows: the page starts half a row down, so code lines of
+  // an odd number of rows are half a row down in it (one row lower). A
+  // heading's line box starts the page.
+  expect(gridFirstRow('code', 0, row, { ...code, body: 19, codeSize: null }, 0.5)).toBe(1)
+  expect(gridFirstRow('h1', 1, row, { ...DEFAULT_GRID, body: 19, heading: [29, 20, 20, 9, 9, 9] }, 1)).toBe(1)
 })
 
 test('the grid numbers of the font measure are read, and a bad one is refused', () => {

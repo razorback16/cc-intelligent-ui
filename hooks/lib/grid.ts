@@ -44,8 +44,11 @@ const rowsNear = (pt: number, rowPt: number) => Math.round(pt / rowPt)
 
 // The row of the ink centre of a page's first line: its padding in whole
 // rows, then row floor(n / 2) of its line box of n rows (an even box is half
-// a row down, so its centre is in row n / 2). `level`: a heading's (1 to 6);
-// `code`: the job's code input. A list is a `para`: body lines.
+// a row down, so its centre is in row n / 2). When a line of body text is an
+// even number of rows, the page starts half a row down; code lines of an odd
+// number of rows are then half a row down in it, one row more (a heading's
+// line box starts the page). `level`: a heading's (1 to 6); `code`: the
+// job's code input. A list is a `para`: body lines.
 export function gridFirstRow(kind: FirstLine, level: number, rowPt: number, g: GridMetrics, code: number): number {
   const middle = (needPt: number) => Math.floor(gridRowsOf(needPt, rowPt) / 2)
   const body = middle(g.body)
@@ -57,8 +60,11 @@ export function gridFirstRow(kind: FirstLine, level: number, rowPt: number, g: G
       return middle(g.heading[level - 1] ?? g.body)
     case 'quote':
       return rowsNear(g.pad.quote, rowPt) + body
-    case 'code':
-      return rowsNear(g.pad.code, rowPt) + middle(g.code * BODY_PT * (g.codeSize ?? code))
+    case 'code': {
+      const n = gridRowsOf(g.code * BODY_PT * (g.codeSize ?? code), rowPt)
+      const half = gridRowsOf(g.body, rowPt) % 2 === 0
+      return rowsNear(g.pad.code, rowPt) + Math.floor(n / 2) + (half && n % 2 === 1 ? 1 : 0)
+    }
     case 'table':
       return rowsNear(g.pad.table, rowPt) + body
     default:
