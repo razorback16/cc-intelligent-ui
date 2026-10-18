@@ -126,10 +126,10 @@ export function commandSuggestions(
       description: h === height ? 'current' : h === DEFAULT_HEIGHT ? 'the default: half the terminal'
         : h === 'full' ? `the terminal height less ${PICTURE_ROOM_ROWS} rows` : undefined,
     }))
-  const grid = o.grid ? 'on' : 'off'
+  const grid = o.grid === false ? 'off' : 'on'
   const gridRows = (prefix: string, lead: string) => GRIDS
     .filter(g => g.startsWith(prefix))
-    .map(g => ({ text: `${lead}${g}`, label: g, description: g === grid ? 'current' : g === 'off' ? 'the default' : undefined }))
+    .map(g => ({ text: `${lead}${g}`, label: g, description: g === grid ? 'current' : g === 'on' ? 'the default' : undefined }))
   const updates = o.updates === false ? 'off' : 'on'
   const updateRows = (prefix: string, lead: string) => UPDATES
     .filter(u => u.startsWith(prefix))

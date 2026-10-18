@@ -41,8 +41,8 @@ test('right after theme or size, rows hold the word and its argument', () => {
   expect(heights[1]!.description).toBe('the terminal height less 16 rows')
   const grids = at('/iui grid')
   expect(grids.map(r => r.text)).toEqual(['grid on', 'grid off'])
-  // off is the default; with no grid given, it is current.
-  expect(grids.map(r => r.description)).toEqual([undefined, 'current'])
+  // on is the default; with no grid given, it is current.
+  expect(grids.map(r => r.description)).toEqual(['current', undefined])
 })
 
 test('a theme name or size completes after its word', () => {
@@ -63,8 +63,8 @@ test('a theme name or size completes after its word', () => {
   expect(tall('/iui height h')[0]!.description).toBe('the default: half the terminal')
   expect(at('/iui grid o').map(r => r.text)).toEqual(['on', 'off'])
   expect(at('/iui grid of').map(r => r.label)).toEqual(['off'])
-  const gridded = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, grid: true })
-  expect(gridded('/iui grid o').map(r => r.description)).toEqual(['current', 'the default'])
+  const gridded = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, grid: false })
+  expect(gridded('/iui grid o').map(r => r.description)).toEqual(['the default', 'current'])
   expect(at('/iui grid on extra')).toEqual([])
 })
 

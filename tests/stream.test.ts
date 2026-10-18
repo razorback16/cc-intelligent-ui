@@ -235,7 +235,7 @@ const FRAME = { columns: 100, rows: 40, cell: DEFAULT_CELL }
 const keyOf = (text: string) =>
   renderKey({
     textHash: hashOf([text]), columns: 98, cell: DEFAULT_CELL, size: 100, mode: 'dark', termFont: '', columnPt: fontFit(DEFAULT_METRICS, 100).columnPt,
-    templateStamp: '1', look: { name: DEFAULT_THEME, dir: `/mod/render/themes/${DEFAULT_THEME}`, stamp: '0' }, inline: false,
+    templateStamp: '1', look: { name: DEFAULT_THEME, dir: `/mod/render/themes/${DEFAULT_THEME}`, stamp: '0' }, inline: false, grid: S.grid,
   })
 const PAGE = { file: '', width: 1568, height: 64, alt: 'x', columns: 98, rows: 2 }
 

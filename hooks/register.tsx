@@ -511,7 +511,7 @@ export const register: Register = on => {
         await storeSet($, 'grid', S.grid)
       }
       const head = asked.grid === undefined ? 'The row grid is' : 'The row grid is now'
-      return { text: `${head} ${gridText(S.grid)}. With the grid on, a mouse selection over a picture covers the lines it copies. Use /iui grid on, or /iui grid off (the default).` }
+      return { text: `${head} ${gridText(S.grid)}. With the grid on, a mouse selection over a picture covers the lines it copies. Use /iui grid on (the default), or /iui grid off.` }
     }
     if (asked.kind === 'updates') {
       await loadUpdates($)

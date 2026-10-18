@@ -134,8 +134,8 @@ export const S = {
   // committed (with `shown`), so an image box changes in one step.
   shownHeight: DEFAULT_HEIGHT as Height,
   // `/iui grid`: each text line of a page on whole terminal rows, so a
-  // mouse selection (whole cells) covers the text it copies. Off by default.
-  grid: false,
+  // mouse selection (whole cells) covers the text it copies. On by default.
+  grid: true,
   look: null as Look | null,
   // The usable themes the last scan found, for the typeahead.
   themeChoices: [] as ThemeInfo[],

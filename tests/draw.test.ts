@@ -319,7 +319,7 @@ const boxes = (tree: any): any[] =>
 const bulletRowOf = (tree: any) => boxes(tree).find(b => b.props.width === 2)?.props.marginTop
 
 test('grid on is kept and begins an epoch: another key, compiled with grid=1 and top=0; grid off goes back to the key of before', async ($, on) => {
-  const { clock, kept, compiles, logs } = world(on, { TERM: 'xterm-kitty', IUI_DEBUG: '1' })
+  const { clock, kept, compiles, logs } = world(on, { TERM: 'xterm-kitty', IUI_DEBUG: '1' }, HEAD, { grid: false })
   const ran = await $.command.run({ command: 'iui', args: '' } as any)
   expect(ran.text).toContain('grid off.')
   const ui = await $.ui.mount(message('g-1', 'Some **bold** text.'))
@@ -385,7 +385,7 @@ test('with the grid on, the bullet row comes from the grid numbers that the font
 })
 
 test('a heading with the grid off keeps its bullet row and top margin', async ($, on) => {
-  const { clock, compiles } = world(on, { TERM: 'xterm-kitty' })
+  const { clock, compiles } = world(on, { TERM: 'xterm-kitty' }, HEAD, { grid: false })
   await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await $.ui.mount(message('g-3', '# Title'))
   await clock.settle()
@@ -398,10 +398,10 @@ test('a heading with the grid off keeps its bullet row and top margin', async ($
   expect(bulletRowOf(await ui.drawn())).toBe(bulletRow)
 })
 
-test('a bad kept grid is off; a bad value is refused and not kept', async ($, on) => {
+test('a bad kept grid is on (the default); a bad value is refused and not kept', async ($, on) => {
   const { kept } = world(on, { TERM: 'xterm-kitty' }, HEAD, { grid: 'yes' })
   const shown = await $.command.run({ command: 'iui', args: 'grid' } as any)
-  expect(shown.text).toContain('The row grid is off (the default)')
+  expect(shown.text).toContain('The row grid is on (each line of text on whole terminal rows)')
   const bad = await $.command.run({ command: 'iui', args: 'grid maybe' } as any)
   expect(bad.text).toContain('Not understood: "grid maybe"')
   expect(kept.grid).toBe(undefined)

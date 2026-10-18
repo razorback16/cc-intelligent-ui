@@ -46,8 +46,8 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
 | `/iui height full` | An image uses the terminal height less 16 rows (kept for later sessions). The 16 rows are for the row of the file, the text around it and the prompt. |
 | `/iui height <6–200>` | Sets the most rows that an image can use (kept for later sessions). An image is never taller than with `full`. |
 | `/iui grid` | Shows the row grid setting: on or off |
-| `/iui grid on` | Puts each line of text in a picture on the terminal rows (kept for later sessions). Refer to [Selection and the row grid](#selection-and-the-row-grid). |
-| `/iui grid off` | Lines of text in a picture have the usual spacing (kept for later sessions). This is the default. |
+| `/iui grid on` | Puts each line of text in a picture on the terminal rows (kept for later sessions). This is the default. Refer to [Selection and the row grid](#selection-and-the-row-grid). |
+| `/iui grid off` | Lines of text in a picture have the usual spacing (kept for later sessions). |
 | `/iui updates` | Shows the update check: on or off, and the newest version that it found |
 | `/iui updates on` | Looks for a new version one time each day at most, and shows a toast when there is one (kept for later sessions). This is the default. Refer to [Update](install.md#update). |
 | `/iui updates off` | Stops the check for a new version and its toast (kept for later sessions) |
@@ -86,9 +86,9 @@ For the limits, refer to [Limitations](limitations.md).
 
 ## Selection and the row grid
 
-The terminal draws a mouse selection as full cells, thus a selection covers full rows. Usually, the lines of text in a picture are not on the terminal rows. A line of body text is approximately 1.3 rows tall, and a line in a list or a table is approximately 1.6 rows tall. Thus, after some lines, the selection is not on the text that the mod copies.
+The terminal draws a mouse selection as full cells, thus a selection covers full rows. Without the grid, the lines of text in a picture are not on the terminal rows. A line of body text is approximately 1.3 rows tall, and a line in a list or a table is approximately 1.6 rows tall. Thus, after some lines, the selection is not on the text that the mod copies.
 
-`/iui grid on` puts each line of text on the terminal rows:
+The row grid (`/iui grid on`, the default) puts each line of text on the terminal rows:
 
 - Each line of body text, a list, a quote or a table uses one row (or more rows if the text is large). The middle of the text is in the middle of a row.
 - Each heading, each code line and each gap between blocks uses full rows.
@@ -98,7 +98,7 @@ The terminal draws a mouse selection as full cells, thus a selection covers full
 - The reply bullet is on the row that holds the middle of the first line. For example, the bullet is on the second row of a level-1 heading.
 - Some blocks have a height that the mod cannot set, for example display math, an image or a Typst drawing. The mod adds space to such a block, so that its height is a number of full rows.
 
-Thus the selection covers the text that the mod copies. The lines are closer together than without the grid, so the look is not the same as VS Code. The grid is off by default. For the limits, refer to [Limitations](limitations.md).
+Thus the selection covers the text that the mod copies. The lines are closer together than without the grid, so the look is not the same as VS Code. The grid is on by default. Use `/iui grid off` for the usual spacing. For the limits, refer to [Limitations](limitations.md).
 
 ## Plan approval
 

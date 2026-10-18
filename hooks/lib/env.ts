@@ -88,7 +88,7 @@ export function setUp($: EngineInterface): Promise<Env> {
     const height = await storeGet($, 'height').catch(() => undefined)
     S.height = height === 'half' || height === 'full' ? height
       : Number.isInteger(height) && Number(height) >= MIN_HEIGHT && Number(height) <= MAX_HEIGHT ? Number(height) : DEFAULT_HEIGHT
-    S.grid = (await storeGet($, 'grid').catch(() => undefined)) === true
+    S.grid = (await storeGet($, 'grid').catch(() => undefined)) !== false
     if ((await storeGet($, 'enabled').catch(() => undefined)) === false) await update($, isOn, () => false).catch(() => undefined)
     const isMac = os.trim() === 'Darwin'
     setFrame(await readFrame($))
