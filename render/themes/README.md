@@ -30,7 +30,7 @@ Example: pink inline code, rounder boxes.
 - `*-px`: CSS pixels of VS Code's preview. Its body text is 14px, so 1px = 11/14 pt (the body is always 11pt; Intelligent UI scales the whole picture to your terminal).
 - `*-em`: em of that element's own text.
 - `size`: a fraction of the body text size. For code, `"terminal"` means the size of your terminal's own text.
-- Colours: `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`. The page is transparent, so a translucent background (for example `#ffffff1a`) looks right on any terminal colour.
+- Colours: `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`. The page is transparent, so a translucent background (for example `#ffffff1a`) looks right on any terminal colour. The terminal draws the mouse selection under the picture: it shows through a translucent background, but an opaque one (`code-bg`, `quote-bg`, `inline-code-bg`) hides it.
 
 ## Keys and vscode defaults
 
