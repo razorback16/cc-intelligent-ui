@@ -15,6 +15,7 @@ test('the first word completes as a subcommand', () => {
   expect(at('/iui t').map(r => r.text)).toEqual(['theme'])
   expect(at('/iui w').map(r => r.text)).toEqual(['width'])
   expect(at('/iui h').map(r => r.text)).toEqual(['height'])
+  expect(at('/iui g').map(r => r.text)).toEqual(['grid', 'grab'])
   expect(at('/iui o').map(r => r.text)).toEqual(['on', 'off'])
   expect(at('/iui S').map(r => r.text)).toEqual(['size', 'setup'])
   expect(at('/iui x')).toEqual([])
@@ -38,6 +39,10 @@ test('right after theme or size, rows hold the word and its argument', () => {
   // half is the default; with no height given, it is current.
   expect(heights[0]!.description).toBe('current')
   expect(heights[1]!.description).toBe('the terminal height less 16 rows')
+  const grids = at('/iui grid')
+  expect(grids.map(r => r.text)).toEqual(['grid on', 'grid off'])
+  // off is the default; with no grid given, it is current.
+  expect(grids.map(r => r.description)).toEqual([undefined, 'current'])
 })
 
 test('a theme name or size completes after its word', () => {
@@ -56,6 +61,11 @@ test('a theme name or size completes after its word', () => {
   const tall = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, height: 24 })
   expect(tall('/iui height 2')[0]!.description).toBe('current')
   expect(tall('/iui height h')[0]!.description).toBe('the default: half the terminal')
+  expect(at('/iui grid o').map(r => r.text)).toEqual(['on', 'off'])
+  expect(at('/iui grid of').map(r => r.label)).toEqual(['off'])
+  const gridded = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, grid: true })
+  expect(gridded('/iui grid o').map(r => r.description)).toEqual(['current', 'the default'])
+  expect(at('/iui grid on extra')).toEqual([])
 })
 
 test('other prompts and the command name itself get no rows', () => {

@@ -10,15 +10,16 @@ import { isThemeName, type ThemeInfo } from './themes'
 import { commandRegister } from './api'
 
 // `/iui` arguments: on, off, size <80-200>, width [40-400|full],
-// height [6-200|half|full], details (all Intelligent UI found), grab (copy
-// the text of the last mouse selection of pictures), dump (how the last
-// clipboard with picture cells was read), or nothing (show state). A `width`
-// or `height` with no value shows it.
+// height [6-200|half|full], grid [on|off], details (all Intelligent UI
+// found), grab (copy the text of the last mouse selection of pictures), dump
+// (how the last clipboard with picture cells was read), or nothing (show
+// state). A `width`, `height` or `grid` with no value shows it.
 export type Command =
   | { kind: 'on' | 'off' | 'show' | 'details' | 'probe' | 'grab' | 'dump' }
   | { kind: 'size'; percent: number }
   | { kind: 'width'; width?: Width }
   | { kind: 'height'; height?: Height }
+  | { kind: 'grid'; grid?: boolean }
   | { kind: 'theme'; name?: string }
   | { kind: 'setup'; remove: boolean }
   | { kind: 'bad' }
@@ -52,16 +53,20 @@ export function parseCommand(args: string): Command {
     const height = Number.parseInt(words[1]!, 10)
     if (height >= MIN_HEIGHT && height <= MAX_HEIGHT) return { kind: 'height', height }
   }
+  if (words[0] === 'grid' && words.length === 1) return { kind: 'grid' }
+  if (words[0] === 'grid' && words.length === 2 && (words[1] === 'on' || words[1] === 'off')) return { kind: 'grid', grid: words[1] === 'on' }
   return { kind: 'bad' }
 }
 
-// The /iui arguments, and the sizes, widths and heights the typeahead offers.
+// The /iui arguments, and the sizes, widths, heights and grid values the
+// typeahead offers.
 const SUBCOMMANDS = [
   { name: 'on', description: 'draw answers as pictures' },
   { name: 'off', description: 'show answers as text' },
   { name: 'size', description: `text size, ${MIN_SIZE}-${MAX_SIZE}%` },
   { name: 'width', description: `the most columns a picture takes, ${MIN_WIDTH}-${MAX_WIDTH} or full` },
   { name: 'height', description: `the most rows an image or a Typst drawing takes, ${MIN_HEIGHT}-${MAX_HEIGHT}, half or full` },
+  { name: 'grid', description: 'each line of text on whole terminal rows, on or off' },
   { name: 'theme', description: 'list the themes, or switch to one' },
   { name: 'setup', description: 'iTerm2: add the shell line that turns pictures on' },
   { name: 'details', description: 'the mode source, the terminal font, Typst and the terminal' },
@@ -71,16 +76,17 @@ const SUBCOMMANDS = [
 const SIZES = [80, 90, 100, 110, 120, 125, 150, 175, 200]
 const WIDTHS: readonly Width[] = [80, 100, 120, 160, 200, 'full']
 const HEIGHTS: readonly Height[] = ['half', 'full', 12, 24, 36]
+const GRIDS = ['on', 'off'] as const
 
 // Typeahead rows for `/iui` arguments: the word at the cursor (`token`,
 // starting at `start` in `text`) completed as a subcommand, a theme name, a
-// size, a width or a height. Right after `theme`, `size`, `width` or
-// `height`, rows hold the word and its argument, since the typeahead asks
-// only while a word is at the cursor.
+// size, a width, a height or a grid value. Right after `theme`, `size`,
+// `width`, `height` or `grid`, rows hold the word and its argument, since
+// the typeahead asks only while a word is at the cursor.
 export type Suggestion = { text: string; label?: string; description?: string }
 export function commandSuggestions(
   text: string, token: string, start: number,
-  o: { themes: readonly ThemeInfo[]; active: string; size: number; width?: Width; height?: Height },
+  o: { themes: readonly ThemeInfo[]; active: string; size: number; width?: Width; height?: Height; grid?: boolean },
 ): Suggestion[] {
   const head = /^\s*\/iui\s+/.exec(text)
   if (!head || start < head[0].length) return []
@@ -114,17 +120,23 @@ export function commandSuggestions(
       description: h === height ? 'current' : h === DEFAULT_HEIGHT ? 'the default: half the terminal'
         : h === 'full' ? `the terminal height less ${PICTURE_ROOM_ROWS} rows` : undefined,
     }))
+  const grid = o.grid ? 'on' : 'off'
+  const gridRows = (prefix: string, lead: string) => GRIDS
+    .filter(g => g.startsWith(prefix))
+    .map(g => ({ text: `${lead}${g}`, label: g, description: g === grid ? 'current' : g === 'off' ? 'the default' : undefined }))
   if (before.length === 0) {
     if (word === 'theme') return themeRows('', 'theme ')
     if (word === 'height') return heightRows('', 'height ')
     if (word === 'size') return sizeRows('', 'size ')
     if (word === 'width') return widthRows('', 'width ')
+    if (word === 'grid') return gridRows('', 'grid ')
     return SUBCOMMANDS.filter(c => c.name.startsWith(word)).map(c => ({ text: c.name, description: c.description }))
   }
   if (before.length === 1 && before[0] === 'theme') return themeRows(word, '')
   if (before.length === 1 && before[0] === 'size') return sizeRows(word.replace(/%$/, ''), '')
   if (before.length === 1 && before[0] === 'width') return widthRows(word, '')
   if (before.length === 1 && before[0] === 'height') return heightRows(word, '')
+  if (before.length === 1 && before[0] === 'grid') return gridRows(word, '')
   return []
 }
 
@@ -133,7 +145,7 @@ export function commandSuggestions(
 export async function registerCommand($: EngineInterface) {
   await commandRegister($, {
     name: 'iui',
-    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image or a Typst drawing takes), theme [name] (list or switch themes), grab (copy the selected pictures' text), dump (copy diagnostics)",
-    argumentHint: '[on|off|size <percent>|width [columns|full]|height [rows|half|full]|theme [name]|grab|dump]',
+    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image or a Typst drawing takes), grid [on|off] (each line of text on whole terminal rows), theme [name] (list or switch themes), grab (copy the selected pictures' text), dump (copy diagnostics)",
+    argumentHint: '[on|off|size <percent>|width [columns|full]|height [rows|half|full]|grid [on|off]|theme [name]|grab|dump]',
   }).catch(() => undefined)
 }

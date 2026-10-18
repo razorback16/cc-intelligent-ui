@@ -278,16 +278,17 @@ export async function runKillable(
 }
 
 // The template's inputs for a job and its ppi (the PNG compile and the
-// probe share them).
+// probe share them). With the row grid, `grid` is 1 and `top` 0.
 export function typstInputs(job: Job, segments: readonly string[], dir: string, isSafe: boolean) {
   const fit = fontFit(job.env.metrics, job.size)
   const { widthPt, ppi, rowPt } = sizing(job.columns, job.cell, fit.columnPt)
-  const { topPt } = alignFirstLine(firstLineOf(segments[0] ?? ''), rowPt)
+  const { topPt } = alignFirstLine(firstLineOf(segments[0] ?? ''), rowPt, job.grid)
   const inputs: Record<string, string | number> = {
     theme: job.theme,
     width: widthPt,
     top: topPt,
     row: Math.round(rowPt * 10000) / 10000,
+    ...(job.grid ? { grid: 1 } : {}),
     code: fit.code,
     ...(job.env.termFont ? { 'term-font': job.env.termFont } : {}),
     'theme-dir': job.themeDir,
@@ -438,7 +439,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     }
     pages = pages.map(p => ({ ...p, rows: Math.min(MAX_IMAGE_ROWS, p.rows) }))
   }
-  const { bulletRow } = alignFirstLine(firstLineOf(segments[0] ?? ''), rowPt)
+  const { bulletRow } = alignFirstLine(firstLineOf(segments[0] ?? ''), rowPt, job.grid)
   const result: Result = { pages, bulletRow, ...(note ? { note } : {}) }
   await fsWrite($, `${dir}/pages.json`, JSON.stringify(result))
   return result

@@ -79,6 +79,7 @@ More in the [gallery](docs/gallery.md): plots, fractals and a tour of all the Ma
 | `/iui on` / `off` | Turns the pictures on or off |
 | `/iui theme <name>` | Changes the theme: `claude-code`, `vscode-modern`, `vscode` or your own |
 | `/iui size <80–200>` | Text size in percent of your terminal text |
+| `/iui grid on` / `off` | Puts each line of text on the terminal rows, so that a mouse selection covers the text (off by default) |
 | `/iui details` | Shows the terminal, font, mode and Typst that the mod found |
 | `/iui setup` | iTerm2: adds the shell line that turns pictures on |
 | `/iui grab` | Copies the text under your last mouse selection of pictures |

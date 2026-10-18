@@ -73,6 +73,9 @@ export function renderKey(o: {
   // the room height and the design. A plain text's key does not change
   // with the rows.
   room?: Room
+  // `/iui grid` on: the lines on the row grid, another picture. Off adds
+  // nothing, so the keys of before stay.
+  grid?: boolean
 }): string {
   const { room } = o
   return hashOf([
@@ -80,6 +83,7 @@ export function renderKey(o: {
     o.templateStamp, o.look.name, o.look.dir, o.look.stamp, TEMPLATE_VERSION, ...(o.inline ? ['inline'] : []),
     ...(o.base ? ['base', o.base] : []),
     ...(room ? ['room', room.heightPt, room.design.widthPt, room.design.heightPt] : []),
+    ...(o.grid ? ['grid'] : []),
   ])
 }
 
@@ -112,7 +116,10 @@ export function firstLineOf(md: string): FirstLine {
 // the first line of text on the centre of a terminal row, and which row that
 // is: row 0 when the line fits there, else the first row its ink can reach
 // without being cut at the picture's top. The bullet is drawn on that row.
-export function alignFirstLine(kind: FirstLine, rowPt: number): { topPt: number; bulletRow: number } {
+// With the row grid (`grid`), the first line box is row 0 at the page's top:
+// no margin, and the bullet on row 0.
+export function alignFirstLine(kind: FirstLine, rowPt: number, grid = false): { topPt: number; bulletRow: number } {
+  if (grid) return { topPt: 0, bulletRow: 0 }
   const { centre, inkTop } = FIRST_LINE[kind]
   const bulletRow = Math.max(0, Math.ceil((centre - inkTop + 0.5) / rowPt - 0.5 - 1e-9))
   return { topPt: Math.round(((bulletRow + 0.5) * rowPt - centre) * 100) / 100, bulletRow }

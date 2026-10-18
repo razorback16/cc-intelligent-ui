@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import {
-  scaledBulletRow, base64Bytes, canDrawIn, COMMIT_MIN_MS, DEFAULT_CELL, fileHref, fitsInline, INLINE_MAX_BYTES, INLINE_MAX_SIDE, inlineBudget, renderKey,
+  alignFirstLine, scaledBulletRow, base64Bytes, canDrawIn, COMMIT_MIN_MS, DEFAULT_CELL, fileHref, fitsInline, INLINE_MAX_BYTES, INLINE_MAX_SIDE, inlineBudget, renderKey,
   RESIZE_QUIET_MS, resolveLinks, SEGMENT_ROWS, WATCH_PL,
 } from '../hooks/register'
 
@@ -309,6 +309,86 @@ test('width with no value shows it; a bad value is refused; a bad kept value is 
   const set = await $.command.run({ command: 'iui', args: 'width 400' } as any)
   expect(set.text).toContain('400 columns (a picture is 255 columns at most)')
   expect(kept.width).toBe(400)
+})
+
+// ---- The grid setting ---------------------------------------------------------
+
+const boxes = (tree: any): any[] =>
+  tree && typeof tree === 'object' ? [...(tree.type === 'Box' ? [tree] : []), ...(tree.children ?? []).flatMap(boxes)] : []
+// The reply bullet's row: the gutter Box's top margin.
+const bulletRowOf = (tree: any) => boxes(tree).find(b => b.props.width === 2)?.props.marginTop
+
+test('grid on is kept and begins an epoch: another key, compiled with grid=1 and top=0; grid off goes back to the key of before', async ($, on) => {
+  const { clock, kept, compiles, logs } = world(on, { TERM: 'xterm-kitty', IUI_DEBUG: '1' })
+  const ran = await $.command.run({ command: 'iui', args: '' } as any)
+  expect(ran.text).toContain('grid off.')
+  const ui = await $.ui.mount(message('g-1', 'Some **bold** text.'))
+  await clock.settle()
+  await ui.redraw(props('Some **bold** text.'))
+  const [first] = images(await ui.drawn())
+  expect(compiles.length).toBe(1)
+  expect(compiles[0]!.grid).toBe(undefined)
+  const begun = () => logs.filter(l => / epoch \d+ begin/.test(l)).length
+  const before = begun()
+  const set = await $.command.run({ command: 'iui', args: 'grid on' } as any)
+  expect(set.text).toContain('The row grid is now on (each line of text on whole terminal rows)')
+  expect(kept.grid).toBe(true)
+  expect(begun()).toBe(before + 1)
+  await clock.settle()
+  await clock.advance(COMMIT_MIN_MS)
+  await ui.redraw(props('Some **bold** text.'))
+  const [now] = images(await ui.drawn())
+  expect(compiles.length).toBe(2)
+  expect(compiles[1]!.grid).toBe('1')
+  expect(compiles[1]!.top).toBe('0')
+  expect(now.props.source.file).not.toBe(first.props.source.file)
+  const status = await $.command.run({ command: 'iui', args: '' } as any)
+  expect(status.text).toContain('grid on.')
+  const details = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(details.text).toContain('row grid on')
+  // Off: the key of before, in memory, so nothing compiles.
+  await $.command.run({ command: 'iui', args: 'grid off' } as any)
+  expect(kept.grid).toBe(false)
+  expect(begun()).toBe(before + 2)
+  await clock.settle()
+  await clock.advance(COMMIT_MIN_MS)
+  await ui.redraw(props('Some **bold** text.'))
+  expect(compiles.length).toBe(2)
+  expect(images(await ui.drawn())[0].props.source.file).toBe(first.props.source.file)
+})
+
+test('a kept grid on draws a heading on the grid, its bullet on row 0; grid with no value shows it', async ($, on) => {
+  const { clock, compiles } = world(on, { TERM: 'xterm-kitty' }, HEAD, { grid: true })
+  const shown = await $.command.run({ command: 'iui', args: 'grid' } as any)
+  expect(shown.text).toContain('The row grid is on (each line of text on whole terminal rows)')
+  const ui = await $.ui.mount(message('g-2', '# Title'))
+  await clock.settle()
+  await ui.redraw(props('# Title'))
+  expect(compiles[0]).toMatchObject({ grid: '1', top: '0' })
+  expect(bulletRowOf(await ui.drawn())).toBe(0)
+})
+
+test('a heading with the grid off keeps its bullet row and top margin', async ($, on) => {
+  const { clock, compiles } = world(on, { TERM: 'xterm-kitty' })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await $.ui.mount(message('g-3', '# Title'))
+  await clock.settle()
+  await ui.redraw(props('# Title'))
+  expect(compiles[0]!.grid).toBe(undefined)
+  expect(Number(compiles[0]!.top)).not.toBe(0)
+  // An h1 is taller than a row: its bullet is on row 1.
+  const { bulletRow } = alignFirstLine('h1', Number(compiles[0]!.row))
+  expect(bulletRow).toBe(1)
+  expect(bulletRowOf(await ui.drawn())).toBe(bulletRow)
+})
+
+test('a bad kept grid is off; a bad value is refused and not kept', async ($, on) => {
+  const { kept } = world(on, { TERM: 'xterm-kitty' }, HEAD, { grid: 'yes' })
+  const shown = await $.command.run({ command: 'iui', args: 'grid' } as any)
+  expect(shown.text).toContain('The row grid is off (the default)')
+  const bad = await $.command.run({ command: 'iui', args: 'grid maybe' } as any)
+  expect(bad.text).toContain('Not understood: "grid maybe"')
+  expect(kept.grid).toBe(undefined)
 })
 
 // ---- The box of a page ---------------------------------------------------------

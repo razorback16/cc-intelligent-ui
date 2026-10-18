@@ -33,7 +33,7 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
 
 | Command | What it does |
 |---|---|
-| `/iui` | Shows the state, the theme, the text size, the width and the image height, and a problem that keeps pictures away |
+| `/iui` | Shows the state, the theme, the text size, the width, the image height and the row grid, and a problem that keeps pictures away |
 | `/iui details` | Shows all that the mod found: where the mode comes from, the terminal font, the Typst path, why the terminal can or cannot show pictures, and if the automatic copy is on (`Auto copy:`) |
 | `/iui on` / `off` | Turns the pictures on or off (kept for later sessions) |
 | `/iui setup` / `setup remove` | iTerm2: adds or removes the shell line that turns pictures on (then close the tab and open a new one) |
@@ -45,6 +45,9 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
 | `/iui height half` | An image uses half the terminal height, from 6 to 24 rows (kept for later sessions). This is the default. |
 | `/iui height full` | An image uses the terminal height less 16 rows (kept for later sessions). The 16 rows are for the row of the file, the text around it and the prompt. |
 | `/iui height <6–200>` | Sets the most rows that an image can use (kept for later sessions). An image is never taller than with `full`. |
+| `/iui grid` | Shows the row grid setting: on or off |
+| `/iui grid on` | Puts each line of text in a picture on the terminal rows (kept for later sessions). Refer to [Selection and the row grid](#selection-and-the-row-grid). |
+| `/iui grid off` | Lines of text in a picture have the usual spacing (kept for later sessions). This is the default. |
 | `/iui theme` | Lists the themes, shows which one is in use, and shows the folder for your own themes |
 | `/iui theme <name>` | Changes to that theme (kept for later sessions) |
 | `/iui grab` | Copies the text under your last mouse selection of pictures. Refer to [Copy text from a picture](#copy-text-from-a-picture). |
@@ -77,6 +80,18 @@ The mod finds the position of each word on a page when you copy from that page f
 If the clipboard did not change, use `/iui grab`. It reads the last mouse selection of Claude Code (fullscreen mode only) and copies its text. If the copied text is not correct, `/iui dump` shows the cells that the mod found and the page that it used. It also writes all of this to `copy-debug.json` in the cache folder.
 
 For the limits, refer to [Limitations](limitations.md).
+
+## Selection and the row grid
+
+The terminal draws a mouse selection as full cells, thus a selection covers full rows. Usually, the lines of text in a picture are not on the terminal rows. A line of body text is approximately 1.3 rows tall, and a line in a list or a table is approximately 1.6 rows tall. Thus, after some lines, the selection is not on the text that the mod copies.
+
+`/iui grid on` puts each line of text on the terminal rows:
+
+- Each line of body text, a list, a quote or a table uses one row (or more rows if the text is large). The text is in the middle of its rows.
+- Each heading, each code line and each gap between blocks uses full rows.
+- Some blocks have a height that the mod cannot set, for example display math, an image or a Typst drawing. The mod adds space to such a block, so that its height is a number of full rows.
+
+Thus the selection covers the text that the mod copies. The lines are closer together than without the grid, so the look is not the same as VS Code. The grid is off by default. For the limits, refer to [Limitations](limitations.md).
 
 ## Plan approval
 

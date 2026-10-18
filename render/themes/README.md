@@ -61,6 +61,11 @@ Example: pink inline code, rounder boxes.
 | `table.pad-x-px`, `pad-y-px`, `border-px`, `header-weight` | `10`, `5`, `1`, `700` | |
 | `rule.border-px`, `gap-em` | `1`, `1.5` | Horizontal rule |
 
+With `/iui grid on`, the lines of text lie on the terminal's rows. Then some keys change their effect:
+
+- `text.leading-em`, `text.paragraph-em`, `heading.leading-em`, `heading.rule-pad-em`, `list.item-spacing-em` and `code-block.line-height` are not used. Each line is one row (a large heading is two or more rows). The gap between paragraphs and blocks is one row. The items of a tight list have no gap. The items of a loose list (a list with a blank line between its items or in an item) have a gap of one row.
+- `heading.above-em` and `below-em`, `rule.gap-em`, `code-block.pad-px`, `quote.pad-y-em` and `table.pad-y-px` are rounded to the nearest whole number of rows. Gaps above and below headings and rules are one row or more.
+
 ## Licence
 
 The `vscode` and `vscode-modern` values come from VS Code (MIT, Copyright (c) 2015 - present Microsoft Corporation). Each of those folders has the `LICENSE` file. Their `source` keys name the files the values come from.

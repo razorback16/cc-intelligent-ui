@@ -8,11 +8,12 @@ import {
   GHOSTTY_DEFAULT_BG, ghosttyBackgroundOf, ghosttyThemePaths, ghosttyThemesOf, ghosttyValueOf, hexColorOf,
   modeLine, modeOfColorFgBg, modeOfGnome, modeOfMacAppearance, resolveMode, settingOf,
   BASE_THEME, DEFAULT_THEME, chooseTheme, isSyntaxPath, isThemeName, measureCall, pickThemes, renderKey, themeEntry, themeFiles, themeListing,
-  needsRoom, nextJob, pageRowsOf, resultOf, roomInputs, rowsOfBlock, splitInTwo,
+  needsRoom, nextJob, pageRowsOf, resultOf, roomInputs, rowsOfBlock, splitInTwo, typstInputs,
   composeFrame, fitBox, pictureColumns, roomColumns, scaledBulletRow,
 } from '../hooks/register'
 import { DRAWING_ROWS } from '../hooks/lib/settings'
 import { wrapPid } from '../hooks/lib/typst'
+import type { Env, Job } from '../hooks/lib/state'
 
 const para = (i: number) => `Paragraph ${i} ${'word '.repeat(40)}`.trim()
 const fence = (info: string, lines: number) => ['```' + info, ...Array.from({ length: lines }, (_, i) => `line ${i}`), '```'].join('\n')
@@ -209,6 +210,14 @@ test('the size command takes 80 to 200 percent', () => {
   expect(parseCommand('probe 3')).toEqual({ kind: 'bad' })
 })
 
+test('the grid command: on, off, or nothing to show it', () => {
+  expect(parseCommand('grid')).toEqual({ kind: 'grid' })
+  expect(parseCommand('grid on')).toEqual({ kind: 'grid', grid: true })
+  expect(parseCommand('GRID Off')).toEqual({ kind: 'grid', grid: false })
+  expect(parseCommand('grid yes')).toEqual({ kind: 'bad' })
+  expect(parseCommand('grid on off')).toEqual({ kind: 'bad' })
+})
+
 test('the first line of an answer is told by how it starts', () => {
   expect(firstLineOf('\n\nSome text')).toBe('para')
   expect(firstLineOf('# Title')).toBe('h1')
@@ -237,6 +246,15 @@ test('the first line of text is centred on the bullet row', () => {
       expect(bulletRow).toBeLessThan(3)
       // No ink above the picture's top.
       expect(inkTop[kind] + topPt).toBeGreaterThan(0)
+    }
+  }
+})
+
+test('with the row grid, the first line box is row 0: no top margin, the bullet on row 0', () => {
+  for (const kind of ['para', 'h1', 'h2', 'h3', 'h4', 'quote', 'code', 'table'] as const) {
+    for (const rowPt of [9, 11, 13.2, 16]) {
+      expect(alignFirstLine(kind, rowPt, true)).toEqual({ topPt: 0, bulletRow: 0 })
+      expect(alignFirstLine(kind, rowPt, false)).toEqual(alignFirstLine(kind, rowPt))
     }
   }
 })
@@ -283,6 +301,30 @@ test('the room height is in the key only when it is given (a text that needs it)
   expect(renderKey({ ...o, room: { ...room, isNew: false, designKey: 'e' } })).toBe(roomed)
   expect(renderKey({ ...o, room: { ...room, heightPt: 200 } })).not.toBe(roomed)
   expect(renderKey({ ...o, room: { ...room, design: { widthPt: 500, heightPt: 300 } } })).not.toBe(roomed)
+})
+
+test('the grid is in the key only when it is on, so the keys with it off stay', () => {
+  const o = {
+    textHash: 'h', columns: 100, cell: DEFAULT_CELL, size: 100, mode: 'dark' as const, termFont: '', columnPt: 6,
+    templateStamp: '1', look: { name: 'vscode', dir: '/t', stamp: '0' },
+  }
+  const plain = renderKey(o)
+  expect(renderKey({ ...o, grid: false })).toBe(plain)
+  expect(renderKey({ ...o, grid: true })).not.toBe(plain)
+})
+
+test('with the grid on, the template gets grid=1 and top=0; with it off, no grid input', () => {
+  const env = { metrics: DEFAULT_METRICS, termFont: '' } as Env
+  const job = { key: 'k', requestId: 'r', text: '# Title', columns: 100, cell: DEFAULT_CELL, theme: 'dark', size: 100, grid: false, themeDir: '/t', env, epoch: 0 } as Job
+  const off = typstInputs(job, ['# Title'], '/c/k', false)
+  expect('grid' in off.inputs).toBe(false)
+  expect(off.inputs.top).toBe(alignFirstLine('h1', sizing(100, DEFAULT_CELL, fontFit(DEFAULT_METRICS).columnPt).rowPt).topPt)
+  const on = typstInputs({ ...job, grid: true }, ['# Title'], '/c/k', false)
+  expect(on.inputs.grid).toBe(1)
+  expect(on.inputs.top).toBe(0)
+  // Only grid and top change; the ppi is the same.
+  expect({ ...on.inputs, grid: undefined, top: off.inputs.top }).toEqual({ ...off.inputs, grid: undefined })
+  expect(on.ppi).toBe(off.ppi)
 })
 
 test('the room goes to the template in pt: the design page width and room height', () => {

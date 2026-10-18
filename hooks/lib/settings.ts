@@ -100,6 +100,8 @@ export const heightText = (height: Height) =>
   height === 'half' ? `half (half the terminal, ${PICTURE_MIN_ROWS} to ${PICTURE_MAX_ROWS} rows)`
   : height === 'full' ? `full (the terminal height less ${PICTURE_ROOM_ROWS} rows)`
   : `${height} rows`
+// The grid setting as words.
+export const gridText = (grid: boolean) => (grid ? 'on (each line of text on whole terminal rows)' : 'off (the default)')
 export const PICTURES_KEPT = 64
 // The file paths of the link rows under a picture: whether each one is a
 // file, kept for this many paths (the oldest go).

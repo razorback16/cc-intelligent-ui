@@ -12,6 +12,7 @@
 //   top=<pt>             the first page's top margin (default 6)
 //   row=<pt>             one terminal row; each page is padded to whole rows
 //                        (default 0 = no padding)
+//   grid=1               the row grid (optional; needs row; below)
 //   code=<fraction>      code size as a fraction of the body text (default 0.9)
 //   term-font=<family>   the terminal's font, used first for code (optional)
 //   height=<pt>          the room height of one drawing now (default 0 =
@@ -36,6 +37,13 @@
 //
 // safe=1: the retry mode after a failed compile. `typst` fences are shown as
 // code (no eval), math is shown as code (no mitex), images are alt boxes.
+//
+// grid=1: every line of text lies on the terminal's row grid, so a selection
+// of whole rows covers whole lines. Each line box is a whole number of rows
+// with its text centred, every block starts and ends on a row boundary, and
+// blocks of free height (display math, live drawings, images) are made a
+// whole number of rows. Every page's top margin is 0 (`top` is not used).
+// With row=0, grid=1 does nothing.
 
 #import "@preview/cmarker:0.1.6"
 #import "@preview/mitex:0.2.7": mitex-convert, mitex-scope
@@ -57,6 +65,8 @@
 // One terminal row in pt: each page is padded to a whole number of rows, so
 // its picture fills its box exactly. 0 = no padding.
 #let row = float(inp.at("row", default: "0")) * 1pt
+// The row grid (grid=1, only with a row; see the top).
+#let on-grid = row > 0pt and inp.at("grid", default: "0") not in ("", "0", "false", "no", "off")
 // Code size as a fraction of the body text (the hooks module sets it so code
 // in the terminal's font is the terminal's own size).
 #let code-scale = float(inp.at("code", default: "0.9"))
@@ -152,6 +162,27 @@
 #set par(leading: E.text.leading-em * 1em, spacing: E.text.paragraph-em * 1em, justify: false)
 #set block(spacing: E.text.paragraph-em * 1em)
 
+// ---------- the row grid (grid=1) ----------
+// Lengths on the grid: `rows-near` the whole rows nearest a length (gaps,
+// padding), `rows-up` the whole rows (at least one) a height needs.
+#let rows-near(x) = calc.round(x / row) * row
+#let rows-up(x) = calc.max(1, calc.ceil(x / row - 0.001)) * row
+// Fixed text edges for the current font and size (needs context) that make
+// one line box exactly `rows` rows, with the ink of a line (the tops of
+// "bdfhkl" to the bottoms of "gjpqy") centred in it: centring the font's
+// ascender-to-descender box instead puts large text visibly low. `rows` is
+// the least number of rows that this ink and a gap of 0.1em need: 1 for the
+// body text at the usual sizes (its ascender-to-descender box is then a
+// little more than the row; only the ink must not touch). With par leading
+// 0, the lines of a paragraph are then exactly `rows` rows apart.
+#let grid-edges() = {
+  let up = measure(text(top-edge: "bounds", bottom-edge: "baseline", "bdfhkl")).height
+  let down = measure(text(top-edge: "baseline", bottom-edge: "bounds", "gjpqy")).height
+  let n = calc.max(1, calc.ceil((up + down + 0.1em.to-absolute()) / row - 0.001))
+  let mid = (up - down) / 2
+  (top: mid + n * row / 2, bottom: mid - n * row / 2, rows: n)
+}
+
 // ---------- headings ----------
 #set heading(numbering: none)
 #show heading: it => {
@@ -160,6 +191,27 @@
   let size = at-level(H.size-em, lvl - 1) * 1em
   let above = at-level(H.above-em, lvl - 1) * 11pt
   let below = at-level(H.below-em, lvl - 1) * 11pt
+  if on-grid {
+    // The grid: a line box of whole rows (3 for h1 and 2 for h2 at the
+    // usual sizes: Typst's own heading rule makes h1 1.4em and h2 1.2em of
+    // the theme's size, so h1 is 30.8pt), whole-row gaps (at least one), and
+    // the rule on the bottom row boundary (no padding under the text: it
+    // would add height).
+    return {
+      set text(size: size, weight: H.weight)
+      context {
+        let g = grid-edges()
+        set text(top-edge: g.top, bottom-edge: g.bottom)
+        show raw: set text(top-edge: g.top, bottom-edge: g.bottom)
+        set par(leading: 0pt)
+        block(
+          width: 100%, above: calc.max(row, rows-near(above)), below: calc.max(row, rows-near(below)), sticky: true,
+          stroke: if lvl <= H.rule-levels { (bottom: px + C.border) },
+          it.body,
+        )
+      }
+    }
+  }
   set text(size: size, weight: H.weight)
   set par(leading: H.leading-em * 1em)
   if lvl <= H.rule-levels {
@@ -222,8 +274,11 @@
   let pad-y = IC.pad-y-px * px
   // A zero-width strut of the body text: a line with only code (a table
   // cell, a list item) gets the body's line box, so its baseline is where
-  // the text next to it has its baseline (the code font is smaller).
-  text(font: sans, size: text.size, top-edge: "ascender", bottom-edge: "descender", sym.zwj)
+  // the text next to it has its baseline (the code font is smaller). On
+  // the grid, the strut keeps the grid's edges (the line box of one row).
+  if on-grid { text(font: sans, size: text.size, sym.zwj) } else {
+    text(font: sans, size: text.size, top-edge: "ascender", bottom-edge: "descender", sym.zwj)
+  }
   h(pad-x)
   highlight(
     fill: C.inline-code-bg, extent: pad-x, radius: IC.radius-px * px,
@@ -239,6 +294,20 @@
 #show raw.where(block: true): it => context {
   let fg = if it.lang == none { C.at("code-plain-fg", default: C.code-fg) } else { C.code-fg }
   let CB = E.code-block
+  if on-grid {
+    // The grid: each code line exactly one row (the code is the terminal's
+    // font at its size), padding of whole rows (16px is about one row).
+    let g = grid-edges()
+    return {
+      set text(top-edge: g.top, bottom-edge: g.bottom)
+      set par(leading: 0pt, justify: false)
+      block(
+        width: 100%, fill: C.code-bg, stroke: CB.border-px * px + C.code-border,
+        radius: CB.radius-px * px, inset: (x: CB.pad-px * px, y: rows-near(CB.pad-px * px)), above: row, below: row,
+        text(fill: fg, it),
+      )
+    }
+  }
   let area = measure(text(top-edge: "ascender", bottom-edge: "descender", "x")).height
   set par(leading: calc.max(0pt, CB.line-height * text.size - area), justify: false)
   block(
@@ -255,18 +324,25 @@
 // every other block.
 #show quote.where(block: true): it => {
   let Q = E.quote
+  // The grid: whole-row gaps and padding (0.55em is nearer to no row than
+  // to one, so the bar is as tall as the text's rows), and one row between
+  // the blocks in it (Typst's own quote rule gives them 2.4em above and
+  // 1.8em below).
+  let gap = if on-grid { row } else { E.text.paragraph-em * 1em }
   block(
     width: 100%, fill: C.quote-bg, radius: Q.radius-px * px,
-    above: E.text.paragraph-em * 1em, below: E.text.paragraph-em * 1em,
+    above: gap, below: gap,
     stroke: (left: Q.bar-px * px + C.quote-border),
-    inset: (left: (Q.pad-left-px + Q.bar-px) * px, right: Q.pad-right-px * px, y: Q.pad-y-em * 1em),
-    it.body,
+    inset: (left: (Q.pad-left-px + Q.bar-px) * px, right: Q.pad-right-px * px, y: if on-grid { rows-near(Q.pad-y-em * 11pt) } else { Q.pad-y-em * 1em }),
+    if on-grid { set block(spacing: row); it.body } else { it.body },
   )
 }
 
 // ---------- tables ----------
+// The grid: each table row is whole rows (padding of whole rows: 5px is
+// none), so the rules lie on row boundaries.
 #set table(
-  inset: (x: E.table.pad-x-px * px, y: E.table.pad-y-px * px),
+  inset: (x: E.table.pad-x-px * px, y: if on-grid { rows-near(E.table.pad-y-px * px) } else { E.table.pad-y-px * px }),
   stroke: (x, y) => if y == 1 { (top: E.table.border-px * px + C.th-border) } else if y > 1 { (top: E.table.border-px * px + C.border) },
 )
 #show table.cell.where(y: 0): set text(weight: E.table.header-weight)
@@ -367,8 +443,10 @@
 #let item-mark(prefix, body) = if not probe { body } else { mark("b", kind: "item", prefix: prefix); body }
 
 // ---------- helpers ----------
+// On the grid, the boxes below have no padding above and below (it would
+// make the line taller than its row): the frame is the row, made 1pt smaller.
 #let alt-box(alt, why: none) = box(
-  stroke: px + C.muted, inset: (x: 4pt, y: 1.5pt), outset: (y: 1pt), radius: 3pt,
+  stroke: px + C.muted, inset: (x: 4pt, y: if on-grid { 0pt } else { 1.5pt }), outset: (y: if on-grid { -1pt } else { 1pt }), radius: 3pt,
   text(fill: C.muted, size: 0.9em, {
     "🖼 "
     if alt == none or alt == "" { if why == none { "image" } else { why } } else { alt }
@@ -410,7 +488,15 @@
     let w = if room-h > 0pt and nat.width > 0pt and w * (nat.height / nat.width) > room-h {
       room-h * (nat.width / nat.height)
     } else { w }
-    image(full, width: w, alt: alt)
+    if on-grid {
+      // The grid: the image centred in a box of whole rows, lowered by the
+      // line's descent, so its line is exactly those rows.
+      let h = if nat.width > 0pt { w * (nat.height / nat.width) } else { nat.height }
+      let desc = if type(text.bottom-edge) == length { -text.bottom-edge } else { 0pt }
+      box(height: rows-up(h), baseline: desc, align(horizon, image(full, width: w, alt: alt)))
+    } else {
+      image(full, width: w, alt: alt)
+    }
   }))
 }
 
@@ -542,7 +628,13 @@
   table(columns: columns, ..args)
 }
 
-#let md-rule() = block(above: E.rule.gap-em * 1em, below: E.rule.gap-em * 1em, line(length: 100%, stroke: E.rule.border-px * px + C.border))
+#let md-rule() = if on-grid {
+  // The grid: one row with the line in its middle, whole-row gaps.
+  let gap = calc.max(row, rows-near(E.rule.gap-em * 11pt))
+  block(height: row, above: gap, below: gap, align(horizon, line(length: 100%, stroke: E.rule.border-px * px + C.border)))
+} else {
+  block(above: E.rule.gap-em * 1em, below: E.rule.gap-em * 1em, line(length: 100%, stroke: E.rule.border-px * px + C.border))
+}
 
 // ---------- task lists: "- [x] done" / "- [ ] todo" ----------
 #let checkbox(checked) = box(
@@ -592,26 +684,38 @@
   (m.captures.at(0) != " ", kids.slice(n).join())
 }
 
+// A loose list (a blank line between its items or between the blocks of an
+// item): cmarker ends each paragraph of its items with a parbreak, a tight
+// list has none. On the grid, the items of a loose list have one row
+// between them (the items of a tight list touch, as the lines of a
+// paragraph do).
+#let loose(items) = items.any(it => type(it) == content and it.func() == [].func() and it.children.any(c => c.func() == parbreak))
+#let item-gap(items) = if on-grid and loose(items) { (spacing: row) } else { (:) }
+
 #let md-list(..args) = {
   let items = args.pos()
+  let gap = item-gap(items)
   let tasks = items.map(task-split)
   if probe {
     items = items.zip(tasks).map(((it, t)) => item-mark(if t == none { "- " } else if t.at(0) { "- [x] " } else { "- [ ] " }, it))
     tasks = tasks.zip(items).map(((t, it)) => if t == none { none } else { (t.at(0), item-mark(if t.at(0) { "- [x] " } else { "- [ ] " }, t.at(1))) })
   }
-  if tasks.all(t => t == none) { return list(..args.named(), ..items) }
+  if tasks.all(t => t == none) { return list(..args.named(), ..gap, ..items) }
   if tasks.all(t => t != none) {
     // GitHub-style: no bullet, the checkbox sits where the bullet would.
+    // The grid: a strut of the text (its line box) beside each checkbox, so
+    // the checkbox sits on its row's baseline, and no gap between rows (one
+    // row in a loose list).
     let rows = tasks.map(t => (
-      align(right, checkbox(t.at(0))),
+      align(right, if on-grid { [#sym.zwj#checkbox(t.at(0))] } else { checkbox(t.at(0)) }),
       t.at(1),
     ))
     pad(left: 0.45em, grid(
-      columns: (1.4em, 1fr), column-gutter: 0.55em, row-gutter: 0.38em + 0.15em,
+      columns: (1.4em, 1fr), column-gutter: 0.55em, row-gutter: if on-grid { gap.at("spacing", default: 0pt) } else { 0.38em + 0.15em },
       ..rows.flatten(),
     ))
   } else {
-    list(..args.named(), ..items.zip(tasks).map(((it, t)) => if t == none { it } else {
+    list(..args.named(), ..gap, ..items.zip(tasks).map(((it, t)) => if t == none { it } else {
       [#checkbox(t.at(0)) #t.at(1)]
     }))
   }
@@ -621,12 +725,13 @@
 #let md-enum(..args) = {
   let start = args.named().at("start", default: 1)
   let start = if type(start) == int { start } else { 1 }
+  let gap = item-gap(args.pos())
   let items = args.pos().enumerate().map(((i, it)) => {
     let t = task-split(it)
     let it = if t == none { it } else { [#checkbox(t.at(0)) #t.at(1)] }
     item-mark(str(start + i) + ". ", it)
   })
-  enum(..args.named(), ..items)
+  enum(..args.named(), ..gap, ..items)
 }
 
 // ---------- ```typst fences: live Typst ----------
@@ -660,7 +765,7 @@
       set text(costs: (orphan: 102%)) if probe
       eval(src, mode: "markup", scope: (theme: live-theme))
     }
-    std.block(width: 100%, above: 1.2em, below: 1.2em, layout(size => {
+    std.block(width: 100%, above: if on-grid { row } else { 1.2em }, below: if on-grid { row } else { 1.2em }, layout(size => {
       // The space here (less than the content width in a list or a quote).
       let space = if size.width.pt() < 1e6 { size.width } else { content-w }
       // Lay the code out in the design width (in design units: the space / f
@@ -675,11 +780,13 @@
       // Lay a too-wide drawing out in the width it needs: in the width w, an
       // align(center, ..) puts the extra width left of the block, where the
       // scale cannot bring it back (it is cut off at the page edge).
-      scale(k * 100%, origin: top + left, reflow: true, std.block(width: calc.max(w, wide), drawing))
+      let drawn = scale(k * 100%, origin: top + left, reflow: true, std.block(width: calc.max(w, wide), drawing))
+      // The grid: the drawing centred in whole rows.
+      if on-grid { std.block(height: rows-up(measure(drawn, width: space).height), align(horizon, drawn)) } else { drawn }
     }))
   } else if block and safe and l in live-langs {
     // Retry mode: show the source, with a note that it was not drawn.
-    std.block(above: 1.2em, below: 0pt, sticky: true,
+    std.block(above: if on-grid { row } else { 1.2em }, below: 0pt, sticky: true,
       text(size: 0.85em, fill: C.muted, style: "italic")[Typst source (not drawn: the answer failed to compile)])
     raw(src, block: true, lang: "typst")
   } else {
@@ -770,9 +877,74 @@
 }
 
 #let kbd(attrs, body) = box(
-  stroke: px + C.border, inset: (x: 3pt, y: 1pt), outset: (y: 1pt), radius: 3pt,
+  stroke: px + C.border, inset: (x: 3pt, y: if on-grid { 0pt } else { 1pt }), outset: (y: if on-grid { -1pt } else { 1pt }), radius: 3pt,
   text(font: mono, size: 0.9em, body),
 )
+
+// ---------- the row grid: the page's rules (grid=1) ----------
+// The rules of a page on the grid, over the rules above (the elements with
+// their own grid branch above: headings, code blocks, quotes, tables, task
+// lists, rules, images, live drawings, alt and kbd boxes).
+#let grid-rules(body) = context {
+  let g = grid-edges()
+  // The line box's height above and below the baseline.
+  let (asc, desc) = (g.top, -g.bottom)
+  // Body text: line boxes of exactly g.rows rows (fixed edges, no leading),
+  // one row between paragraphs and blocks. Any smaller text (inline code,
+  // footnotes, sub- and superscripts) gets the same fixed edges, so it never
+  // makes its line taller.
+  set text(top-edge: g.top, bottom-edge: g.bottom)
+  show raw: set text(top-edge: g.top, bottom-edge: g.bottom)
+  // Raised and lowered text (footnote numbers): x-height to baseline edges,
+  // which stay inside the line box, so it never makes its line taller.
+  show super: set text(top-edge: "x-height", bottom-edge: "baseline")
+  show sub: set text(top-edge: "x-height", bottom-edge: "baseline")
+  set par(leading: 0pt, spacing: row)
+  set block(spacing: row)
+  show table: set par(leading: 0pt)
+  // No gap between list items (a loose list's items set one row: item-gap).
+  set list(spacing: 0pt)
+  set enum(spacing: 0pt)
+  // Footnotes: the separator in the middle of a row of its own (the row
+  // above it is the gap), and each entry is one line. An entry's own rule
+  // gives it a leading of 0.5em; on the grid its lines are as far apart as
+  // the text's (its smaller text has the body's fixed edges, so each of its
+  // lines is g.rows rows too).
+  show footnote.entry: set par(leading: 0pt)
+  set footnote.entry(
+    clearance: 0pt, gap: 0pt,
+    separator: block(height: row, align(horizon, line(length: 30%, stroke: px + C.border))),
+  )
+  // Inline math taller than the line box. The line box is the text's here
+  // (a heading's is not the body's): its fixed edges, or the body's where
+  // the edges are not lengths (raised and lowered text). Math ink at most
+  // 0.15 row over an edge goes out of the line box, which keeps its height
+  // (the ink then comes near the next line, not into its text); more ink
+  // over an edge gives its line whole rows more above or below the text
+  // (the text stays on its row). The math's baseline is always the text's.
+  show math.equation.where(block: false): it => context {
+    let (asc, desc) = if type(text.top-edge) == length and type(text.bottom-edge) == length {
+      (text.top-edge.to-absolute(), -text.bottom-edge.to-absolute())
+    } else { (asc, desc) }
+    let big = 1000pt
+    let a = measure([#text(top-edge: "baseline", bottom-edge: -big, sym.zwj)#box(it)]).height - big
+    let d = measure([#text(top-edge: big, bottom-edge: "baseline", sym.zwj)#box(it)]).height - big
+    if a <= asc and d <= desc { return it }
+    // The line box above and below the baseline: the text's, or whole rows
+    // more for an edge with more than the slack over it.
+    let slack = 0.15 * row
+    let up = if a <= asc + slack { asc } else { asc + calc.ceil((a - asc - slack) / row) * row }
+    let down = if d <= desc + slack { desc } else { desc + calc.ceil((d - desc - slack) / row) * row }
+    // The math with its baseline on the box's (the box's top is `up` over
+    // the baseline, the math's top `a`), so its ink may go out of the box.
+    box(width: measure(box(it)).width, height: up + down, baseline: down, place(top + left, dy: up - a, box(it)))
+  }
+  // Display math: centred in whole rows.
+  show math.equation.where(block: true): it => context {
+    block(width: 100%, height: rows-up(measure(it).height), above: row, below: row, align(horizon, it))
+  }
+  body
+}
 
 // ---------- render ----------
 // The content of segment `i`; `scope` over the template's own functions.
@@ -818,10 +990,15 @@
   }).sum(default: 0)
 } else { 0 }
 
+// The grid's rules are over the pages (not only their bodies), so the
+// footnote entries, which a page lays out, have them too.
+#show: body => if on-grid { grid-rules(body) } else { body }
+
 #for (i, seg) in segments.enumerate() {
   if only > 0 and i + 1 != only { continue }
   let md = if type(seg) == str { seg } else { str(seg) }
-  let top = if i == 0 { first-top } else { margin-y }
+  // On the grid, every page starts on a row: no top margin.
+  let top = if on-grid { 0pt } else if i == 0 { first-top } else { margin-y }
   let body = render-md(md, i)
   if notes-before > 0 { body = { counter(footnote).update(notes-before); body } }
   // Pad the bottom so the page is a whole number of terminal rows.

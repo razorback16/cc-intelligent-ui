@@ -71,6 +71,8 @@ export type Job = {
   cell: Cell
   theme: IuiTheme
   size: number
+  // `/iui grid`: each text line on the terminal's row grid.
+  grid: boolean
   themeDir: string
   env: Env
   // The folder relative images start from (a Markdown file's); else env.cwd.
@@ -128,6 +130,9 @@ export const S = {
   // The height setting of the pictures on screen: `height` once its epoch
   // committed (with `shown`), so an image box changes in one step.
   shownHeight: DEFAULT_HEIGHT as Height,
+  // `/iui grid`: each text line of a page on whole terminal rows, so a
+  // mouse selection (whole cells) covers the text it copies. Off by default.
+  grid: false,
   look: null as Look | null,
   // The usable themes the last scan found, for the typeahead.
   themeChoices: [] as ThemeInfo[],

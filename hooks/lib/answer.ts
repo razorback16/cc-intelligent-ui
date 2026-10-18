@@ -107,13 +107,13 @@ export async function pagesOf($: EngineInterface, o: PagesInput): Promise<Drawin
   const room = await roomOf($, { hasRoom, textHash, base, env, rows, widthPt, rowPt, isLive: liveNow() })
   const key = renderKey({
     textHash, columns, cell, size: S.size, mode: S.theme, termFont: env.termFont,
-    columnPt, templateStamp: env.stamp, look: active, inline: env.inline, base, room,
+    columnPt, templateStamp: env.stamp, look: active, inline: env.inline, base, room, grid: S.grid,
   })
   const seen = lastText.get(id)
   const changed = seen !== text
   lastText.set(id, text)
   const job: Job = {
-    key, requestId: id, text, columns, cell, theme: S.theme, size: S.size, themeDir: active.dir, env, epoch: S.epoch,
+    key, requestId: id, text, columns, cell, theme: S.theme, size: S.size, grid: S.grid, themeDir: active.dir, env, epoch: S.epoch,
     ...(base ? { base } : {}), ...(room ? { room } : {}), ...(o.onScreen !== undefined ? { onScreen: o.onScreen } : {}),
   }
   // The picture drawn last for the same text, at another key.

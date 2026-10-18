@@ -21,7 +21,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderViewport } from 'claude-code'
 
 import {
-  DEFAULT_THEME, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
+  DEFAULT_THEME, gridText, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
   widthText,
 } from './lib/settings'
 import { clip, drawnAnswers, editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env } from './lib/state'
@@ -50,7 +50,7 @@ import {
 
 // The names this module exported before the split (the tests import them).
 export {
-  BASE_THEME, DEFAULT_CELL, DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_THEME, DEFAULT_WIDTH, heightText, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH,
+  BASE_THEME, DEFAULT_CELL, DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_THEME, DEFAULT_WIDTH, gridText, heightText, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH,
   MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, PICTURE_ROOM_ROWS, SEGMENT_ROWS, TYPST_PROMPT, widthText, type Height, type Width,
   COMMIT_MAX_MS, COMMIT_MIN_MS, DESIGNS_KEPT_DAYS, RESIZE_QUIET_MS, RESULTS_KEPT, TOUCH_FLUSH_MS,
 } from './lib/settings'
@@ -444,7 +444,7 @@ export const register: Register = on => {
     const got = await next(e)
     if (!/^\s*\/iui\s/.test(e.text)) return got
     if (!S.themeChoices.length) await setUp($).catch(() => null)
-    const mine = commandSuggestions(e.text, e.token, e.start, { themes: S.themeChoices, active: S.look?.name ?? DEFAULT_THEME, size: S.size, width: S.width, height: S.height })
+    const mine = commandSuggestions(e.text, e.token, e.start, { themes: S.themeChoices, active: S.look?.name ?? DEFAULT_THEME, size: S.size, width: S.width, height: S.height, grid: S.grid })
     return mine.length ? { suggestions: [...got.suggestions, ...mine] } : got
   })
 
@@ -487,6 +487,16 @@ export const register: Register = on => {
       }
       const head = asked.height === undefined ? 'The most rows an image or a Typst drawing takes' : 'Intelligent UI images and Typst drawings now take at most'
       return { text: `${head}: ${heightText(S.height)}. This applies to images (sent or pasted) and to Typst drawings in answers. Use /iui height half (the default), /iui height full, or /iui height <${MIN_HEIGHT}-${MAX_HEIGHT}> (never more than full).` }
+    }
+    if (asked.kind === 'grid') {
+      if (asked.grid === undefined) await setUp($).catch(() => null)
+      else {
+        S.grid = asked.grid
+        beginEpoch($)
+        await storeSet($, 'grid', S.grid)
+      }
+      const head = asked.grid === undefined ? 'The row grid is' : 'The row grid is now'
+      return { text: `${head} ${gridText(S.grid)}. With the grid on, a mouse selection over a picture covers the lines it copies. Use /iui grid on, or /iui grid off (the default).` }
     }
     if (asked.kind === 'setup') {
       await setUp($).catch(() => null)
@@ -534,15 +544,15 @@ export const register: Register = on => {
         ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
         : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+ and Rio 0.5.27+ with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
       const auto = `Auto copy: ${autoCopyOf(state === 'on')}`
-      return { text: `Intelligent UI is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, ${font}. ${typst}; ${terminal}.\n${auto}` }
+      return { text: `Intelligent UI is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, row grid ${S.grid ? 'on' : 'off'}, ${font}. ${typst}; ${terminal}.\n${auto}` }
     }
     // The short state: what is set, and only the problems that keep pictures away.
     const sized = (v: number | 'full' | 'half', unit: string) => (typeof v === 'number' ? `${v} ${unit}` : v)
-    const lines = [`Intelligent UI is ${state}: theme ${theme}, ${S.theme}, text ${S.size}%, width ${sized(S.width, 'columns')}, height ${sized(S.height, 'rows')}.`]
+    const lines = [`Intelligent UI is ${state}: theme ${theme}, ${S.theme}, text ${S.size}%, width ${sized(S.width, 'columns')}, height ${sized(S.height, 'rows')}, grid ${S.grid ? 'on' : 'off'}.`]
     if (S.setupNeeded) lines.push('In iTerm2, run /iui setup once to show pictures.')
     else if (!ready.canDraw) lines.push('This terminal shows no pictures, so answers stay text. Pictures show in kitty, Ghostty and iTerm2 3.6+.')
     if (!ready.typst) lines.push('Typst is not installed, so answers stay text. Install it: brew install typst')
-    lines.push('Change: /iui on | off | size | width | height | theme. More: /iui details')
+    lines.push('Change: /iui on | off | size | width | height | grid | theme. More: /iui details')
     return { text: bad + lines.join('\n') }
   })
 

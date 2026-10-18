@@ -327,7 +327,7 @@ test('/iui grab and dump are commands with typeahead rows; dump with nothing see
   expect(parseCommand('grab')).toEqual({ kind: 'grab' })
   expect(parseCommand('dump')).toEqual({ kind: 'dump' })
   expect(parseCommand('grab now')).toEqual({ kind: 'bad' })
-  const rows = commandSuggestions('/iui g', 'g', 5, { themes: [], active: 'claude-code', size: 100 })
+  const rows = commandSuggestions('/iui gra', 'gra', 5, { themes: [], active: 'claude-code', size: 100 })
   expect(rows).toEqual([{ text: 'grab', description: 'copy the text of the pictures you last selected' }])
   expect(commandSuggestions('/iui du', 'du', 5, { themes: [], active: 'claude-code', size: 100 }).map(r => r.text)).toEqual(['dump'])
   const ran = await $.command.run({ command: 'iui', args: 'dump' } as any)
