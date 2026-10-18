@@ -14,9 +14,9 @@
 // mutable state `S`), markdown, terminal, terminals, mode, themes, command,
 // setup, host, typst, draw, stream, answer (one text through the pipeline),
 // env, images, pictures, plan (the plan approval flow), copy (the text under
-// a mouse copy of the pictures) and probe (the drawn pages, and the words of
-// a page a copy reads). This file joins them to the hooks, and gives the
-// tests the names they import.
+// a mouse copy of the pictures), probe (the drawn pages, and the words of a
+// page a copy reads) and updates (the daily check for a new version). This
+// file joins them to the hooks, and gives the tests the names they import.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderViewport } from 'claude-code'
 
@@ -42,7 +42,8 @@ import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/fra
 import { roomColumns } from './lib/terminal'
 import { onScreenOf, pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
 import { pasteDir, rowsAfter, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
-import { fsWrite, processRun, sessionSurfaces, storeSet, uiCopy, uiResolve, uiSelection, uiToast } from './lib/api'
+import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
+import { clockNow, fsWrite, processRun, sessionSurfaces, storeSet, uiCopy, uiResolve, uiSelection, uiToast } from './lib/api'
 import {
   currentPlan, decidePlan, decisionOf, drawAskLine, drawPlanResult, drawPlanUse, isPlanQuestion, planFileOf, planInputOf, planOf,
   planShownOf, scheduleClear, type PlanVerdict,
@@ -82,6 +83,10 @@ export {
 export { nextJob } from './lib/stream'
 export * from './lib/images'
 export * from './lib/copy'
+export {
+  agoText, checkedOf, compareVersions, isDue, isNewer, parseVersion, shouldTell, toldOf, UPDATE_EVERY_MS, UPDATE_FETCH_MS, UPDATE_STEPS, UPDATE_TOAST_MS,
+  UPDATE_URL, updateLine, updateNotice, updateToast, versionOf,
+} from './lib/updates'
 export {
   choiceOf, decisionOf, editorArgv, feedbackOf, isPlanQuestion, normalPath, PLAN_ASK_LINE, PLAN_AUTO, PLAN_CLEAR, PLAN_DRAWING, PLAN_EDIT,
   PLAN_FEEDBACK, PLAN_HEADER, PLAN_IMPLEMENT, PLAN_MANUAL, PLAN_QUESTION, PLAN_QUESTION_EDITED, PLAN_REJECTED, planFileOf, planInputOf,
@@ -348,6 +353,13 @@ function autoCopyOf(isOn: boolean): string {
   return now?.clip && !now.ended ? 'on' : 'off (the watcher does not run)'
 }
 
+// The update check's state now, for /iui, /iui details and /iui updates.
+async function updateState($: EngineInterface): Promise<UpdateState> {
+  await loadUpdates($)
+  const now = await clockNow($).catch(() => Date.now())
+  return { on: S.updates, off: S.updatesOff, own: S.ownVersion, checked: S.updateChecked, now }
+}
+
 // /iui grab: the last mouse selection, read and copied.
 async function grab($: EngineInterface): Promise<string> {
   const selected = await uiSelection($).catch(() => undefined)
@@ -444,7 +456,10 @@ export const register: Register = on => {
     const got = await next(e)
     if (!/^\s*\/iui\s/.test(e.text)) return got
     if (!S.themeChoices.length) await setUp($).catch(() => null)
-    const mine = commandSuggestions(e.text, e.token, e.start, { themes: S.themeChoices, active: S.look?.name ?? DEFAULT_THEME, size: S.size, width: S.width, height: S.height, grid: S.grid })
+    await loadUpdates($)
+    const mine = commandSuggestions(e.text, e.token, e.start, {
+      themes: S.themeChoices, active: S.look?.name ?? DEFAULT_THEME, size: S.size, width: S.width, height: S.height, grid: S.grid, updates: S.updates,
+    })
     return mine.length ? { suggestions: [...got.suggestions, ...mine] } : got
   })
 
@@ -498,6 +513,17 @@ export const register: Register = on => {
       const head = asked.grid === undefined ? 'The row grid is' : 'The row grid is now'
       return { text: `${head} ${gridText(S.grid)}. With the grid on, a mouse selection over a picture covers the lines it copies. Use /iui grid on, or /iui grid off (the default).` }
     }
+    if (asked.kind === 'updates') {
+      await loadUpdates($)
+      if (asked.on !== undefined) {
+        S.updates = asked.on
+        await storeSet($, 'updates', S.updates)
+        // On: the check of this load, if it did not run (it waits 24 h after the last one).
+        if (S.updates) void checkUpdates($)
+      }
+      const head = asked.on === undefined ? 'Update checks' : 'Update checks are now'
+      return { text: `${head}: ${updateLine(await updateState($))}. When on, Intelligent UI gets its plugin.json from GitHub once a day at most (one GET, no data sent) and shows a toast when a new version is available. Use /iui updates on (the default), or /iui updates off.` }
+    }
     if (asked.kind === 'setup') {
       await setUp($).catch(() => null)
       return { text: await runSetup($, asked.remove) }
@@ -544,7 +570,8 @@ export const register: Register = on => {
         ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
         : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+ and Rio 0.5.27+ with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
       const auto = `Auto copy: ${autoCopyOf(state === 'on')}`
-      return { text: `Intelligent UI is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, row grid ${S.grid ? 'on' : 'off'}, ${font}. ${typst}; ${terminal}.\n${auto}` }
+      const updates = `Update checks: ${updateLine(await updateState($))}`
+      return { text: `Intelligent UI is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, row grid ${S.grid ? 'on' : 'off'}, ${font}. ${typst}; ${terminal}.\n${auto}\n${updates}` }
     }
     // The short state: what is set, and only the problems that keep pictures away.
     const sized = (v: number | 'full' | 'half', unit: string) => (typeof v === 'number' ? `${v} ${unit}` : v)
@@ -552,7 +579,9 @@ export const register: Register = on => {
     if (S.setupNeeded) lines.push('In iTerm2, run /iui setup once to show pictures.')
     else if (!ready.canDraw) lines.push('This terminal shows no pictures, so answers stay text. Pictures show in kitty, Ghostty and iTerm2 3.6+.')
     if (!ready.typst) lines.push('Typst is not installed, so answers stay text. Install it: brew install typst')
-    lines.push('Change: /iui on | off | size | width | height | grid | theme. More: /iui details')
+    const notice = updateNotice(await updateState($))
+    if (notice) lines.push(notice)
+    lines.push('Change: /iui on | off | size | width | height | grid | updates | theme. More: /iui details')
     return { text: bad + lines.join('\n') }
   })
 
@@ -757,6 +786,8 @@ export const register: Register = on => {
   // The main loop's running turn, which "clear context" ends.
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) S.mainTurnId = e.turnId
+    // The update check, when the end of setUp could not run it (no terminal yet).
+    void checkUpdates($)
     // The clipboard part, if it is not on (a picture drawn while it was off).
     if (await read($, isOn)) watchClipboard($)
     return next(e)

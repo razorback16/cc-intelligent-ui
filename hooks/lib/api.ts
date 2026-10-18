@@ -4,15 +4,16 @@
 // declaration that spells the call `$.noun.method(...)` (the validator
 // follows `$` into a declaration only), with the types of EngineInterface.
 import type {
-  AskOptions, CommandSpec, EngineInterface, FsBytes, FsReadBytesOptions, FsReadOptions, FsStatOptions, InvalidatableEventName,
+  AskOptions, CommandSpec, EngineInterface, FsBytes, FsReadBytesOptions, FsReadOptions, FsStatOptions, HttpInit, InvalidatableEventName,
   OpEventOf, ProcessRunInit, ProcessSpawnRequest, ResolveInput, ToastOptions, UiCopyArgs, UiLogOptions,
 } from 'claude-code'
 
 // The environment variables the mod reads. `$.env.get` takes a literal name
 // (the validator lists them), so envGet has one call per name.
 export type EnvName =
-  | 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES' | 'CLAUDE_CODE_SESSION_KIND' | 'CLAUDE_CODE_TMPDIR'
-  | 'CMUX_SOCKET_PATH' | 'CMUX_SURFACE_ID' | 'CMUX_WORKSPACE_ID' | 'COLORFGBG' | 'GHOSTTY_RESOURCES_DIR' | 'HOME'
+  | 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC' | 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES' | 'CLAUDE_CODE_SESSION_KIND' | 'CLAUDE_CODE_TMPDIR'
+  | 'CMUX_SOCKET_PATH' | 'CMUX_SURFACE_ID' | 'CMUX_WORKSPACE_ID' | 'COLORFGBG' | 'DISABLE_AUTOUPDATER' | 'DISABLE_UPDATES'
+  | 'GHOSTTY_RESOURCES_DIR' | 'HOME'
   | 'ITERM_PROFILE' | 'ITERM_SESSION_ID' | 'IUI_DEBUG' | 'IUI_FORCE' | 'KITTY_CONFIG_DIRECTORY' | 'KITTY_PID'
   | 'KITTY_WINDOW_ID' | 'LC_TERMINAL' | 'RIO_CONFIG_HOME' | 'SHELL' | 'SSH_CONNECTION' | 'SSH_TTY' | 'STY'
   | 'TERM' | 'TERM_PROGRAM' | 'TMUX' | 'XDG_CONFIG_HOME' | 'ZDOTDIR'
@@ -23,6 +24,10 @@ export function clockAfter($: EngineInterface, ms: number, fn: () => void) {
 
 export function clockEvery($: EngineInterface, ms: number, fn: () => void) {
   return $.clock.every(ms, fn)
+}
+
+export function clockNow($: EngineInterface) {
+  return $.clock.now()
 }
 
 export function commandRegister($: EngineInterface, command: CommandSpec) {
@@ -39,6 +44,7 @@ export function configList($: EngineInterface) {
 
 export function envGet($: EngineInterface, name: EnvName): Promise<string | undefined> {
   switch (name) {
+    case 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': return $.env.get('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC')
     case 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES': return $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES')
     case 'CLAUDE_CODE_SESSION_KIND': return $.env.get('CLAUDE_CODE_SESSION_KIND')
     case 'CLAUDE_CODE_TMPDIR': return $.env.get('CLAUDE_CODE_TMPDIR')
@@ -46,6 +52,8 @@ export function envGet($: EngineInterface, name: EnvName): Promise<string | unde
     case 'CMUX_SURFACE_ID': return $.env.get('CMUX_SURFACE_ID')
     case 'CMUX_WORKSPACE_ID': return $.env.get('CMUX_WORKSPACE_ID')
     case 'COLORFGBG': return $.env.get('COLORFGBG')
+    case 'DISABLE_AUTOUPDATER': return $.env.get('DISABLE_AUTOUPDATER')
+    case 'DISABLE_UPDATES': return $.env.get('DISABLE_UPDATES')
     case 'GHOSTTY_RESOURCES_DIR': return $.env.get('GHOSTTY_RESOURCES_DIR')
     case 'HOME': return $.env.get('HOME')
     case 'ITERM_PROFILE': return $.env.get('ITERM_PROFILE')
@@ -91,6 +99,10 @@ export function fsStat($: EngineInterface, path: string, options?: FsStatOptions
 
 export function fsWrite($: EngineInterface, path: string, text: string) {
   return $.fs.write(path, text)
+}
+
+export function httpFetch($: EngineInterface, url: string, init?: HttpInit) {
+  return $.http.fetch(url, init)
 }
 
 export function pluginRoot($: EngineInterface) {

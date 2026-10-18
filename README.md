@@ -22,6 +22,8 @@ Then, in Claude Code:
 
 It works at once, with no restart.
 
+To get new versions, turn on auto-update for the `razorback16` marketplace in `/plugin`, or update manually. Refer to [Update](docs/install.md#update). The mod also shows a notice when a new version is available (`/iui updates off` stops it).
+
 You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15 and macOS. The pictures show only in some terminals:
 
 | Terminal | Pictures | What to do |
@@ -80,6 +82,7 @@ More in the [gallery](docs/gallery.md): plots, fractals and a tour of all the Ma
 | `/iui theme <name>` | Changes the theme: `claude-code`, `vscode-modern`, `vscode` or your own |
 | `/iui size <80–200>` | Text size in percent of your terminal text |
 | `/iui grid on` / `off` | Puts each line of text on the terminal rows, so that a mouse selection covers the text (off by default) |
+| `/iui updates on` / `off` | Turns the daily check for a new version on or off (on by default) |
 | `/iui details` | Shows the terminal, font, mode and Typst that the mod found |
 | `/iui setup` | iTerm2: adds the shell line that turns pictures on |
 | `/iui grab` | Copies the text under your last mouse selection of pictures |
@@ -89,7 +92,7 @@ All commands are in [Usage](docs/usage.md).
 
 ## Docs
 
-- [Install](docs/install.md): requirements and terminal support
+- [Install](docs/install.md): requirements, terminal support and updates
 - [Usage](docs/usage.md): what it draws, commands, copy, plan approval
 - [Themes](docs/themes.md): built-in themes and your own
 - [How it works](docs/how-it-works.md): the render steps and light or dark mode

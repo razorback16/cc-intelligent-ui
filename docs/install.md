@@ -39,6 +39,37 @@ From a shell:
 claude plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui
 ```
 
+## Update
+
+Claude Code finds a new version of the mod from the version number in its `plugin.json`. For a marketplace that is not from Anthropic, such as `razorback16`, auto-update is off by default.
+
+### Turn on auto-update
+
+1. In Claude Code, type `/plugin`.
+2. Go to **Marketplaces**, then select **razorback16**.
+3. Select **Enable auto-update**.
+
+Claude Code then updates the mod in approximately 10 minutes after the first message of a session. The new version starts in the next session, or after you type `/reload-plugins`.
+
+### Update manually
+
+From a shell:
+
+```
+claude plugin marketplace update razorback16
+claude plugin update cc-intelligent-ui@razorback16
+```
+
+Then type `/reload-plugins` in Claude Code, or start a new session.
+
+### The update notice
+
+The mod looks for a new version one time each day at most, after a session starts. When there is a newer version, a toast shows the new version, your version and the update commands. A toast for one version shows one time each day at most. `/iui` and `/iui details` also show the new version.
+
+- Network use: one GET request for a public file on GitHub (`https://raw.githubusercontent.com/razorback16/cc-intelligent-ui/main/.claude-plugin/plugin.json`) each day at most. The mod sends no data about you or your sessions. The request goes through Claude Code.
+- `/iui updates off` stops the check and the toast (kept for later sessions). `/iui updates on` starts them again.
+- The mod does not look for a new version when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_UPDATES` or `DISABLE_AUTOUPDATER` is set, in a background session, or with `claude -p`.
+
 ## Try it from a clone
 
 To try it from a clone without installing:

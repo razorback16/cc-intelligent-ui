@@ -33,8 +33,8 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
 
 | Command | What it does |
 |---|---|
-| `/iui` | Shows the state, the theme, the text size, the width, the image height and the row grid, and a problem that keeps pictures away |
-| `/iui details` | Shows all that the mod found: where the mode comes from, the terminal font, the Typst path, why the terminal can or cannot show pictures, and if the automatic copy is on (`Auto copy:`) |
+| `/iui` | Shows the state, the theme, the text size, the width, the image height and the row grid, a problem that keeps pictures away, and a new version when there is one |
+| `/iui details` | Shows all that the mod found: where the mode comes from, the terminal font, the Typst path, why the terminal can or cannot show pictures, if the automatic copy is on (`Auto copy:`), and the state of the update check (`Update checks:`) |
 | `/iui on` / `off` | Turns the pictures on or off (kept for later sessions) |
 | `/iui setup` / `setup remove` | iTerm2: adds or removes the shell line that turns pictures on (then close the tab and open a new one) |
 | `/iui size <80–200>` | Text size in percent. 100 is the same visual size as your terminal text. |
@@ -48,6 +48,9 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
 | `/iui grid` | Shows the row grid setting: on or off |
 | `/iui grid on` | Puts each line of text in a picture on the terminal rows (kept for later sessions). Refer to [Selection and the row grid](#selection-and-the-row-grid). |
 | `/iui grid off` | Lines of text in a picture have the usual spacing (kept for later sessions). This is the default. |
+| `/iui updates` | Shows the update check: on or off, and the newest version that it found |
+| `/iui updates on` | Looks for a new version one time each day at most, and shows a toast when there is one (kept for later sessions). This is the default. Refer to [Update](install.md#update). |
+| `/iui updates off` | Stops the check for a new version and its toast (kept for later sessions) |
 | `/iui theme` | Lists the themes, shows which one is in use, and shows the folder for your own themes |
 | `/iui theme <name>` | Changes to that theme (kept for later sessions) |
 | `/iui grab` | Copies the text under your last mouse selection of pictures. Refer to [Copy text from a picture](#copy-text-from-a-picture). |

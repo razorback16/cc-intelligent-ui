@@ -17,6 +17,7 @@ import { readHostMode, termFontOf, watchHost } from './host'
 import { readFrame, setFrame, watchFrame } from './frame'
 import { offerSetup } from './setup'
 import { findTypst, measureFonts } from './typst'
+import { checkUpdates } from './updates'
 import { configList, envGet, fsList, fsStat, pluginRoot, processRun, sessionCwd, storeGet, uiToast } from './api'
 
 // The `isOn` atom, which setUp turns off when the stored setting says so (a
@@ -130,6 +131,8 @@ export function setUp($: EngineInterface): Promise<Env> {
       metrics: typst ? await measureFonts($, typst, root, cache, termFont, S.look?.dir ?? `${root}/render/themes/${BASE_THEME}`) : DEFAULT_METRICS,
     }
     refresh($)
+    // The start is done: the update check now, and nothing waits for it.
+    void checkUpdates($)
     return S.env
   })().catch((err: unknown) => {
     S.envLoading = null

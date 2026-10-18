@@ -9,6 +9,7 @@ import type { HostMode, ThemeSetting } from './mode'
 import type { PlanVerdict } from './plan'
 import type { Drawn } from './copy'
 import type { GridMetrics } from './grid'
+import type { Checked } from './updates'
 import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } from './settings'
 import { uiInvalidate } from './api'
 
@@ -176,6 +177,18 @@ export const S = {
   planVerdict: null as PlanVerdict | null,
   planAsking: '',
   planCode: null as string | null,
+  // The update check (updates.ts), read once per load (`updatesLoading`):
+  // `/iui updates` (on by default), the variable that turns the check off
+  // ('' none), this mod's version ('' not known) and the last check (null:
+  // none stored). `updateDone`: this load's check ran or was not due;
+  // `updateBusy`: one runs now.
+  updates: true,
+  updatesOff: '',
+  ownVersion: '',
+  updateChecked: null as Checked | null,
+  updatesLoading: null as Promise<void> | null,
+  updateDone: false,
+  updateBusy: false,
 }
 // The compile results by key (an LRU: set with `keep` at RESULTS_KEPT).
 export const results = new Map<string, Result | 'failed'>()
