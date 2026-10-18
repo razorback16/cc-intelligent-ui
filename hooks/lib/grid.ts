@@ -54,7 +54,7 @@ export function gridFirstRow(kind: FirstLine, level: number, rowPt: number, g: G
     case 'h2':
     case 'h3':
     case 'h4':
-      return middle(g.heading[Math.min(6, Math.max(1, level)) - 1] ?? g.body)
+      return middle(g.heading[level - 1] ?? g.body)
     case 'quote':
       return rowsNear(g.pad.quote, rowPt) + body
     case 'code':

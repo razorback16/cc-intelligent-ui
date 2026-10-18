@@ -191,14 +191,13 @@
 // block in it with lines of the same parity does not move again, and one
 // with the other parity moves back.
 #let half-cost = 103%
-#let is-half(costs) = costs.widow == half-cost
 #let half-costs(half) = (widow: if half { half-cost } else { 100% })
 // The rows of the line box here, from the grid's fixed edges (needs context).
 #let line-rows() = if type(text.top-edge) == length and type(text.bottom-edge) == length {
   calc.max(1, int(calc.round((text.top-edge - text.bottom-edge).to-absolute() / row)))
 } else { 1 }
 // Half a row when lines of parity `half` are in a flow of the other phase.
-#let phase-pad(half) = if half != is-half(text.costs) { row / 2 } else { 0pt }
+#let phase-pad(half) = if half != (text.costs.widow == half-cost) { row / 2 } else { 0pt }
 // `body`, lines of the text here, in their phase.
 #let in-phase(body) = context {
   let half = calc.even(line-rows())

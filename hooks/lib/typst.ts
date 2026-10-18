@@ -279,7 +279,7 @@ export async function runKillable(
 }
 
 // The first page's top margin and bullet row of a job's text.
-export function firstLinePlace(job: Job, segments: readonly string[]) {
+function firstLinePlace(job: Job, segments: readonly string[]) {
   const fit = fontFit(job.env.metrics, job.size)
   const { rowPt } = sizing(job.columns, job.cell, fit.columnPt)
   const grid = job.grid ? { metrics: job.env.metrics.grid ?? DEFAULT_GRID, code: fit.code } : undefined

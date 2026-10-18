@@ -104,8 +104,9 @@ const FIRST_LINE: Record<FirstLine, { centre: number; inkTop: number }> = {
 }
 
 const HEADING = /^ {0,3}(#{1,6})\s/
+const firstTextLine = (md: string) => md.split('\n').find(l => l.trim()) ?? ''
 export function firstLineOf(md: string): FirstLine {
-  const line = md.split('\n').find(l => l.trim()) ?? ''
+  const line = firstTextLine(md)
   const heading = HEADING.exec(line)
   if (heading) return (['h1', 'h2', 'h3'] as const)[heading[1]!.length - 1] ?? 'h4'
   if (/^ {0,3}>/.test(line)) return 'quote'
@@ -130,7 +131,7 @@ export function alignFirstLine(kind: FirstLine, rowPt: number): { topPt: number;
 export function placeFirstLine(md: string, rowPt: number, grid?: { metrics: GridMetrics; code: number }): { topPt: number; bulletRow: number } {
   const kind = firstLineOf(md)
   if (!grid) return alignFirstLine(kind, rowPt)
-  const level = HEADING.exec(md.split('\n').find(l => l.trim()) ?? '')?.[1]!.length ?? 0
+  const level = HEADING.exec(firstTextLine(md))?.[1]!.length ?? 0
   return { topPt: 0, bulletRow: gridFirstRow(kind, level, rowPt, grid.metrics, grid.code) }
 }
 
