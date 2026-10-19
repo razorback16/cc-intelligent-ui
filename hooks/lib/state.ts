@@ -33,10 +33,14 @@ export type Room = { heightPt: number; design: Design; designKey: string; isNew:
 // Per 1 em (render/measure.typ): `adv` the width of "0", `xh` the x-height,
 // `avg` the mean advance over a lowercase pangram.
 export type FontMetrics = { adv: number; xh: number; avg: number }
+// The theme's font lists (merged over vscode), and `plain`: its list
+// markers and numbering are ASCII (fonts.ts: the lean font set).
+export type LeanFonts = { body: string[]; code: string[]; plain: boolean }
 // `term` the terminal's font (null when unknown or not installed), `menlo`
 // the template's code font, `body` its text font, `grid` the row grid's
-// numbers (DEFAULT_GRID when not given).
-export type Metrics = { term: FontMetrics | null; menlo: FontMetrics; body: FontMetrics; grid?: GridMetrics }
+// numbers (DEFAULT_GRID when not given), `fonts` the theme's font lists
+// (none: no lean font set).
+export type Metrics = { term: FontMetrics | null; menlo: FontMetrics; body: FontMetrics; grid?: GridMetrics; fonts?: LeanFonts }
 // Measured with Typst on macOS: Menlo and SF Pro Text.
 export const DEFAULT_METRICS: Metrics = {
   term: null,
@@ -266,6 +270,11 @@ export const clip = {
   seq: 0,
   last: null as unknown,
 }
+
+// The lean font sets (fonts.ts) by the fonts they are for (Typst, the
+// terminal font and the theme's lists): the folder once made ('' while it
+// is made, or when the lean set is not used for these fonts).
+export const leanDirs = new Map<string, string>()
 
 // Sets a cache entry as the newest; the oldest go past `max`.
 export function keep<T>(cache: Map<string, T>, key: string, value: T, max: number) {
