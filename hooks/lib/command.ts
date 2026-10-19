@@ -75,7 +75,7 @@ const SUBCOMMANDS = [
   { name: 'theme', description: 'list the themes, or switch to one' },
   { name: 'setup', description: 'iTerm2: add the shell line that turns pictures on' },
   { name: 'details', description: 'the mode source, the terminal font, Typst and the terminal' },
-  { name: 'grab', description: 'copy the text of the pictures you last selected' },
+  { name: 'grab', description: 'copy the text of the pictures you last selected (or copied, on the main screen)' },
   { name: 'dump', description: 'show what the clipboard held and how it was read' },
 ] as const
 const SIZES = [80, 90, 100, 110, 120, 125, 150, 175, 200]
@@ -164,7 +164,7 @@ export function commandSuggestions(
 export async function registerCommand($: EngineInterface) {
   await commandRegister($, {
     name: 'iui',
-    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image or a Typst drawing takes), grid [on|off] (each line of text on whole terminal rows), updates [on|off] (look for a new version once a day), theme [name] (list or switch themes), grab (copy the selected pictures' text), dump (copy diagnostics)",
+    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image or a Typst drawing takes), grid [on|off] (each line of text on whole terminal rows), updates [on|off] (look for a new version once a day), theme [name] (list or switch themes), grab (copy the text of the selected pictures, or of the picture cells on the clipboard), dump (copy diagnostics)",
     argumentHint: '[on|off|size <percent>|width [columns|full]|height [rows|half|full]|grid [on|off]|updates [on|off]|theme [name]|grab|dump]',
   }).catch(() => undefined)
 }

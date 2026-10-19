@@ -117,7 +117,16 @@ async function pictureEnv($: EngineInterface, e: { viewport?: RenderViewport }):
     void setUp($).catch(() => undefined)
     return null
   }
+  if (S.env.canDraw && S.isFullscreen === false) tellFullscreen($)
   return S.env.canDraw ? { env: S.env, done: now } : null
+}
+
+// Once a session, where pictures draw on the main screen: fullscreen gives
+// the automatic copy (the main screen has no selection to own a copy).
+function tellFullscreen($: EngineInterface) {
+  if (S.fullscreenTold) return
+  S.fullscreenTold = true
+  uiToast($, 'Intelligent UI works best in fullscreen mode: run /tui fullscreen', { timeoutMs: 12000 })
 }
 
 // The env to draw Markdown pictures with (an answer, a plan): as
@@ -210,8 +219,9 @@ async function planEnv($: EngineInterface): Promise<Env | null> {
 // and no hook sees that copy. The watcher (lib/frame.ts) prints a line when
 // the clipboard changes (macOS: its change count; Linux: a notifier's
 // line, lib/clipboard.ts); at a change the clipboard is read once (pbpaste,
-// wl-paste, xclip, xsel or GTK) and, when it holds placeholders, written again with
-// the words under them (see lib/copy.ts; the drawn pages and the words of
+// wl-paste, xclip, xsel or GTK) and, in fullscreen, when it holds placeholders,
+// written again with the words under them; the main screen has /iui grab
+// (see lib/copy.ts; the drawn pages and the words of
 // a page are in lib/probe.ts). No timer reads the clipboard or the
 // selection.
 
@@ -295,14 +305,26 @@ function clipChanged($: EngineInterface, count: number | null, first: boolean) {
   if (!first) void readClipboard($).catch(() => undefined)
 }
 
-// The clipboard changed: one read (clipboardNow). Placeholders that are not our
-// own write are read and written back as text. A clipboard with no
-// placeholders is never touched. When this session has a selection, the
-// clipboard is rewritten only when it is that selection: another session's
-// copy is that session's to read. In fullscreen a copy of this session's
-// pictures is always of its selection, so with no selection that has
-// placeholders the clipboard is not even read. A change while a read runs
-// (a probe can take a second) reads once more after it.
+// Not fullscreen (or not known yet): no selection says whose copy it is, and
+// two sessions can have the same cells, so the clipboard is not changed.
+// Cells that fit a page drawn here get one toast that names /iui grab.
+async function hintGrab($: EngineInterface) {
+  const text = await clipboardNow($)
+  if (text === null || text === clip.seen) return
+  clip.seen = text
+  if (text === clip.wrote || !hasPlaceholders(text)) return
+  if (!pickPages(decodeSelection(text), [...drawnAnswers.values()]).some(Boolean)) return
+  clip.raw = text
+  clip.rawRow = undefined
+  uiToast($, 'Intelligent UI: picture cells copied; /iui grab puts their text on the clipboard')
+}
+
+// The clipboard changed: one read (clipboardNow). Only in fullscreen, and
+// only when this session's selection has placeholders and is the
+// clipboard's text, it is read and written back as text: a copy with no
+// selection here is another session's. A clipboard with no placeholders,
+// and our own write, are never touched. A change while a read runs (a
+// probe can take a second) reads once more after it.
 async function readClipboard($: EngineInterface) {
   if (clip.busy) {
     clip.again = true
@@ -312,14 +334,18 @@ async function readClipboard($: EngineInterface) {
   try {
     do {
       clip.again = false
+      if (S.isFullscreen !== true) {
+        await hintGrab($)
+        continue
+      }
       const selected = await uiSelection($).catch(() => undefined)
-      if (S.isFullscreen && !(selected && hasPlaceholders(selected.text))) continue
+      if (!(selected && hasPlaceholders(selected.text))) continue
       const text = await clipboardNow($)
       if (text === null || text === clip.seen) continue
       clip.seen = text
       if (text === clip.wrote || !hasPlaceholders(text)) continue
-      if (selected && !sameCopy(selected.text, text)) continue
-      await copyRead($, text, selected?.requestId)
+      if (!sameCopy(selected.text, text)) continue
+      await copyRead($, text, selected.requestId)
     } while (clip.again)
   } finally {
     clip.busy = false
@@ -349,7 +375,7 @@ function stopClipboard($: EngineInterface) {
 function autoCopyOf(isOn: boolean): string {
   const now = watchState()
   return autoCopyText({
-    isMac: !!S.env?.isMac, hostOs: S.hostOs, isRemote: S.isRemote, isOn, none: clip.none, drawn: drawnAnswers.size > 0,
+    isMac: !!S.env?.isMac, hostOs: S.hostOs, isRemote: S.isRemote, isOn, isFullscreen: S.isFullscreen, none: clip.none, drawn: drawnAnswers.size > 0,
     running: !!now?.clip && !now.ended, way: S.clipWay,
   })
 }
@@ -361,20 +387,30 @@ async function updateState($: EngineInterface): Promise<UpdateState> {
   return { on: S.updates, off: S.updatesOff, own: S.ownVersion, checked: S.updateChecked, now }
 }
 
-// /iui grab: the last mouse selection, read and copied.
+// /iui grab: the last mouse selection, read and copied. With no selection
+// (the main screen), the picture cells on the clipboard: the command says
+// that the copy is this session's.
 async function grab($: EngineInterface): Promise<string> {
   const selected = await uiSelection($).catch(() => undefined)
-  if (!selected) return 'Intelligent UI: no mouse selection (it needs fullscreen mode; select over a picture first).'
-  if (!hasPlaceholders(selected.text)) return `Intelligent UI: the selection has no picture cells; it is ${selected.text.length} chars of text already.`
-  clip.raw = selected.text
-  clip.rawRow = selected.requestId
-  const read = await readCopy($, selected.text, selected.requestId)
+  let raw = selected?.text
+  if (raw === undefined) {
+    const now = await clipboardNow($)
+    if (now === null) return 'Intelligent UI: no mouse selection, and the clipboard can not be read (see /iui details).'
+    if (clip.wrote && now === clip.wrote) return 'Intelligent UI: the clipboard has the text already.'
+    if (!hasPlaceholders(now)) return 'Intelligent UI: no mouse selection and no picture cells on the clipboard; select over a picture and copy first.'
+    raw = now
+  }
+  if (!hasPlaceholders(raw)) return `Intelligent UI: the selection has no picture cells; it is ${raw.length} chars of text already.`
+  const row = selected?.requestId
+  clip.raw = raw
+  clip.rawRow = row
+  const read = await readCopy($, raw, row)
   if (!read.resolved) return `Intelligent UI: found ${read.runs} picture run(s) but could not read them (see /iui dump).`
   clip.wrote = read.text
   clip.seen = read.text
   const copied = await uiCopy($, { text: read.text })
   return copied.isCopied
-    ? `Intelligent UI: copied ${read.text.length} chars (${read.resolved} of ${read.runs} picture runs read${selected.requestId ? `, row ${selected.requestId}` : ''}).`
+    ? `Intelligent UI: copied ${read.text.length} chars (${read.resolved} of ${read.runs} picture runs read${row ? `, row ${row}` : ''}).`
     : `Intelligent UI: the copy failed: ${copied.reason}.`
 }
 

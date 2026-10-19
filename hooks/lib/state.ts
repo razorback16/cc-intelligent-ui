@@ -130,6 +130,8 @@ export const S = {
   // The terminal's layout (a viewport's isFullscreen; fixed per session),
   // null before a render hook says.
   isFullscreen: null as boolean | null,
+  // The fullscreen advice was shown (once, on the main screen).
+  fullscreenTold: false,
   // The key folders in the cache at setUp: a key found there is read back
   // at once (a reopened session), with no queue and no blank.
   onDisk: new Set<string>(),

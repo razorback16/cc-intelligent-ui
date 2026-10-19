@@ -57,12 +57,12 @@ The mod works on Linux with X11 and with Wayland. It uses these tools. Most Linu
 - **perl** (perl 5): reads the terminal size and its cell size, and watches for a change of the size.
 - **fontconfig** (`fc-match`, `fc-list`): finds the terminal font when the terminal's config does not name one. kitty and most terminals use fontconfig's `monospace` font. Ghostty uses its own JetBrains Mono when its config names no font. The mod uses JetBrains Mono only when fontconfig has it, because Typst must find the font too.
 - **The light or dark mode of the desktop** (for the `auto` theme): the freedesktop portal (`org.freedesktop.appearance color-scheme`, through `gdbus` or `busctl`). GNOME, KDE Plasma and most desktops have the portal. If the portal does not answer, the mod reads GNOME's `color-scheme` (`gsettings`).
-- **The clipboard** (for the automatic copy, refer to [Copy text from a picture](usage.md#copy-text-from-a-picture)). The mod uses the first of these that it finds:
+- **The clipboard** (for the automatic copy in fullscreen mode and for `/iui grab` on the main screen, refer to [Copy text from a picture](usage.md#copy-text-from-a-picture)). The mod uses the first of these that it finds:
   1. **Wayland, not GNOME:** `wl-paste` from `wl-clipboard`. `wl-paste --watch` tells the mod about each clipboard change. It needs the data-control protocol of the compositor (KDE Plasma, Sway, Hyprland and other wlroots compositors have it).
   2. **X11, and GNOME on Wayland (through Xwayland):** `clipnotify` tells the mod about each clipboard change, and `xclip` or `xsel` reads the clipboard. If `clipnotify` is not installed, the mod uses GTK 3 from Python (`python3-gi`, which most GNOME desktops have) for both.
   3. **GNOME on Wayland with no X11 tool:** `wl-paste`. GNOME does not have the data-control protocol, so `wl-paste --watch` stops, and the automatic copy is off.
 
-  If none of these work, the automatic copy is off. `/iui grab`, Claude Code's `/copy` and the `ui.copy` hook still work. `/iui details` shows the tool in use, or why the automatic copy is off, on the line `Auto copy:`.
+  If none of these work, the automatic copy is off. `/iui grab` (with a selection, in fullscreen mode), Claude Code's `/copy` and the `ui.copy` hook still work. `/iui details` shows the tool in use, or why the automatic copy is off, on the line `Auto copy:`.
 - **"Edit the plan"** (refer to [Plan approval](usage.md#plan-approval)): VS Code (`code --wait`), else the first of VSCodium, Zed, Sublime Text, Kate, gedit and gvim that is on the `PATH`. These editors can wait until you close the file. If none is installed, the option does not show.
 - **The cache folder** is in `$TMPDIR`, else in `/tmp`.
 

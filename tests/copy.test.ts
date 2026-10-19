@@ -371,7 +371,7 @@ test('/iui grab and dump are commands with typeahead rows; dump with nothing see
   expect(parseCommand('dump')).toEqual({ kind: 'dump' })
   expect(parseCommand('grab now')).toEqual({ kind: 'bad' })
   const rows = commandSuggestions('/iui gra', 'gra', 5, { themes: [], active: 'claude-code', size: 100 })
-  expect(rows).toEqual([{ text: 'grab', description: 'copy the text of the pictures you last selected' }])
+  expect(rows).toEqual([{ text: 'grab', description: 'copy the text of the pictures you last selected (or copied, on the main screen)' }])
   expect(commandSuggestions('/iui du', 'du', 5, { themes: [], active: 'claude-code', size: 100 }).map(r => r.text)).toEqual(['dump'])
   const ran = await $.command.run({ command: 'iui', args: 'dump' } as any)
   expect(ran.text).toContain('Intelligent UI: no clipboard text with picture cells seen yet')
@@ -392,11 +392,13 @@ const inputsOf = (argv: readonly string[]) => Object.fromEntries(argv.flatMap((a
 // its start and at each change of the clipboard; `clip none` with
 // `noBridge`), pbpaste reading `clipboard`, and the copies, toasts and
 // selection the test sees. `copy` is a copy in another app (or a mouse
-// copy): the clipboard and its change count change.
-function world(on: any, o: { failFirst?: boolean; noBridge?: boolean } = {}) {
+// copy): the clipboard and its change count change; while `selects`, a copy
+// of picture cells is this session's selection too (a mouse copy in
+// fullscreen).
+function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Record<string, string> } = {}) {
   mock.store(on)
   const clock = mock.clock(on)
-  mock.env(on, { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
+  mock.env(on, o.env ?? { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
   const files = new Map<string, string>()
   const compiles: Record<string, string>[] = []
   const queries: Record<string, string>[] = []
@@ -407,12 +409,14 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean } = {}) {
     clock, files, compiles, queries, kills, watchers,
     clipboard: 'nothing yet', count: 40, pastes: 0, copies: [] as string[], toasts: [] as string[],
     selection: undefined as { text: string; requestId?: string } | undefined,
+    selects: true,
     gate: null as Promise<void> | null, release: () => {},
     hold() {
       w.gate = new Promise<void>(r => (w.release = r))
     },
     copy(text: string) {
       w.clipboard = text
+      if (w.selects && hasPlaceholders(text)) w.selection = { text }
       w.count++
       for (const c of watchers) if (!c.dead && c.argv[3] === 'clip' && !o.noBridge) c.say(`clip ${w.count}`)
     },
@@ -498,18 +502,18 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean } = {}) {
   return w
 }
 
-const message = (requestId: string, text: string) =>
+const message = (requestId: string, text: string, isFullscreen: boolean | null = true) =>
   ({
     plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId,
-    props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40 },
+    props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40, ...(isFullscreen === null ? {} : { isFullscreen }) },
   }) as any
 const props = (text: string) => ({ text, isFirstOfReply: true }) as any
 const names = (files: Map<string, string>) => [...new Set([...files.keys()].filter(k => k.startsWith('/c/')).map(k => k.replace(/^.*\//, '')))].sort()
 
 // Draws `text` (SMALL_MD) as answer `id` (98 columns: the fixture's),
 // compiled; the watcher has its clipboard part (its first count noted).
-async function drawAnswer($: any, w: ReturnType<typeof world>, id = 'ans-1', text = SMALL_MD) {
-  const ui = await $.ui.mount(message(id, text))
+async function drawAnswer($: any, w: ReturnType<typeof world>, id = 'ans-1', text = SMALL_MD, isFullscreen: boolean | null = true) {
+  const ui = await $.ui.mount(message(id, text, isFullscreen))
   await w.clock.settle()
   await ui.redraw(props(text))
   await w.clock.settle()
@@ -661,10 +665,10 @@ test('a clipboard change runs pbpaste once and copies; no change, no read; our o
   // Its first count is only noted; no change, no read.
   await w.clock.advance(900)
   expect(w.pastes).toBe(0)
-  // A copy with no placeholders: one read, never written.
+  // A copy with no placeholders (and no selection of picture cells): no read, never written.
   w.copy('copied in another app')
   await w.clock.settle()
-  expect(w.pastes).toBe(1)
+  expect(w.pastes).toBe(0)
   expect(w.copies).toEqual([])
   w.copy(COPY)
   await w.clock.settle()
@@ -672,9 +676,9 @@ test('a clipboard change runs pbpaste once and copies; no change, no read; our o
   expect(w.toasts).toContain('Intelligent UI: copied 35 chars of text')
   // One read before the write; our own write changes the count: read
   // once, not copied again.
-  expect(w.pastes).toBe(4)
+  expect(w.pastes).toBe(3)
   await w.clock.advance(900)
-  expect(w.pastes).toBe(4)
+  expect(w.pastes).toBe(3)
   expect(w.copies.length).toBe(1)
   const dumped = await $.command.run({ command: 'iui', args: 'dump' } as any)
   expect(dumped.text).toContain('U+10EEEE[1,0]')
@@ -688,7 +692,7 @@ test('a clipboard change runs pbpaste once and copies; no change, no read; our o
   expect(w.kills).toEqual([w.watchers[0]!.pid, w.watchers[1]!.pid])
   w.copy(COPY)
   await w.clock.settle()
-  expect(w.pastes).toBe(4)
+  expect(w.pastes).toBe(3)
 })
 
 test('/iui details says whether the automatic copy is on', async ($, on) => {
@@ -756,9 +760,10 @@ test('a clipboard with picture cells that is not this session\'s selection is no
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
-  // This session has a selection of its own (no picture cells), and the
-  // clipboard has another session's picture cells.
-  w.selection = { text: 'my own text', requestId: 'u1' }
+  w.selects = false
+  // This session has a selection of its own picture cells, and the
+  // clipboard has other picture cells (another session's).
+  w.selection = { text: cells(2, 0, 97), requestId: 'ans-1' }
   w.copy([cells(1, 0, 97), cells(3, 0, 21)].join('\n'))
   await w.clock.settle()
   expect(w.pastes).toBe(1)
@@ -773,12 +778,8 @@ test('a clipboard with picture cells that is not this session\'s selection is no
 test('in fullscreen the clipboard is read only with a selection of picture cells; with none it is another session\'s copy', async ($, on) => {
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
-  const ui = await $.ui.mount({ ...message('ans-1', SMALL_MD), viewport: { columns: 100, rows: 40, isFullscreen: true } })
-  await w.clock.settle()
-  await ui.redraw(props(SMALL_MD))
-  await w.clock.settle()
-  await w.clock.advance(300)
-  await w.clock.settle()
+  await drawAnswer($, w)
+  w.selects = false
   // No selection here: another fullscreen session's copy, not even read.
   w.selection = undefined
   w.copy(COPY)
@@ -878,6 +879,7 @@ test('a newer clipboard that the watcher has not said yet is not written over; i
   w.copy([cells(2, 0, 97), cells(3, 0, 21)].join('\n'))
   await w.clock.settle()
   w.clipboard = COPY
+  w.selection = { text: COPY }
   w.release()
   await w.clock.settle()
   expect(w.copies).toEqual([COPIED])
@@ -942,4 +944,110 @@ test('a clip child that ends on its own is started again; its old clipboard is n
   w.copy(COPY)
   await w.clock.settle()
   expect(w.copies).toEqual([COPIED])
+})
+
+// ---- The main screen: no selection, so no automatic copy ---------------------
+
+const GRAB_TOAST = 'Intelligent UI: picture cells copied; /iui grab puts their text on the clipboard'
+const FULLSCREEN_TOAST = 'Intelligent UI works best in fullscreen mode: run /tui fullscreen'
+
+test('main screen: picture cells on the clipboard are never rewritten (their session is not known); one toast names /iui grab', async ($, on) => {
+  const w = world(on)
+  w.selects = false
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w, 'ans-1', SMALL_MD, false)
+  // Another session's cells: no write, no probe, one toast.
+  w.copy(COPY)
+  await w.clock.settle()
+  await w.clock.advance(1000)
+  expect(w.pastes).toBe(1)
+  expect(w.copies).toEqual([])
+  expect(w.queries).toEqual([])
+  expect(w.toasts.filter(t => t.includes('/iui grab'))).toEqual([GRAB_TOAST])
+  // dump shows them (its read probes the page).
+  const dumped = await $.command.run({ command: 'iui', args: 'dump' } as any)
+  expect(dumped.text).toContain('auto copy off on the main screen (use /iui grab)')
+  expect(dumped.text).toContain('-> answer ans-1 page 0')
+  // The same cells again: no second toast.
+  w.copy(COPY)
+  await w.clock.settle()
+  expect(w.toasts.filter(t => t.includes('/iui grab')).length).toBe(1)
+  // Cells that fit no page drawn here (column 150): no toast.
+  w.copy([cells(1, 0, 150), cells(2, 0, 150)].join('\n'))
+  await w.clock.settle()
+  expect(w.toasts.filter(t => t.includes('/iui grab')).length).toBe(1)
+  expect(w.copies).toEqual([])
+  expect(w.queries.length).toBe(1)
+})
+
+test('main screen: /iui grab with no selection reads the clipboard and writes its text; a second grab says it is there', async ($, on) => {
+  const w = world(on)
+  w.selects = false
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w, 'ans-1', SMALL_MD, false)
+  w.copy(COPY)
+  await w.clock.settle()
+  const grabbed = await $.command.run({ command: 'iui', args: 'grab' } as any)
+  expect(grabbed.text).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read).')
+  expect(w.copies).toEqual([COPIED])
+  // Our own write is not read back as new: no toast, no copy.
+  await w.clock.settle()
+  expect(w.copies).toEqual([COPIED])
+  expect(w.toasts.filter(t => t.includes('/iui grab')).length).toBe(1)
+  const again = await $.command.run({ command: 'iui', args: 'grab' } as any)
+  expect(again.text).toBe('Intelligent UI: the clipboard has the text already.')
+  expect(w.copies).toEqual([COPIED])
+  w.copy('plain text')
+  await w.clock.settle()
+  const none = await $.command.run({ command: 'iui', args: 'grab' } as any)
+  expect(none.text).toBe('Intelligent UI: no mouse selection and no picture cells on the clipboard; select over a picture and copy first.')
+  expect(w.copies).toEqual([COPIED])
+})
+
+test('fullscreen or main screen not known yet: the clipboard is never written', async ($, on) => {
+  const w = world(on)
+  w.selects = false
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w, 'ans-1', SMALL_MD, null)
+  // Even with a selection that is the copy.
+  w.selection = { text: COPY, requestId: 'ans-1' }
+  w.copy(COPY)
+  await w.clock.settle()
+  await w.clock.advance(1000)
+  expect(w.copies).toEqual([])
+  expect(w.queries).toEqual([])
+  const details = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(details.text).toContain('\nAuto copy: off (fullscreen or main screen is not known yet)')
+  // No advice either: the layout is not known.
+  expect(w.toasts).not.toContain(FULLSCREEN_TOAST)
+})
+
+test('the fullscreen advice: once on the main screen, never in fullscreen', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w, 'ans-1', SMALL_MD, false)
+  await drawAnswer($, w, 'ans-2', `${SMALL_MD}\n\nEnd.`, false)
+  expect(w.toasts.filter(t => t === FULLSCREEN_TOAST).length).toBe(1)
+})
+
+test('the fullscreen advice is not shown in fullscreen', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  expect(w.toasts).not.toContain(FULLSCREEN_TOAST)
+})
+
+test('the fullscreen advice is not shown where no picture draws (tmux)', async ($, on) => {
+  const w = world(on, { env: { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1', TMUX: '/tmp/tmux-501/default,1,0' } })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w, 'ans-1', SMALL_MD, false)
+  expect(w.compiles).toEqual([])
+  expect(w.toasts).not.toContain(FULLSCREEN_TOAST)
+})
+
+test('the fullscreen advice is not shown with Intelligent UI off', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: 'off' } as any)
+  await drawAnswer($, w, 'ans-1', SMALL_MD, false)
+  expect(w.toasts).not.toContain(FULLSCREEN_TOAST)
 })

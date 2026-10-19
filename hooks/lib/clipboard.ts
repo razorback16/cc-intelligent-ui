@@ -153,20 +153,25 @@ export function clipWatchArgs(isMac: boolean): string[] | null {
   return way && 'watch' in way ? way.watch : null
 }
 
-// The automatic copy now, for /iui details and dump. `ended`: the
-// notifier stopped (the watcher printed `clip none`).
-export function autoCopyText(o: { isMac: boolean; hostOs: string; isRemote: boolean; isOn: boolean; none: boolean; drawn: boolean; running: boolean; way: ClipWay | null }): string {
+// The automatic copy now, for /iui details and dump. `none`: the
+// notifier stopped (the watcher printed `clip none`). `isFullscreen`: null
+// before a render hook says; only fullscreen copies by itself.
+export function autoCopyText(o: {
+  isMac: boolean; hostOs: string; isRemote: boolean; isOn: boolean; isFullscreen: boolean | null; none: boolean; drawn: boolean; running: boolean; way: ClipWay | null
+}): string {
   if (!o.isMac && o.hostOs !== 'Linux') return 'off (not macOS or Linux)'
   if (o.isRemote) return 'off (ssh)'
   if (!o.isMac && o.way && 'off' in o.way) return `off (${o.way.off})`
   if (!o.isMac && !o.way) return 'off (the clipboard tools are not looked up yet)'
   if (!o.isOn) return 'off (Intelligent UI is off)'
+  if (o.isFullscreen === false) return 'off on the main screen (use /iui grab)'
   if (o.none) {
     if (o.isMac) return 'off (no PerlObjCBridge in /usr/bin/perl)'
     const way = o.way as Extract<ClipWay, { watch: string[] }>
     return `off (${way.name} stopped${way.wayland ? ': the compositor may not have the data-control protocol' : ''})`
   }
   if (!o.drawn) return 'off (no picture yet)'
+  if (o.isFullscreen === null) return 'off (fullscreen or main screen is not known yet)'
   if (!o.running) return 'off (the watcher does not run)'
   return o.isMac ? 'on' : `on, with ${(o.way as Extract<ClipWay, { name: string }>).name}`
 }

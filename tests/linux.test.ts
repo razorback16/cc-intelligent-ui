@@ -74,8 +74,13 @@ test('the GTK scripts: X11 events, a line at the start, a text read that fails w
 })
 
 test('the automatic copy line: the macOS texts as they were, the Linux way or why it is off', () => {
-  const base = { isMac: true, hostOs: 'Darwin', isRemote: false, isOn: true, none: false, drawn: true, running: true, way: null }
+  const base = { isMac: true, hostOs: 'Darwin', isRemote: false, isOn: true, isFullscreen: true as boolean | null, none: false, drawn: true, running: true, way: null }
   expect(autoCopyText(base)).toBe('on')
+  // Only fullscreen copies by itself: the main screen has /iui grab.
+  expect(autoCopyText({ ...base, isFullscreen: false })).toBe('off on the main screen (use /iui grab)')
+  expect(autoCopyText({ ...base, isFullscreen: false, isOn: false })).toBe('off (Intelligent UI is off)')
+  expect(autoCopyText({ ...base, isFullscreen: null })).toBe('off (fullscreen or main screen is not known yet)')
+  expect(autoCopyText({ ...base, isFullscreen: null, drawn: false })).toBe('off (no picture yet)')
   expect(autoCopyText({ ...base, none: true })).toBe('off (no PerlObjCBridge in /usr/bin/perl)')
   expect(autoCopyText({ ...base, isRemote: true })).toBe('off (ssh)')
   expect(autoCopyText({ ...base, running: false })).toBe('off (the watcher does not run)')
@@ -87,6 +92,7 @@ test('the automatic copy line: the macOS texts as they were, the Linux way or wh
   expect(autoCopyText({ ...linux, way: { off: 'no Wayland or X11 display' } })).toBe('off (no Wayland or X11 display)')
   expect(autoCopyText({ ...linux, way: null })).toBe('off (the clipboard tools are not looked up yet)')
   expect(autoCopyText({ ...linux, drawn: false })).toBe('off (no picture yet)')
+  expect(autoCopyText({ ...linux, isFullscreen: false })).toBe('off on the main screen (use /iui grab)')
   expect(autoCopyText({ ...linux, hostOs: 'FreeBSD' })).toBe('off (not macOS or Linux)')
 })
 
@@ -151,8 +157,11 @@ function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Rec
   const watchers: { argv: string[]; say: (line: string) => void; dead: boolean; n: number }[] = []
   const w = {
     clock, files, ran, watchers, clipboard: 'old', reads: 0, copies: [] as string[], toasts: [] as string[],
+    selection: undefined as { text: string } | undefined,
     copy(text: string) {
       w.clipboard = text
+      // A mouse copy of picture cells in fullscreen is this session's selection.
+      if (text.includes('\u{10EEEE}')) w.selection = { text }
       for (const c of watchers) if (!c.dead && c.argv[3] === 'clip') c.say(`clip ${c.n++}`)
     },
   }
@@ -223,7 +232,7 @@ function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Rec
     w.copy(e.text)
     return { value: { isCopied: true } }
   })
-  on('ui.selection', async () => ({ value: undefined }))
+  on('ui.selection', async () => ({ value: w.selection }))
   on('ui.toast', async ($: any, e: any) => {
     w.toasts.push(String(e.text))
     return { value: undefined }
@@ -232,10 +241,10 @@ function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Rec
   return w
 }
 
-const message = (requestId: string, text: string) =>
+const message = (requestId: string, text: string, isFullscreen = true) =>
   ({
     plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId,
-    props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40 },
+    props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen },
   }) as any
 
 const autoLine = async ($: any) => ((await $.command.run({ command: 'iui', args: 'details' } as any)).text ?? '').split('\n').find((l: string) => l.startsWith('Auto copy:'))
@@ -265,6 +274,26 @@ test('Linux on Wayland: the watcher runs wl-paste --watch after clip, and a copy
   expect(w.copies.length).toBe(1)
   // pbpaste is never run on Linux.
   expect(w.ran.some(argv => argv[0] === 'pbpaste')).toBe(false)
+})
+
+test('Linux on Wayland, main screen: a copy of picture cells is not changed; /iui grab reads it with wl-paste and writes its text', async ($, on) => {
+  const w = linuxWorld(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await $.ui.mount(message('ans-1', SMALL_MD, false))
+  await w.clock.settle()
+  await ui.redraw({ text: SMALL_MD, isFirstOfReply: true } as any)
+  await w.clock.settle()
+  await w.clock.advance(300)
+  await w.clock.settle()
+  expect(await autoLine($)).toBe('Auto copy: off on the main screen (use /iui grab)')
+  w.copy([cells(1, 0, 97, '● '), cells(2, 0, 97), cells(3, 0, 21)].join('\n'))
+  w.selection = undefined
+  await w.clock.settle()
+  expect(w.copies).toEqual([])
+  expect(w.toasts).toContain('Intelligent UI: picture cells copied; /iui grab puts their text on the clipboard')
+  const grabbed = await $.command.run({ command: 'iui', args: 'grab' } as any)
+  expect(grabbed.text).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read).')
+  expect(w.copies).toEqual(['Copy test\nThe quick brown fox jumps'])
 })
 
 test('Linux, auto, in kitty: kitty\'s config comes first; the font is fontconfig\'s monospace', async ($, on) => {

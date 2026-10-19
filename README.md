@@ -24,6 +24,8 @@ Then, in Claude Code:
 
 It works at once, with no restart.
 
+Intelligent UI works best in fullscreen mode (recommended). To use it, run `/tui fullscreen` in Claude Code.
+
 To get new versions, turn on auto-update for the `razorback16` marketplace in `/plugin`, or update manually. Refer to [Update](docs/install.md#update). The mod also shows a notice when a new version is available (`/iui updates off` stops it).
 
 You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15, and macOS or Linux (X11 or Wayland). The pictures show only in some terminals:
@@ -48,7 +50,7 @@ In other terminals, the mod shows the normal text. Refer to [Install](docs/insta
 - **LaTeX math.** Inline `$…$` and display `$$…$$` math, typeset.
 - **Live diagrams, charts and plots.** Claude writes Typst with CeTZ, cetz-plot and fletcher. The drawings use your theme's colours and work offline.
 - **Images and files.** Images in an answer, images that Claude sends, Markdown files that Claude sends, and images that you paste show in the transcript.
-- **Copy text from pictures.** Select and copy text with the mouse, as you do with normal text. On Linux, this needs a clipboard tool (refer to [Install](docs/install.md#linux)).
+- **Copy text from pictures.** In fullscreen mode, select and copy text with the mouse, as you do with normal text. On Linux, this needs a clipboard tool (refer to [Install](docs/install.md#linux)).
 - **Links you can click.** The links, file paths and commands of an answer show in rows under its picture. A cmd+click on a link opens it. A click on a command copies it.
 - **Plans you can read.** In plan mode, the plan shows rendered, with an approve, edit or reject question under it.
 - **Themes that follow light and dark.** Claude Code's own colours by default, or VS Code's Markdown preview. You can make your own.
