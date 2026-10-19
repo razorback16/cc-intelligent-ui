@@ -108,7 +108,7 @@ export function jobDone($: EngineInterface) {
 const holds = (job: Job) => job.epoch === S.epoch && job.onScreen !== false
 
 // Commits the open epoch when no burst runs and it is overdue, or it is
-// ready and no job of it on screen waits or runs and no JPEG or WebP
+// ready and no job of it on screen waits or runs and no JPEG, WebP or SVG
 // converts.
 function maybeCommit($: EngineInterface) {
   if (S.resizing || !epochOpen()) return

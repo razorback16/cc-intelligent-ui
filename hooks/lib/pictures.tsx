@@ -1,6 +1,6 @@
 // Pictures under rows: the files Claude sends (SendUserFile) and the images
 // the user pastes are drawn under their row. An image is drawn at its own
-// size or smaller (a JPEG or WebP as the PNG Typst makes of it); a Markdown
+// size or smaller (a JPEG, WebP or SVG as the PNG Typst makes of it); a Markdown
 // file as an answer is. The pure parts are in images.ts.
 import type { EngineInterface, FsStat, ImageSource, RenderElement, RenderInput } from 'claude-code'
 
@@ -118,7 +118,7 @@ export async function shownOne($: EngineInterface, e: RowInput, ready: Env, file
 
 const nameOf = (file: string) => file.split('/').pop() || 'image'
 
-// A JPEG or WebP as a PNG that Typst makes (render/convert.typ) in the
+// A JPEG, WebP or SVG as a PNG that Typst makes (render/convert.typ) in the
 // cache, to fit `box`: once per stat stamp and box, one run at a time per
 // key. The first PNG of a file is waited for; for a new box, the last PNG
 // of the file draws at once while the new one is made, then jobDone draws
@@ -210,7 +210,7 @@ export async function sentTextOf($: EngineInterface, file: string, at?: StatAt):
 // relative images by its own folder). `markdown`: the env for the Markdown
 // files (null: they stay out); `id`: the call's tool_use_id; `at`: as
 // statOf. Images size from the Frame on screen; while an epoch is open, the
-// PNG of a JPEG or WebP for the target is made at once (not waited for), so
+// PNG of a JPEG, WebP or SVG for the target is made at once (not waited for), so
 // it is there when the epoch commits. With no PNG of that file yet (a
 // resumed session) only the target's is made, and nothing draws for it
 // until the commit.
@@ -248,7 +248,7 @@ export async function sentOf(
 }
 
 // The space a picture takes in `frame` with the height setting `height`
-// (as in shownOne), which a JPEG or WebP is made to fit. Over ssh it stays
+// (as in shownOne), which a JPEG, WebP or SVG is made to fit. Over ssh it stays
 // INLINE_MAX_SIDE pixels wide at most.
 const boxOf = (frame: Frame, inline: boolean, height: Height): PixelBox =>
   convertBox(pictureColumns(frame, inline), pictureRowsFor(frame.rows, height), frame.cell)

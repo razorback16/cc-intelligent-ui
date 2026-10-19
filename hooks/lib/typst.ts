@@ -44,7 +44,7 @@ export function typstCall(o: {
 // The arguments that load only the fonts of a lean folder (and Typst's own).
 export const fontArgs = (fonts?: string) => (fonts ? ['--ignore-system-fonts', '--font-path', fonts] : [])
 
-// The typst command that makes a PNG of a JPEG or WebP (render/convert.typ)
+// The typst command that makes a PNG of a JPEG, WebP or SVG (render/convert.typ)
 // that fits `box` (in pixels), never larger than its own pixel size: at 72
 // ppi, 1 pt is 1 pixel.
 export function convertCall(o: {

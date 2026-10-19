@@ -233,7 +233,7 @@ export const INLINE_KEPT = 64
 // PNG), and the pasted-images folder of each session once found.
 export const pictures = new Map<string, { stamp: string; size: { width: number; height: number } | null }>()
 export const pasteDirs = new Map<string, string>()
-// SendUserFile: the PNG Typst made of each JPEG or WebP by its file, stat
+// SendUserFile: the PNG Typst made of each JPEG, WebP or SVG by its file, stat
 // stamp and box (null: it failed), the ones Typst makes now (same keys), the
 // last PNG made of each file (any box: it draws while a new box is made),
 // and the text of each Markdown file by its stat stamp (null: it does not

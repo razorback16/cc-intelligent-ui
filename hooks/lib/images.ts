@@ -33,25 +33,33 @@ export function pictureCells(size: { width: number; height: number }, columns: n
 }
 
 // The kinds of file a SendUserFile result can draw: an image the engine's
-// Image takes (PNG), an image Typst makes a PNG of (JPEG, WebP), and a
+// Image takes (PNG), an image Typst makes a PNG of (JPEG, WebP, SVG), and a
 // Markdown file (drawn as an answer is).
-export type SentKind = 'png' | 'jpeg' | 'webp' | 'markdown'
+export type SentKind = 'png' | 'jpeg' | 'webp' | 'svg' | 'markdown'
 export type SentFile = { path: string; kind: SentKind }
 
 // An image's type: by its media type, else by its file name. Null for any
-// other type (GIF, SVG, …). An image with neither is a PNG to try (the
-// header read tells for sure).
-export function imageKindOf(a: { path: string; media_type?: unknown }): 'png' | 'jpeg' | 'webp' | null {
+// other type (GIF, …). An image with neither is a PNG to try (the header
+// read tells for sure).
+export function imageKindOf(a: { path: string; media_type?: unknown }): 'png' | 'jpeg' | 'webp' | 'svg' | null {
   if (typeof a.media_type === 'string') {
     const type = a.media_type.trim().toLowerCase()
     if (type === 'image/png') return 'png'
     if (type === 'image/jpeg' || type === 'image/jpg') return 'jpeg'
+    if (type === 'image/svg+xml') return 'svg'
     return type === 'image/webp' ? 'webp' : null
   }
   if (/\.jpe?g$/i.test(a.path)) return 'jpeg'
   if (/\.webp$/i.test(a.path)) return 'webp'
+  if (isSvgPath(a.path)) return 'svg'
   return 'png'
 }
+
+// An SVG file, by its name. Claude Code sends one with isImage false (its
+// images are PNG, JPEG, GIF and WebP) and the media type image/svg+xml.
+export const isSvgPath = (path: string) => /\.svg$/i.test(path)
+const isSvg = (a: { path: string; media_type?: unknown }) =>
+  typeof a.media_type === 'string' ? a.media_type.trim().toLowerCase() === 'image/svg+xml' : isSvgPath(a.path)
 
 // A Markdown file, by its name: .md or .markdown.
 export const isMarkdownPath = (path: string) => /\.(md|markdown)$/i.test(path)
@@ -64,19 +72,19 @@ export function sentFiles(output: unknown): SentFile[] {
   for (const a of list) {
     if (!a || typeof a !== 'object' || typeof a.path !== 'string' || a.path === '') continue
     if (found.some(f => f.path === a.path)) continue
-    const kind = a.isImage === true ? imageKindOf(a) : isMarkdownPath(a.path) ? 'markdown' : null
+    const kind = a.isImage === true ? imageKindOf(a) : isSvg(a) ? 'svg' : isMarkdownPath(a.path) ? 'markdown' : null
     if (kind) found.push({ path: a.path, kind })
   }
   return found
 }
 
-// The image paths of a SendUserFile result that can draw (PNG, JPEG, WebP).
+// The image paths of a SendUserFile result that can draw (PNG, JPEG, WebP, SVG).
 export const sentImages = (output: unknown) => sentFiles(output).filter(f => f.kind !== 'markdown').map(f => f.path)
 
 // The folder of a file, for the relative images of a Markdown file.
 export const folderOf = (path: string) => path.replace(/\/+[^/]*$/, '') || '/'
 
-// The box in pixels a JPEG or WebP is made to fit: the space a picture
+// The box in pixels a JPEG, WebP or SVG is made to fit: the space a picture
 // takes (as pictureCells), each side at most CONVERT_MAX_SIDE.
 export type PixelBox = { width: number; height: number }
 export function convertBox(columns: number, rows: number, px: Cell): PixelBox {
@@ -84,7 +92,7 @@ export function convertBox(columns: number, rows: number, px: Cell): PixelBox {
   return { width: side(columns * px.width), height: side(rows * px.height) }
 }
 
-// The PNG Typst makes of a JPEG or WebP: in a key folder of the cache (as a
+// The PNG Typst makes of a JPEG, WebP or SVG: in a key folder of the cache (as a
 // compile's, dropped after 2 days), by the file, its stat stamp and the box,
 // so a changed file or a new box is made again.
 export const convertedPath = (cache: string, file: string, stamp: string, box: PixelBox) =>

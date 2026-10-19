@@ -20,13 +20,13 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
 
   A `theme` dictionary (`theme.fg`, `theme.muted`, `theme.blue`, `theme.palette`, `theme.width`, …) is in scope, so drawings match the terminal's colours. The mod tells Claude about this in a short part of the system prompt. `theme.width` and `theme.height` give the space for a drawing. The mod keeps the size that a message had when it was drawn the first time. When the terminal size changes, the mod makes the drawings larger or smaller by the same amount.
 - Files that Claude sends to you (the SendUserFile tool). The mod draws each file under the row that shows the files, in the same order:
-  - PNG, JPEG and WebP images. Typst changes a JPEG or WebP image into a PNG image in the cache folder. The PNG image is the size of the space for the picture in the transcript, or smaller. Typst does this one time for each version of the file and each size of the space. When the space changes, the mod shows the old PNG image until Typst makes the new one.
+  - PNG, JPEG, WebP and SVG images. Typst changes a JPEG, WebP or SVG image into a PNG image in the cache folder. The PNG image is the size of the space for the picture in the transcript, or smaller. Typst does this one time for each version of the file and each size of the space. When the space changes, the mod shows the old PNG image until Typst makes the new one.
   - Markdown files (`.md` or `.markdown`, 256 KiB or less). The mod draws the file as rendered pictures, the same as an answer. A relative image path in the file starts from the folder of the file.
 
-  Other files stay as the normal row. JPEG images, WebP images and Markdown files need Typst.
+  Other files stay as the normal row. JPEG images, WebP images, SVG images and Markdown files need Typst.
 - Images that you paste into the prompt (`[Image #N]`). The mod draws each image under your prompt.
 
-  These pictures are not larger than the image. They are not wider than the transcript. The height setting (`/iui height`) sets the most rows that they can use (Typst drawings use it too): by default, half the screen and not more than 24 rows. The mod draws PNG, JPEG and WebP images only. Other image types (for example GIF and SVG) stay as the normal row.
+  These pictures are not larger than the image. They are not wider than the transcript. The height setting (`/iui height`) sets the most rows that they can use (Typst drawings use it too): by default, half the screen and not more than 24 rows. The mod draws PNG, JPEG, WebP and SVG images only. Other image types (for example GIF) stay as the normal row. The size of an SVG image is its width and height in CSS px.
 - The plan in plan mode (the ExitPlanMode tool). The mod draws the plan as a picture in the transcript, the same as an answer. Then the mod asks you to approve the plan. Refer to [Plan approval](#plan-approval).
 
 ## Commands

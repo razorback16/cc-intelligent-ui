@@ -52,7 +52,7 @@ test('the height command: half, full, 6 to 200 rows, or nothing to show it', () 
   expect(parseCommand('height 12 rows')).toEqual({ kind: 'bad' })
 })
 
-test('only PNG, JPEG and WebP image attachments are drawn', () => {
+test('only PNG, JPEG, WebP and SVG image attachments are drawn', () => {
   expect(sentImages({
     attachments: [
       { path: '/t/a.png', size: 1, isImage: true, media_type: 'image/png' },
@@ -63,8 +63,12 @@ test('only PNG, JPEG and WebP image attachments are drawn', () => {
       { path: '/t/e.webp', size: 1, isImage: true, media_type: 'image/webp' },
       { path: '/t/f.gif', size: 1, isImage: true, media_type: 'image/gif' },
       { path: '/t/g.svg', size: 1, isImage: true, media_type: 'image/svg+xml' },
+      // As Claude Code sends an SVG: not an image, by its media type.
+      { path: '/t/h.svg', size: 1, isImage: false, media_type: 'image/svg+xml' },
+      { path: '/t/i.SVG', size: 1, isImage: false },
+      { path: '/t/j.svg', size: 1, isImage: false, media_type: 'text/plain' },
     ],
-  })).toEqual(['/t/a.png', '/t/b.png', '/t/c.jpg', '/t/e.webp'])
+  })).toEqual(['/t/a.png', '/t/b.png', '/t/c.jpg', '/t/e.webp', '/t/g.svg', '/t/h.svg', '/t/i.SVG'])
   expect(sentImages(undefined)).toEqual([])
   expect(sentImages('error text')).toEqual([])
   expect(sentImages({ attachments: 'x' })).toEqual([])
@@ -78,7 +82,8 @@ test('an image type: by its media type, else by its name; with neither, a PNG to
   // The media type wins over the name.
   expect(imageKindOf({ path: '/t/a.jpg', media_type: 'image/png' })).toBe('png')
   expect(imageKindOf({ path: '/t/a.png', media_type: 'image/gif' })).toBe(null)
-  expect(imageKindOf({ path: '/t/a.png', media_type: 'image/svg+xml' })).toBe(null)
+  expect(imageKindOf({ path: '/t/a.png', media_type: 'image/svg+xml' })).toBe('svg')
+  expect(imageKindOf({ path: '/t/a.Svg' })).toBe('svg')
   expect(imageKindOf({ path: '/t/a.PNG' })).toBe('png')
   expect(imageKindOf({ path: '/t/a.JPG' })).toBe('jpeg')
   expect(imageKindOf({ path: '/t/a.jpeg' })).toBe('jpeg')
@@ -392,22 +397,23 @@ test('a file that is not an image, a JPEG and a missing file leave the row as it
   }
 })
 
-test('a JPEG and a WebP Claude sends are made PNGs by Typst once, and draw under the row', async ($, on) => {
-  const { converts, moves, heads } = world(on, { typst: true, files: { '/t/photo.jpg': JPEG, '/t/shot.webp': '' } })
+test('a JPEG, a WebP and an SVG Claude sends are made PNGs by Typst once, and draw under the row', async ($, on) => {
+  const { converts, moves, heads } = world(on, { typst: true, files: { '/t/photo.jpg': JPEG, '/t/shot.webp': '', '/t/chart.svg': '<svg/>' } })
   await ready($)
   const output = { attachments: [
     { path: '/t/photo.jpg', size: 1000, isImage: true, media_type: 'image/jpeg' },
     { path: '/t/shot.webp', size: 1000, isImage: true, media_type: 'image/webp' },
+    { path: '/t/chart.svg', size: 1000, isImage: false, media_type: 'image/svg+xml' },
   ] }
   const ui = await $.ui.mount(sent(output))
   const tree: any = await ui.drawn()
   expect(tree.children[0]).toMatchObject(ENGINE)
   const shown = images(tree)
-  expect(shown.map(i => i.props.alt)).toEqual(['photo.jpg', 'shot.webp'])
+  expect(shown.map(i => i.props.alt)).toEqual(['photo.jpg', 'shot.webp', 'chart.svg'])
   expect(shown[0].props).toMatchObject({ columns: 40, rows: 10 })
   expect(shown[0].props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/image\.png$/)
   expect(shown[0].props.source.file).not.toBe(shown[1].props.source.file)
-  expect(converts.map(argv => argv.find(a => a.startsWith('f=')))).toEqual(['f=/t/photo.jpg', 'f=/t/shot.webp'])
+  expect(converts.map(argv => argv.find(a => a.startsWith('f=')))).toEqual(['f=/t/photo.jpg', 'f=/t/shot.webp', 'f=/t/chart.svg'])
   // Made to fit the space of the picture: 98 x 20 cells of 16 x 32 px.
   expect(converts[0]).toContain('maxw=1568')
   expect(converts[0]).toContain('maxh=640')
@@ -417,8 +423,8 @@ test('a JPEG and a WebP Claude sends are made PNGs by Typst once, and draw under
   expect(moves[0]).toEqual(['mv', '-f', converts[0]!.at(-1), out])
   // A redraw converts nothing again, and the JPEG's own bytes are never read as a PNG.
   await ui.redraw(sent(output).props)
-  expect(images(await ui.drawn()).length).toBe(2)
-  expect(converts.length).toBe(2)
+  expect(images(await ui.drawn()).length).toBe(3)
+  expect(converts.length).toBe(3)
   expect(heads).not.toContain('/t/photo.jpg')
 })
 
