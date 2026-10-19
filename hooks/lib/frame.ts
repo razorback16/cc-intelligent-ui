@@ -1,7 +1,7 @@
 // The Frame: the terminal's columns, rows and cell, the one source of truth
 // for every size. A small watcher prints the tty size (TIOCGWINSZ) at each
-// SIGWINCH that changed it (and, on macOS once a picture is drawn, the
-// clipboard's change count: register.tsx); the render hooks note the viewport (the
+// SIGWINCH that changed it (and, once a picture is drawn, the clipboard's
+// changes: clipboard.ts, register.tsx); the render hooks note the viewport (the
 // transcript can be narrower than the tty). Both restart one quiet timer:
 // during a burst no job starts, and once it is quiet one tty read settles
 // it. A changed Frame begins an epoch (epoch.ts), so a drag or a font size
@@ -14,6 +14,7 @@ import { beginEpoch, holdJobs, releaseJobs } from './epoch'
 import { pump } from './stream'
 import { columnsFor, sizeOf } from './terminal'
 import { CELL_SH, perlFor, termFontOf, WATCH_PL } from './host'
+import { clipWatchArgs } from './clipboard'
 import { measureFonts } from './typst'
 import { clockAfter, processRun, processSpawn } from './api'
 
@@ -251,7 +252,8 @@ export function watchFrame($: EngineInterface, clip?: ((count: number | null, fi
   const me: NonNullable<typeof watcher> = { clip: isClip, ended: false, stop }
   watcher = me
   try {
-    const child = processSpawn($, { argv: [perlFor(S.hostOs === 'Darwin'), '-e', WATCH_PL, ...(isClip ? ['clip'] : [])] })
+    const isMac = S.hostOs === 'Darwin'
+    const child = processSpawn($, { argv: [perlFor(isMac), '-e', WATCH_PL, ...(isClip ? ['clip', ...(clipWatchArgs(isMac) ?? [])] : [])] })
     void followWatcher(child, line => {
       if ('pid' in line) {
         pid = line.pid

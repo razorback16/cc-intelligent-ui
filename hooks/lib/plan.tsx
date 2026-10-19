@@ -15,7 +15,7 @@ import { S, writesLive } from './state'
 import { firstLine } from './markdown'
 import type { Drawing } from './answer'
 import { drawPages, type ShownLink } from './draw'
-import { clockAfter, commandRun, fsRead, processRun, promptSubmit, turnAbort, uiAsk, uiResolve } from './api'
+import { clockAfter, commandRun, envGet, fsRead, processRun, promptSubmit, turnAbort, uiAsk, uiResolve } from './api'
 
 // The question's chip and its two wordings.
 export const PLAN_HEADER = 'Plan'
@@ -146,12 +146,30 @@ export function decisionOf(verdict: PlanVerdict, toolInput: unknown): Permission
 
 // The editor that opens the plan file and waits until it is closed: VS Code
 // (`code --wait`) when it is on the PATH, else TextEdit on a Mac (`open -W`
-// waits until TextEdit quits). Not over ssh, where TextEdit is the remote
-// computer's. A mod has no terminal, so no terminal editor.
-export function editorArgv(o: { code: string; isMac: boolean; isRemote: boolean }, file: string): string[] | null {
+// waits until TextEdit quits), else on Linux a GUI editor that waits
+// (`gui`: its path and flag, LINUX_EDITORS). Not over ssh, where TextEdit
+// or the GUI editor is the remote computer's. A mod has no terminal, so no
+// terminal editor; xdg-open does not wait, so it is not used.
+export function editorArgv(o: { code: string; isMac: boolean; isRemote: boolean; gui?: readonly string[] }, file: string): string[] | null {
   if (o.code) return [o.code, '--wait', file]
   if (o.isMac && !o.isRemote) return ['open', '-W', '-t', file]
+  if (!o.isMac && !o.isRemote && o.gui?.length) return [...o.gui, file]
   return null
+}
+
+// The GUI editors on Linux that can wait until the file is closed, in the
+// order they are looked for, with the flag that makes them wait.
+export const LINUX_EDITORS: readonly (readonly [string, string])[] = [
+  ['codium', '--wait'], ['zed', '--wait'], ['zeditor', '--wait'], ['subl', '--wait'], ['kate', '--block'], ['gedit', '--wait'], ['gvim', '-f'],
+]
+// Prints `name path` for the first editor of LINUX_EDITORS on the PATH.
+const GUI_EDITOR_SH = `for c in ${LINUX_EDITORS.map(([name]) => name).join(' ')}; do p=$(command -v "$c" 2>/dev/null) && { echo "$c $p"; break; }; done`
+
+// The editor of GUI_EDITOR_SH's output: its path and its flag; [] for none.
+export function guiEditorOf(stdout: string): string[] {
+  const m = /^(\S+) (\/.*)$/.exec(firstLine(stdout))
+  const flag = m ? LINUX_EDITORS.find(([name]) => name === m[1])?.[1] : undefined
+  return m && flag ? [m[2]!, flag] : []
 }
 
 // ---- The flow -----------------------------------------------------------------
@@ -172,6 +190,22 @@ async function findCode($: EngineInterface): Promise<string> {
   return found
 }
 
+// On Linux with a display (X11 or Wayland), a GUI editor that waits
+// ([] when none), looked up once per load.
+async function findGuiEditor($: EngineInterface): Promise<string[]> {
+  if (S.planGui !== null) return S.planGui
+  let found: string[] = []
+  if ((await envGet($, 'WAYLAND_DISPLAY')) || (await envGet($, 'DISPLAY'))) {
+    for (const flag of ['-lc', '-c']) {
+      const got = await processRun($, ['sh', flag, GUI_EDITOR_SH], { timeoutMs: 5000 }).catch(() => null)
+      found = got?.exitCode === 0 ? guiEditorOf(got.stdout) : []
+      if (found.length) break
+    }
+  }
+  S.planGui = found
+  return found
+}
+
 // What the mod's question decided: a verdict for the PermissionRequest, or
 // the person's words (a deny of the call: Claude revises the plan).
 export type PlanOutcome = { kind: 'verdict'; verdict: PlanVerdict } | { kind: 'feedback'; message: string }
@@ -185,7 +219,9 @@ export async function decidePlan(
   $: EngineInterface,
   o: { plan: string; callPlan: string; file: string; isMac: boolean; isRemote: boolean; onEdited: (plan: string) => void },
 ): Promise<PlanOutcome> {
-  const argv = o.file ? editorArgv({ code: await findCode($), isMac: o.isMac, isRemote: o.isRemote }, o.file) : null
+  const code = o.file ? await findCode($) : ''
+  const gui = o.file && !code && !o.isMac && !o.isRemote ? await findGuiEditor($) : []
+  const argv = o.file ? editorArgv({ code, isMac: o.isMac, isRemote: o.isRemote, gui }, o.file) : null
   const canEdit = !!argv
   let plan = o.plan
   let isEdited = false

@@ -12,11 +12,11 @@ import type {
 // (the validator lists them), so envGet has one call per name.
 export type EnvName =
   | 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC' | 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES' | 'CLAUDE_CODE_SESSION_KIND' | 'CLAUDE_CODE_TMPDIR'
-  | 'CMUX_SOCKET_PATH' | 'CMUX_SURFACE_ID' | 'CMUX_WORKSPACE_ID' | 'COLORFGBG' | 'DISABLE_AUTOUPDATER' | 'DISABLE_UPDATES'
+  | 'CMUX_SOCKET_PATH' | 'CMUX_SURFACE_ID' | 'CMUX_WORKSPACE_ID' | 'COLORFGBG' | 'DISABLE_AUTOUPDATER' | 'DISABLE_UPDATES' | 'DISPLAY'
   | 'GHOSTTY_RESOURCES_DIR' | 'HOME'
   | 'ITERM_PROFILE' | 'ITERM_SESSION_ID' | 'IUI_DEBUG' | 'IUI_FORCE' | 'KITTY_CONFIG_DIRECTORY' | 'KITTY_PID'
   | 'KITTY_WINDOW_ID' | 'LC_TERMINAL' | 'RIO_CONFIG_HOME' | 'SHELL' | 'SSH_CONNECTION' | 'SSH_TTY' | 'STY'
-  | 'TERM' | 'TERM_PROGRAM' | 'TMUX' | 'XDG_CONFIG_HOME' | 'ZDOTDIR'
+  | 'TERM' | 'TERM_PROGRAM' | 'TMUX' | 'WAYLAND_DISPLAY' | 'XDG_CONFIG_HOME' | 'XDG_CURRENT_DESKTOP' | 'ZDOTDIR'
 
 export function clockAfter($: EngineInterface, ms: number, fn: () => void) {
   return $.clock.after(ms, fn)
@@ -54,6 +54,7 @@ export function envGet($: EngineInterface, name: EnvName): Promise<string | unde
     case 'COLORFGBG': return $.env.get('COLORFGBG')
     case 'DISABLE_AUTOUPDATER': return $.env.get('DISABLE_AUTOUPDATER')
     case 'DISABLE_UPDATES': return $.env.get('DISABLE_UPDATES')
+    case 'DISPLAY': return $.env.get('DISPLAY')
     case 'GHOSTTY_RESOURCES_DIR': return $.env.get('GHOSTTY_RESOURCES_DIR')
     case 'HOME': return $.env.get('HOME')
     case 'ITERM_PROFILE': return $.env.get('ITERM_PROFILE')
@@ -72,7 +73,9 @@ export function envGet($: EngineInterface, name: EnvName): Promise<string | unde
     case 'TERM': return $.env.get('TERM')
     case 'TERM_PROGRAM': return $.env.get('TERM_PROGRAM')
     case 'TMUX': return $.env.get('TMUX')
+    case 'WAYLAND_DISPLAY': return $.env.get('WAYLAND_DISPLAY')
     case 'XDG_CONFIG_HOME': return $.env.get('XDG_CONFIG_HOME')
+    case 'XDG_CURRENT_DESKTOP': return $.env.get('XDG_CURRENT_DESKTOP')
     case 'ZDOTDIR': return $.env.get('ZDOTDIR')
   }
 }

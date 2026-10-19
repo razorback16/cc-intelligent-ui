@@ -717,7 +717,7 @@ test("Ghostty's background comes from its config, its theme, or its default", ()
   const where = { home: '/h', resources: '/R' }
   expect(ghosttyThemePaths('Nord', where)).toEqual([
     '/h/.config/ghostty/themes/Nord', '/h/Library/Application Support/com.mitchellh.ghostty/themes/Nord', '/R/themes/Nord',
-    '/Applications/Ghostty.app/Contents/Resources/ghostty/themes/Nord', '/usr/share/ghostty/themes/Nord',
+    '/Applications/Ghostty.app/Contents/Resources/ghostty/themes/Nord', '/usr/share/ghostty/themes/Nord', '/usr/local/share/ghostty/themes/Nord',
   ])
   expect(ghosttyThemePaths('Nord', { ...where, xdgConfig: '/x' })[0]).toBe('/x/ghostty/themes/Nord')
   expect(ghosttyThemePaths('/t/Mine', where)).toEqual(['/t/Mine'])

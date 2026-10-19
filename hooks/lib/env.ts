@@ -4,7 +4,7 @@ import { atom, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import {
-  BASE_THEME, DEFAULT_HEIGHT, DEFAULT_SIZE, DESIGNS_KEPT_DAYS, DEFAULT_THEME, DEFAULT_WIDTH, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, NO_TYPST,
+  BASE_THEME, DEFAULT_HEIGHT, DEFAULT_SIZE, DESIGNS_KEPT_DAYS, DEFAULT_THEME, DEFAULT_WIDTH, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, noTypstOf,
 } from './settings'
 import { DEFAULT_METRICS, refresh, S, type Env } from './state'
 import { resolveMode, settingOf } from './mode'
@@ -16,6 +16,7 @@ import { registerCommand } from './command'
 import { readHostMode, termFontOf, watchHost } from './host'
 import { readFrame, setFrame, watchFrame } from './frame'
 import { offerSetup } from './setup'
+import { findClipWay } from './clipboard'
 import { findTypst, measureFonts } from './typst'
 import { checkUpdates } from './updates'
 import { configList, envGet, fsList, fsStat, pluginRoot, processRun, sessionCwd, storeGet, uiToast } from './api'
@@ -28,7 +29,7 @@ const isOn = atom({ plugin: 'cc-intelligent-ui', key: 'isOn' } as const, true)
 // the designs folder (outside the tmp cache) and drops design files not
 // touched for DESIGNS_KEPT_DAYS; prints the cache folder, the OS name and
 // the designs folder.
-const CACHE_SH = `d="\${TMPDIR:-/tmp}"; d="\${d%/}/cc-intelligent-ui-$(id -u)"; g="\${XDG_CACHE_HOME:-$HOME/.cache}/cc-intelligent-ui/designs"; mkdir -p "$d" && chmod 700 "$d" && { find "$d" -mindepth 1 -maxdepth 1 -type d -mtime +2 ! -name pkg-cache -exec rm -rf {} + 2>/dev/null; mkdir -p "$g" 2>/dev/null && find "$g" -type f -mtime +${DESIGNS_KEPT_DAYS} -delete 2>/dev/null; printf '%s\\n%s\\n%s\\n' "$d" "$(uname -s)" "$g"; }`
+export const CACHE_SH = `d="\${TMPDIR:-/tmp}"; d="\${d%/}/cc-intelligent-ui-$(id -u)"; g="\${XDG_CACHE_HOME:-$HOME/.cache}/cc-intelligent-ui/designs"; mkdir -p "$d" && chmod 700 "$d" && { find "$d" -mindepth 1 -maxdepth 1 -type d -mtime +2 ! -name pkg-cache -exec rm -rf {} + 2>/dev/null; mkdir -p "$g" 2>/dev/null && find "$g" -type f -mtime +${DESIGNS_KEPT_DAYS} -delete 2>/dev/null; printf '%s\\n%s\\n%s\\n' "$d" "$(uname -s)" "$g"; }`
 
 // Once per load: the cache folder, Typst, the terminal and its font, the
 // theme, the cell. A failed setup is tried again on the next call.
@@ -91,12 +92,14 @@ export function setUp($: EngineInterface): Promise<Env> {
     S.grid = (await storeGet($, 'grid').catch(() => undefined)) !== false
     if ((await storeGet($, 'enabled').catch(() => undefined)) === false) await update($, isOn, () => false).catch(() => undefined)
     const isMac = os.trim() === 'Darwin'
+    // Linux, on this computer: the clipboard tools, for the copy.
+    if (S.hostOs === 'Linux' && !ssh) void findClipWay($).catch(() => undefined)
     setFrame(await readFrame($))
     if (canDraw) watchFrame($)
     const typst = await findTypst($)
     if (!typst) {
       try {
-        uiToast($, NO_TYPST, { timeoutMs: 8000 })
+        uiToast($, noTypstOf(isMac), { timeoutMs: 8000 })
       } catch {}
     }
     const termFont = await termFontOf($, program, isMac).catch(() => '')
