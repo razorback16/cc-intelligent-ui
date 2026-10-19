@@ -135,8 +135,9 @@ export const DESIGNS_KEPT_DAYS = 180
 // A Markdown file Claude sends (SendUserFile) draws when it is at most this
 // many bytes.
 export const SENT_TEXT_MAX_BYTES = 256 * 1024
-// The PNG Typst makes of a JPEG, WebP or SVG fits the space of the picture, and
-// each side is at most this many pixels (never made larger).
+// The PNG Typst makes of a JPEG, WebP or SVG (never made larger), or of a
+// PDF page, fits the space of the picture, and each side is at most this
+// many pixels.
 export const CONVERT_MAX_SIDE = 4096
 
 // What Claude is told while the mod draws its answers (a system prompt

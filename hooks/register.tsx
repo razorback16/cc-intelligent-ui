@@ -42,7 +42,7 @@ import { setUp } from './lib/env'
 import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/frame'
 import { roomColumns } from './lib/terminal'
 import { onScreenOf, pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
-import { pasteDir, rowsAfter, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
+import { drawPageField, pasteDir, pdfPagesOf, rowsAfter, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
 import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
 import { clockNow, fsWrite, sessionSurfaces, storeSet, uiCopy, uiResolve, uiSelection, uiToast } from './lib/api'
 import {
@@ -83,6 +83,7 @@ export {
 } from './lib/draw'
 export { nextJob } from './lib/stream'
 export * from './lib/images'
+export { rowsAfter, type Under } from './lib/pictures'
 export * from './lib/copy'
 export { autoCopyText, CLIP_TOOLS, clipToolsOf, clipWayOf, FIND_SH, GTK_READ_PY, GTK_WATCH_PY, WL_WATCH_SH, X11_WATCH_SH, type ClipTool, type ClipWay } from './lib/clipboard'
 export {
@@ -695,8 +696,9 @@ export const register: Register = on => {
   })
 
   // The files Claude sends with SendUserFile, under the result row that lists
-  // them: PNG, JPEG and WebP images, and Markdown files drawn as an answer is
-  // (they need Typst). Its ToolUse row draws no attachments, and the tool is
+  // them: PNG, JPEG, WebP and SVG images, one page of each PDF (with a control
+  // line to turn the pages), and Markdown files drawn as an answer is (all
+  // but a PNG need Typst). Its ToolUse row draws no attachments, and the tool is
   // never in a ToolGroup, so only ToolResult is hooked and no picture draws
   // twice.
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -709,7 +711,7 @@ export const register: Register = on => {
         const markdown = files.some(f => f.kind === 'markdown') && ready.env.typst ? ready.env : null
         const id = e.props.tool_use_id
         const onScreen = onScreenOf(e.props.onScreen)
-        const k = { text: files.map(f => `${f.kind}:${f.path}`).join('\n'), extra: '', stamp: stampOf(ready, e.viewport), onScreen }
+        const k = { text: files.map(f => `${f.kind}:${f.path}`).join('\n'), extra: pdfPagesOf(id, files), stamp: stampOf(ready, e.viewport), onScreen }
         // Its jobs: one per Markdown file (pagesOf's id `file:<id>:<path>`).
         const kept = memoOf(unders, id, k, requestId => requestId.startsWith(`file:${id}:`))
         // Each Markdown file's pages with the rows drawn after them (rowsAfter)
@@ -749,6 +751,13 @@ export const register: Register = on => {
     } catch {
       return row
     }
+  })
+
+  // The page field of a PDF under a SendUserFile row (pictures.tsx askPage):
+  // the pane PAGE_PANE, named as a literal so the validator reads it.
+  on('ui.render', { component: 'Pane', requestId: 'iui-page' }, async ($, e, next) => {
+    if (e.surface !== 'terminal') return next(e)
+    return drawPageField($, e)
   })
 
   // The images the user pasted (`[Image #N]`), under the prompt row. Only the
