@@ -862,6 +862,10 @@
       show colbreak: none
       // The probe: no marks (see no-marks). The grid: no half-row phase.
       set text(costs: (orphan: 102%)) if probe or on-grid
+      // Off-grid text rules, so multi-line labels do not overlap.
+      set text(top-edge: "ascender", bottom-edge: "descender") if on-grid
+      set par(leading: E.text.leading-em * 1em, spacing: E.text.paragraph-em * 1em) if on-grid
+      set std.block(spacing: E.text.paragraph-em * 1em) if on-grid
       eval(src, mode: "markup", scope: (theme: live-theme))
     }
     std.block(width: 100%, above: if on-grid { row } else { 1.2em }, below: if on-grid { row } else { 1.2em }, layout(size => {
