@@ -26,50 +26,57 @@ test('right after theme or size, rows hold the word and its argument', () => {
   const rows = at('/iui theme')
   expect(rows.map(r => r.text)).toEqual(['theme github-light', 'theme nord', 'theme vscode', 'theme vscode-modern'])
   expect(rows.map(r => r.label)).toEqual(['github-light', 'nord', 'vscode', 'vscode-modern'])
-  expect(rows[3]!.description).toBe('built-in, active: default look')
-  expect(rows[1]!.description).toBe('user: my nord')
+  expect(rows[3]!.description).toBe('in use: default look')
+  expect(rows[1]!.description).toBe('yours: my nord')
   expect(at('/iui size').map(r => r.text)).toContain('size 150')
   const widths = at('/iui width')
   expect(widths.map(r => r.text)).toEqual(['width 80', 'width 100', 'width 120', 'width 160', 'width 200', 'width full'])
-  // full is the default; with no width given, it is current.
-  expect(widths.at(-1)!.description).toBe('current')
+  // full is the default; with no width given, it is in use.
+  expect(widths.at(-1)!.description).toBe('in use')
   const heights = at('/iui height')
   expect(heights.map(r => r.text)).toEqual(['height half', 'height full', 'height 12', 'height 24', 'height 36'])
   expect(heights.map(r => r.label)).toEqual(['half', 'full', '12 rows', '24 rows', '36 rows'])
-  // half is the default; with no height given, it is current.
-  expect(heights[0]!.description).toBe('current')
+  // half is the default; with no height given, it is in use.
+  expect(heights[0]!.description).toBe('in use')
   expect(heights[1]!.description).toBe('the terminal height less 16 rows')
   const grids = at('/iui grid')
   expect(grids.map(r => r.text)).toEqual(['grid on', 'grid off'])
-  // on is the default; with no grid given, it is current.
-  expect(grids.map(r => r.description)).toEqual(['current', undefined])
+  // on is the default; with no grid given, it is in use.
+  expect(grids.map(r => r.description)).toEqual(['in use', undefined])
 })
 
 test('a theme name or size completes after its word', () => {
   expect(at('/iui theme vs').map(r => r.text)).toEqual(['vscode', 'vscode-modern'])
   expect(at('/iui theme N').map(r => r.text)).toEqual(['nord'])
   expect(at('/iui size 1').map(r => r.text)).toEqual(['100', '110', '120', '125', '150', '175'])
-  expect(at('/iui size 10')[0]!.description).toBe('current')
+  expect(at('/iui size 10')[0]!.description).toBe('in use')
   expect(at('/iui theme nord extra')).toEqual([])
   expect(at('/iui width 1').map(r => r.text)).toEqual(['100', '120', '160'])
   expect(at('/iui width f').map(r => r.label)).toEqual(['full'])
   const set = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, width: 160 })
-  expect(set('/iui width 16')[0]!.description).toBe('current')
+  expect(set('/iui width 16')[0]!.description).toBe('in use')
   expect(set('/iui width f')[0]!.description).toBe('the default')
   expect(at('/iui height f').map(r => r.text)).toEqual(['full'])
   expect(at('/iui height 2').map(r => r.text)).toEqual(['24'])
   const tall = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, height: 24 })
-  expect(tall('/iui height 2')[0]!.description).toBe('current')
+  expect(tall('/iui height 2')[0]!.description).toBe('in use')
   expect(tall('/iui height h')[0]!.description).toBe('the default: half the terminal')
   expect(at('/iui grid o').map(r => r.text)).toEqual(['on', 'off'])
   expect(at('/iui grid of').map(r => r.label)).toEqual(['off'])
   const gridded = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, grid: false })
-  expect(gridded('/iui grid o').map(r => r.description)).toEqual(['the default', 'current'])
+  expect(gridded('/iui grid o').map(r => r.description)).toEqual(['the default', 'in use'])
   expect(at('/iui grid on extra')).toEqual([])
 })
 
-test('other prompts and the command name itself get no rows', () => {
-  expect(at('/iui')).toEqual([])
+test('the command name itself offers the subcommands, as rows that hold it', () => {
+  const rows = at('/iui')
+  expect(rows.map(r => r.label)).toEqual(['on', 'off', 'size', 'width', 'height', 'grid', 'updates', 'theme', 'setup', 'details', 'grab', 'dump'])
+  expect(rows.find(r => r.label === 'theme')!.text).toBe('/iui theme')
+  expect(at('  /iui').map(r => r.text)).toContain('/iui grid')
+  expect(at('tell me /iui')).toEqual([])
+})
+
+test('other prompts get no rows', () => {
   expect(at('/iuix t')).toEqual([])
   expect(at('tell me about /iui t')).toEqual([])
   expect(at('/other theme')).toEqual([])

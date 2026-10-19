@@ -1,6 +1,6 @@
 {
   "name": "VS Code Modern",
-  "description": "VS Code's Markdown preview with Dark Modern and Light Modern",
+  "description": "VS Code, Dark Modern and Light Modern",
   "source": "microsoft/vscode (MIT, see LICENSE): extensions/theme-defaults/themes/dark_modern.json and light_modern.json (colours); every other value comes from the vscode theme (markdown.css, highlight.css)",
   "dark": {
     "fg": "#cccccc",

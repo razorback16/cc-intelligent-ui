@@ -89,10 +89,10 @@ test('/iui updates [on|off] is a command, with typeahead rows', () => {
   expect(at('/iui u')[0]!.description).toBe('look for a new version once a day, on or off')
   const rows = at('/iui updates')
   expect(rows.map(r => r.text)).toEqual(['updates on', 'updates off'])
-  // on is the default; with no value given, it is current.
-  expect(rows.map(r => r.description)).toEqual(['current', undefined])
-  expect(at('/iui updates of', { updates: false }).map(r => [r.text, r.description])).toEqual([['off', 'current']])
-  expect(at('/iui updates o', { updates: false }).map(r => r.description)).toEqual(['the default', 'current'])
+  // on is the default; with no value given, it is in use.
+  expect(rows.map(r => r.description)).toEqual(['in use', undefined])
+  expect(at('/iui updates of', { updates: false }).map(r => [r.text, r.description])).toEqual([['off', 'in use']])
+  expect(at('/iui updates o', { updates: false }).map(r => r.description)).toEqual(['the default', 'in use'])
   expect(at('/iui updates on extra')).toEqual([])
 })
 

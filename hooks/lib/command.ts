@@ -86,14 +86,21 @@ const UPDATES = ['on', 'off'] as const
 
 // Typeahead rows for `/iui` arguments: the word at the cursor (`token`,
 // starting at `start` in `text`) completed as a subcommand, a theme name, a
-// size, a width, a height, a grid or an updates value. Right after `theme`,
-// `size`, `width`, `height`, `grid` or `updates`, rows hold the word and its
-// argument, since the typeahead asks only while a word is at the cursor.
+// size, a width, a height, a grid or an updates value. The typeahead asks
+// only while a word is at the cursor (never after a space), and again after
+// a row is taken. So each word offers its next step while it is at the
+// cursor: `/iui` its subcommands, and `theme`, `size`, `width`, `height`,
+// `grid` or `updates` their values, as rows that hold the word too. A Tab
+// then takes a row and the next rows show at once. The value in use is
+// marked `in use` in each list, as in `/iui theme`.
 export type Suggestion = { text: string; label?: string; description?: string }
 export function commandSuggestions(
   text: string, token: string, start: number,
   o: { themes: readonly ThemeInfo[]; active: string; size: number; width?: Width; height?: Height; grid?: boolean; updates?: boolean },
 ): Suggestion[] {
+  if (token === '/iui' && /^\s*$/.test(text.slice(0, start))) {
+    return SUBCOMMANDS.map(c => ({ text: `/iui ${c.name}`, label: c.name, description: c.description }))
+  }
   const head = /^\s*\/iui\s+/.exec(text)
   if (!head || start < head[0].length) return []
   const before = text.slice(head[0].length, start).trim().split(/\s+/).filter(Boolean).map(w => w.toLowerCase())
@@ -104,18 +111,18 @@ export function commandSuggestions(
     .map(t => ({
       text: `${lead}${t.name}`,
       label: t.name,
-      description: `${t.isUser ? 'user' : 'built-in'}${t.name === o.active ? ', active' : ''}${t.description ? `: ${t.description}` : ''}`,
+      description: [[t.isUser ? 'yours' : '', t.name === o.active ? 'in use' : ''].filter(Boolean).join(', '), t.description].filter(Boolean).join(': ') || undefined,
     }))
   const sizeRows = (prefix: string, lead: string) => SIZES
     .filter(n => String(n).startsWith(prefix))
-    .map(n => ({ text: `${lead}${n}`, label: `${n}%`, description: n === o.size ? 'current' : n === DEFAULT_SIZE ? 'the terminal text size' : undefined }))
+    .map(n => ({ text: `${lead}${n}`, label: `${n}%`, description: n === o.size ? 'in use' : n === DEFAULT_SIZE ? 'the terminal text size' : undefined }))
   const width = o.width ?? DEFAULT_WIDTH
   const widthRows = (prefix: string, lead: string) => WIDTHS
     .filter(w => String(w).startsWith(prefix))
     .map(w => ({
       text: `${lead}${w}`,
       label: w === 'full' ? 'full' : `${w} columns`,
-      description: w === width ? 'current' : w === DEFAULT_WIDTH ? 'the default' : w === 'full' ? `the terminal width (${IMAGE_MAX_COLUMNS} at most)` : undefined,
+      description: w === width ? 'in use' : w === DEFAULT_WIDTH ? 'the default' : w === 'full' ? `the terminal width (${IMAGE_MAX_COLUMNS} at most)` : undefined,
     }))
   const height = o.height ?? DEFAULT_HEIGHT
   const heightRows = (prefix: string, lead: string) => HEIGHTS
@@ -123,17 +130,17 @@ export function commandSuggestions(
     .map(h => ({
       text: `${lead}${h}`,
       label: typeof h === 'number' ? `${h} rows` : h,
-      description: h === height ? 'current' : h === DEFAULT_HEIGHT ? 'the default: half the terminal'
+      description: h === height ? 'in use' : h === DEFAULT_HEIGHT ? 'the default: half the terminal'
         : h === 'full' ? `the terminal height less ${PICTURE_ROOM_ROWS} rows` : undefined,
     }))
   const grid = o.grid === false ? 'off' : 'on'
   const gridRows = (prefix: string, lead: string) => GRIDS
     .filter(g => g.startsWith(prefix))
-    .map(g => ({ text: `${lead}${g}`, label: g, description: g === grid ? 'current' : g === 'on' ? 'the default' : undefined }))
+    .map(g => ({ text: `${lead}${g}`, label: g, description: g === grid ? 'in use' : g === 'on' ? 'the default' : undefined }))
   const updates = o.updates === false ? 'off' : 'on'
   const updateRows = (prefix: string, lead: string) => UPDATES
     .filter(u => u.startsWith(prefix))
-    .map(u => ({ text: `${lead}${u}`, label: u, description: u === updates ? 'current' : u === 'on' ? 'the default' : undefined }))
+    .map(u => ({ text: `${lead}${u}`, label: u, description: u === updates ? 'in use' : u === 'on' ? 'the default' : undefined }))
   if (before.length === 0) {
     if (word === 'theme') return themeRows('', 'theme ')
     if (word === 'height') return heightRows('', 'height ')

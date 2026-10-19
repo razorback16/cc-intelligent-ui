@@ -87,17 +87,21 @@ export function chooseTheme(themes: ReadonlyMap<string, ThemeInfo>, wanted: stri
   return { name: BASE_THEME, dir: base?.dir ?? `${root}/render/themes/${BASE_THEME}`, isFallback: wanted !== BASE_THEME }
 }
 
-// What `/iui theme` lists.
-export function themeListing(themes: ReadonlyMap<string, ThemeInfo>, problems: readonly ThemeProblem[], active: string, userDir: string): string {
-  const lines = [...themes.values()]
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map(t => `${t.name === active ? '*' : '-'} ${t.name} (${t.isUser ? 'user' : 'built-in'})${t.description ? `: ${t.description}` : ''}`)
-  const skipped = problems.map(p => `  skipped ${p.name} (${p.isUser ? 'user' : 'built-in'}): ${p.reason}`)
+// What `/iui theme` lists. The output shows as Markdown, so the theme in use
+// is marked in words (a `*` would turn into a list bullet), and the home
+// folder shows as `~`.
+export function themeListing(themes: ReadonlyMap<string, ThemeInfo>, problems: readonly ThemeProblem[], active: string, userDir: string, home = ''): string {
+  const marks = (t: { name: string; isUser: boolean }) => [t.isUser ? 'yours' : '', t.name === active ? 'in use' : ''].filter(Boolean).join(', ')
+  const item = (t: ThemeInfo) => `- ${t.name}${marks(t) ? ` (${marks(t)})` : ''}${t.description ? `: ${t.description}` : ''}`
+  const lines = [...themes.values()].sort((a, b) => a.name.localeCompare(b.name)).map(item)
+  const skipped = problems.map(p => `- ${p.name}${p.isUser ? ' (yours)' : ''}: not usable, ${p.reason}`)
+  const dir = home && userDir.startsWith(`${home}/`) ? `~${userDir.slice(home.length)}` : userDir
   return [
-    `Themes (* = active):`,
+    'Themes:',
     ...(lines.length ? lines : ['- none found']),
     ...skipped,
-    `User themes go in ${userDir}/<name>/theme.json. Switch with /iui theme <name>.`,
+    '',
+    `Change it with /iui theme <name>. Your own themes go in ${dir}/<name>/theme.json.`,
   ].join('\n')
 }
 

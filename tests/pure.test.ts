@@ -582,11 +582,13 @@ test('a user theme replaces the built-in one of its name; a broken one is only r
   expect(themes.get('nord')).toMatchObject({ isUser: true, description: 'mine' })
   expect(themes.get('vscode')).toMatchObject({ isUser: false, dir: '/mod/render/themes/vscode' })
   expect(problems.map(p => p.name).sort()).toEqual(['solar', 'vscode'])
-  const listing = themeListing(themes, problems, 'nord', '/home/.claude/cc-intelligent-ui/themes')
-  expect(listing).toContain('* nord (user): mine')
-  expect(listing).toContain('- vscode (built-in)')
-  expect(listing).toContain('skipped solar (user)')
-  expect(listing).toContain('/home/.claude/cc-intelligent-ui/themes/<name>/theme.json')
+  const listing = themeListing(themes, problems, 'nord', '/home/.claude/cc-intelligent-ui/themes', '/home')
+  expect(listing).toContain('- nord (yours, in use): mine')
+  expect(listing).toContain('- vscode\n')
+  expect(listing).toContain('- solar (yours): not usable')
+  expect(listing).toContain('~/.claude/cc-intelligent-ui/themes/<name>/theme.json')
+  // Shown as Markdown: a line that starts with `* ` would turn into a bullet.
+  expect(listing.split('\n').some(l => l.startsWith('* '))).toBe(false)
 })
 
 test('a missing theme falls back to the base theme, even before it is on disk', () => {

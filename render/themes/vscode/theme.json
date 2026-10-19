@@ -1,6 +1,6 @@
 {
   "name": "VS Code",
-  "description": "VS Code's Markdown preview with the default themes, Dark+ and Light+",
+  "description": "VS Code, Dark+ and Light+",
   "source": "microsoft/vscode (MIT, see LICENSE): extensions/markdown-language-features/media/markdown.css (sizes, spacing), media/highlight.css (code colours, in dark.tmTheme and light.tmTheme), src/vs/platform/theme/common/colors/baseColors.ts (textPreformat, textCodeBlock, textBlockQuote, textLink defaults), extensions/theme-defaults/themes/dark_vs.json and light_vs.json (editor and widget colours)",
   "syntax": { "dark": "dark.tmTheme", "light": "light.tmTheme" },
   "fonts": {

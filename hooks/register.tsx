@@ -451,7 +451,7 @@ export const register: Register = on => {
   // Typeahead for /iui arguments; the theme list is the last scan's.
   on('prompt.autocomplete', async ($, e, next) => {
     const got = await next(e)
-    if (!/^\s*\/iui\s/.test(e.text)) return got
+    if (!/^\s*\/iui(\s|$)/.test(e.text)) return got
     if (!S.themeChoices.length) await setUp($).catch(() => null)
     await loadUpdates($)
     const mine = commandSuggestions(e.text, e.token, e.start, {
@@ -544,8 +544,7 @@ export const register: Register = on => {
       const { themes, problems, chosen } = await applyTheme($, ready.root, ready.home, wanted)
       if (asked.name && chosen.isFallback) {
         if (was) S.look = was
-        const names = [...themes.keys()].sort().join(', ') || 'none'
-        return { text: `No usable theme named ${asked.name}. Themes: ${names}.\n${themeListing(themes, problems, was?.name ?? DEFAULT_THEME, userThemesOf(ready.home))}` }
+        return { text: `No usable theme named ${asked.name}.\n\n${themeListing(themes, problems, was?.name ?? DEFAULT_THEME, userThemesOf(ready.home), ready.home)}` }
       }
       if (S.look?.name !== was?.name || S.look?.dir !== was?.dir || S.look?.stamp !== was?.stamp) {
         // The theme's fonts set the column width and the code size.
@@ -553,8 +552,8 @@ export const register: Register = on => {
         beginEpoch($)
       }
       if (asked.name) await storeSet($, 'theme-name', chosen.name)
-      const head = asked.name ? `Intelligent UI uses the theme ${chosen.name}.\n` : ''
-      return { text: `${head}${themeListing(themes, problems, chosen.name, userThemesOf(ready.home))}` }
+      const head = asked.name ? `Theme set to ${chosen.name}.\n\n` : ''
+      return { text: `${head}${themeListing(themes, problems, chosen.name, userThemesOf(ready.home), ready.home)}` }
     }
     const state = (await read($, isOn)) ? 'on' : 'off'
     const ready = await setUp($)

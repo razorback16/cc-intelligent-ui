@@ -1,6 +1,6 @@
 {
   "name": "Claude Code",
-  "description": "The colours of Claude Code's own Markdown in the terminal, with its dark and light themes",
+  "description": "Claude Code's own colours",
   "source": "Claude Code 2.1.302: its dark and light theme palettes (text, inactive, subtle, promptBorder, permission for inline code and code blocks with no language, claude for the accent, its border colour for the code block frame, the subagent colours for drawings) and its Markdown renderer (dim quote bar, no code background, underlined h1, '-' bullets, 1. a. i. 1. numbers, highlight.js classes as ANSI colours). ANSI colours (links, code) are VS Code's terminal colours, MIT, see LICENSE: src/vs/workbench/contrib/terminal/common/terminalColorRegistry.ts",
   "syntax": { "dark": "dark.tmTheme", "light": "light.tmTheme" },
   "dark": {
