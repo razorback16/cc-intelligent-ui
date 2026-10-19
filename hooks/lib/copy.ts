@@ -131,12 +131,14 @@ export type Mark = {
   prefix?: string
   cx?: number
   g?: number
+  pad?: number
 }
 // A word, or a whole code line (`adv`: its character advance), in PNG
 // pixels: its box, the block it is in, and its place in the document (`i`).
 // `glued`: a character of a long word or of CJK text after the first (it
-// joins the one before with no space).
-export type Item = { i: number; text: string; x0: number; y0: number; x1: number; y1: number; block: number; adv?: number; glued?: boolean }
+// joins the one before with no space). A word's `em` is its text size and
+// `pad` the padding beside inline code (a word of it), in pixels.
+export type Item = { i: number; text: string; x0: number; y0: number; x1: number; y1: number; block: number; adv?: number; glued?: boolean; em?: number; pad?: number }
 // A block: paragraph, heading, code, quote, cell (`cx` its column), item
 // (`prefix`); `first` its first item.
 export type TextBlock = { kind: string; prefix: string; cx?: number; first: number }
@@ -198,6 +200,7 @@ export function positionsOf(marks: readonly Mark[], ppi: number): Positions {
         : {
             i: count, text: (m.t ?? '').replace(INVISIBLE, ''), block, x0: round(m.x * k), x1: round((m.x + (m.w ?? 0)) * k),
             y0: round(m.y * k), y1: round((m.y + (m.h ?? m.s ?? 11)) * k), ...(m.g ? { glued: true } : {}),
+            ...(m.s ? { em: round(m.s * k) } : {}), ...(m.pad ? { pad: round(m.pad * k) } : {}),
           }
     if (!item.text) return
     count++
@@ -372,10 +375,12 @@ export function textOfRun(
 // Joins picked words: a new line between blocks (a tab between the cells of
 // a table row), a block's prefix when its first word is in, a new line
 // between code lines; inside a block a space between words, none between
-// the pieces of one word (boxes on one line closer than a fifth of the line
-// height: a space is wider, the padding beside inline code narrower; none
-// before a glued character that follows the one before it), none after a
-// - or / that ends a line.
+// the pieces of one word (boxes on one line closer than 0.15 of the text
+// size, not counting the padding beside inline code: a space is 0.22-0.32
+// of it; none before a glued character that follows the one before it),
+// none after a - or / that ends a line. Not of the line height: that is the
+// font's (Noto Sans: 1.36 of the size) or the grid's rows. Items with no
+// text size: a fifth of the line height.
 export function joinItems(picked: readonly { item: Item; text: string }[], blocks: readonly TextBlock[]): string {
   let out = ''
   let prev: { item: Item; text: string } | null = null
@@ -395,7 +400,8 @@ export function joinItems(picked: readonly { item: Item; text: string }[], block
     else {
       const height = p.item.y1 - p.item.y0
       const sameLine = Math.abs((p.item.y0 + p.item.y1) / 2 - (prev.item.y0 + prev.item.y1) / 2) < height / 2
-      if (sameLine) out += p.item.x0 - prev.item.x1 > height * 0.2 ? ' ' : ''
+      const pad = (p.item.pad ?? 0) === (prev.item.pad ?? 0) ? 0 : Math.max(p.item.pad ?? 0, prev.item.pad ?? 0)
+      if (sameLine) out += p.item.x0 - prev.item.x1 - pad > (p.item.em ? p.item.em * 0.15 : height * 0.2) ? ' ' : ''
       else out += /[-/]$/.test(prev.text) ? '' : ' '
     }
     out += p.text

@@ -461,6 +461,8 @@
 //      A long word (30+ characters) or CJK text breaks anywhere: each of
 //      its characters (clusters) is a word, boxed, `g` on all but the
 //      first (they join with no space).
+//      A word of inline code has `pad`, the theme's padding beside the
+//      code, when it is not 0.
 //   c: a block code line: x its start, y its baseline, a and d the code
 //      font's ascender and descender, w its width, n its characters.
 //   b: a block starts: paragraph, heading, code block, quote, table cell
@@ -484,6 +486,9 @@
 // here: a page is as tall as its text, so no paragraph breaks across pages.
 #let in-code(costs) = costs.orphan == 101%
 #let no-marks(costs) = costs.orphan == 102%
+// Inline code sets this so its words carry the theme's padding beside it
+// (`pad`: a copy takes it off the gap to the text next to it).
+#let in-inline-code(costs) = costs.orphan == 104%
 #let cjk = regex("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]")
 #let probe-rules(body) = {
   // A word is cut after a hyphen or a slash, where a line may break; a
@@ -491,6 +496,8 @@
   show regex("\\S{30,}|[^\\s/-]*[/-]+|[^\\s/-]+"): it => context if in-code(text.costs) or no-marks(text.costs) { it } else {
     let size = measure(it)
     let t = it.text
+    let pad = E.inline-code.pad-x-px * px
+    let pad = if in-inline-code(text.costs) and pad > 0pt { (pad: pad / 1pt) } else { (:) }
     if t.clusters().len() >= 30 or t.match(cjk) != none {
       // A long word or CJK text breaks anywhere: a box for each character
       // (a line may break between boxes, as at the long-word rule's zws).
@@ -498,12 +505,12 @@
       // with all the marks after it.
       for (i, c) in t.clusters().enumerate() {
         let one = measure(c)
-        box({ mark("w", t: c, w: one.width / 1pt, h: one.height / 1pt, ..if i > 0 { (g: 1) } else { (:) }); c })
+        box({ mark("w", t: c, w: one.width / 1pt, h: one.height / 1pt, ..pad, ..if i > 0 { (g: 1) } else { (:) }); c })
       }
     } else {
       // Boxed, so the mark is where the word is drawn (a bare mark at the
       // start of a wrapped line stays at the end of the line above).
-      box({ mark("w", t: t, w: size.width / 1pt, h: size.height / 1pt); it })
+      box({ mark("w", t: t, w: size.width / 1pt, h: size.height / 1pt, ..pad); it })
     }
   }
   // A code line: a zero-size box at its start (its y is the baseline). An
@@ -520,6 +527,7 @@
     it
   }
   show math.equation: set text(costs: (orphan: 102%))
+  show raw.where(block: false): it => context if no-marks(text.costs) { it } else { set text(costs: (orphan: 104%)); it }
   show par: it => { mark("b", kind: "par"); it }
   show heading: it => { mark("b", kind: "heading"); it }
   show quote.where(block: true): it => { mark("b", kind: "quote"); it }

@@ -5,6 +5,7 @@ import {
   placeholderCell, isSafePage, positionsOf, screenOf, textOfRun, WATCH_PL, type Drawn, type TextBlock, type Item, type Mark, type OnScreen,
   type Place,
 } from '../hooks/register'
+import { joinItems } from '../hooks/lib/copy'
 import { WATCH_RESTART_MS } from '../hooks/lib/frame'
 import { rowsAfter, type Under } from '../hooks/lib/pictures'
 import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI } from './copy-fixture'
@@ -319,6 +320,48 @@ test('invisible marks and list markers of other themes are dropped', () => {
   ]
   const got = positionsOf(marks, 72)
   expect(got.pages[0]!.map(i => i.text)).toEqual(['with', 'code', 'end', 'one'])
+})
+
+// A real probe on Linux (Ubuntu 24.04, theme claude-code, row grid on, ppi
+// 275): the body font is Noto Sans, its space 0.26 of the size, its
+// ascender to descender 1.36; on the grid a line is 2 rows (22.254 pt). A
+// fifth of either is more than the space.
+const NOTO_LINE: Mark[] = [
+  { k: 'w', p: 1, x: 20.9, y: 1541.09, s: 11, t: '-', w: 3.542, h: 22.254 },
+  { k: 'b', p: 1, x: 30.492, y: 1541.09, s: 11, kind: 'item', prefix: '- ' },
+  ...([[30.492, 'Geometric', 57.354], [90.706, 'resizing', 43.01], [136.576, 'keeps', 30.316], [169.752, 'inserts', 34.892], [207.504, 'at', 10.142],
+    [248.123, 'amortized,', 55.55], [306.533, 'even', 24.574], [333.967, 'though', 37.785], [374.612, 'a', 6.171], [383.643, 'single', 30.712],
+    [417.215, 'rehash', 35.563], [455.638, 'costs', 26.444], [510.908, '.', 2.948]] as const).map(([x, t, w]): Mark => ({ k: 'w', p: 1, x, y: 1541.09, s: 11, t, w, h: 22.254 })),
+]
+const joinAll = (marks: Mark[], ppi = 275) => {
+  const got = positionsOf(marks, ppi)
+  return joinItems(got.pages[0]!.map(item => ({ item, text: item.text })), got.blocks)
+}
+
+test('a space is found from the text size, not the line height: Noto Sans on the row grid and without it', () => {
+  expect(joinAll(NOTO_LINE)).toBe('- Geometric resizing keeps inserts at amortized, even though a single rehash costs .')
+  // Without the grid the line is the font's 1.36 of the size (14.982 pt).
+  expect(joinAll(NOTO_LINE.map(m => (m.h ? { ...m, h: 14.982 } : m)))).toBe('- Geometric resizing keeps inserts at amortized, even though a single rehash costs .')
+  // The pieces of one word ("**bo**ld") touch; a glued character joins.
+  const word = (x: number, t: string, w: number, more: Partial<Mark> = {}): Mark => ({ k: 'w', p: 1, x, y: 0, s: 11, t, w, h: 22.254, ...more })
+  const par: Mark = { k: 'b', p: 1, x: 0, y: 0, s: 11, kind: 'par' }
+  expect(joinAll([par, word(0, 'bo', 12.6), word(12.6, 'ld', 9.5), word(24.96, 'and', 19)])).toBe('bold and')
+  expect(joinAll([par, word(0, '中', 11), word(11, '文', 11, { g: 1 }), word(24, 'x', 6)])).toBe('中文 x')
+})
+
+test('the padding beside inline code is not a space; a space next to it is', () => {
+  // Theme vscode: 3 px of padding (2.357 pt), as wide as a space of 0.21 of the size.
+  const word = (x: number, t: string, w: number, code = false): Mark => ({ k: 'w', p: 1, x, y: 0, s: 11, t, w, h: 15, ...(code ? { pad: 2.357 } : {}) })
+  const par: Mark = { k: 'b', p: 1, x: 0, y: 0, s: 11, kind: 'par' }
+  // "a `list` b", "`x`y", "x`y`", "`b`," and "`a == b`" (the spaces of code are its own).
+  expect(joinAll([par, word(0, 'a', 6), word(11.217, 'list', 26.49, true), word(42.924, 'b', 6)])).toBe('a list b')
+  expect(joinAll([par, word(0, 'x', 6.6, true), word(8.957, 'y', 6)])).toBe('xy')
+  expect(joinAll([par, word(0, 'x', 6), word(8.357, 'y', 6.6, true)])).toBe('xy')
+  expect(joinAll([par, word(0, 'b', 6.6, true), word(8.957, ',', 3.3)])).toBe('b,')
+  expect(joinAll([par, word(0, 'a', 6.6, true), word(12.9, '==', 13.2, true), word(32.4, 'b', 6.6, true)])).toBe('a == b')
+  // Noto Sans (a space of 2.86 pt) on the grid's 2 rows.
+  const noto = (x: number, t: string, w: number, code = false): Mark => ({ ...word(x, t, w, code), h: 22.254 })
+  expect(joinAll([par, noto(0, 'forbids', 36), noto(41.217, 'list', 26.49, true), noto(72.924, 'as', 11)])).toBe('forbids list as')
 })
 
 // ---- The command ------------------------------------------------------------
