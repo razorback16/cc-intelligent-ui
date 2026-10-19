@@ -428,7 +428,27 @@
 // ---------- tables ----------
 // The grid: each table row is whole rows (padding of whole rows: 5px is
 // none), so the rules lie on row boundaries.
+// Claude Code's own table look: a full grid of thin rules (border-px,
+// th-border), the header centred (a column's own alignment wins) and half
+// a row more padding above and below the text of a cell.
+#let table-line = E.table.border-px * px + C.th-border
+#let table-rules = (x, y) => (left: if x > 0 { table-line }, top: if y > 0 { table-line })
 #set table(
+  inset: (x: E.table.pad-x-px * px, y: if on-grid { rows-near(E.table.pad-y-px * px) + row / 2 } else { 2 * E.table.pad-y-px * px }),
+  stroke: table-rules,
+)
+// The outer border is the block's, inside the table's edges (a negative
+// outset changes no layout), so a table at a page's edge (no left margin)
+// keeps all of it. The clip trims the rule ends that Typst draws past the
+// edges. On the grid, half a row around the box keeps the text on its rows
+// and puts each rule in the middle of a row.
+#show table: it => if it.stroke == table-rules {
+  show table.cell.where(y: 0): set align(center)
+  let framed = block(stroke: table-line, outset: -table-line.thickness / 2, clip: true, it)
+  if on-grid { block(inset: (y: row / 2), framed) } else { framed }
+} else { it }
+// Live ```typst drawings (the only scale here) keep the earlier rules.
+#show scale: set table(
   inset: (x: E.table.pad-x-px * px, y: if on-grid { rows-near(E.table.pad-y-px * px) } else { E.table.pad-y-px * px }),
   stroke: (x, y) => if y == 1 { (top: E.table.border-px * px + C.th-border) } else if y > 1 { (top: E.table.border-px * px + C.border) },
 )
