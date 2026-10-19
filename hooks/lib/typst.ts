@@ -46,7 +46,9 @@ export const fontArgs = (fonts?: string) => (fonts ? ['--ignore-system-fonts', '
 
 // The typst command that makes a PNG of a JPEG, WebP or SVG (render/convert.typ)
 // that fits `box` (in pixels), never larger than its own pixel size: at 72
-// ppi, 1 pt is 1 pixel.
+// ppi, 1 pt is 1 pixel. For a PDF, `page` is the page (it fits the box,
+// larger too), and the errors are in the human format: only it has the
+// hint with the page count of a page that does not exist.
 export function convertCall(o: {
   typst: string
   root: string
@@ -54,16 +56,18 @@ export function convertCall(o: {
   file: string
   box: { width: number; height: number }
   out: string
+  page?: number
 }): { argv: string[]; env: Record<string, string> } {
   const argv = [
     o.typst, 'compile',
     '--root', '/',
     '--format', 'png',
-    '--diagnostic-format', 'short',
+    '--diagnostic-format', o.page ? 'human' : 'short',
     '--ppi', '72',
     '--input', `f=${o.file}`,
     '--input', `maxw=${o.box.width}`,
     '--input', `maxh=${o.box.height}`,
+    ...(o.page ? ['--input', `page=${o.page}`] : []),
     `${o.root}/render/convert.typ`,
     o.out,
   ]

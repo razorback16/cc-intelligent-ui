@@ -5,7 +5,7 @@
 // follows `$` into a declaration only), with the types of EngineInterface.
 import type {
   AskOptions, CommandSpec, EngineInterface, FsBytes, FsReadBytesOptions, FsReadOptions, FsStatOptions, HttpInit, InvalidatableEventName,
-  OpEventOf, ProcessRunInit, ProcessSpawnRequest, ResolveInput, ToastOptions, UiCopyArgs, UiLogOptions,
+  OpEventOf, PaneCloseArgs, PaneOpenArgs, ProcessRunInit, ProcessSpawnRequest, ResolveInput, ToastOptions, UiCopyArgs, UiLogOptions,
 } from 'claude-code'
 
 // The environment variables the mod reads. `$.env.get` takes a literal name
@@ -156,6 +156,10 @@ export function uiAsk($: EngineInterface, question: string, options?: readonly s
   return $.ui.ask(question, options)
 }
 
+export function uiClose($: EngineInterface, pane: PaneCloseArgs) {
+  return $.ui.close(pane)
+}
+
 export function uiCopy($: EngineInterface, args: UiCopyArgs) {
   return $.ui.copy(args)
 }
@@ -166,6 +170,10 @@ export function uiInvalidate($: EngineInterface, event: InvalidatableEventName) 
 
 export function uiLog($: EngineInterface, text: string, options?: UiLogOptions) {
   return $.ui.log(text, options)
+}
+
+export function uiOpen($: EngineInterface, pane: PaneOpenArgs) {
+  return $.ui.open(pane)
 }
 
 export function uiResolve<E extends ResolveInput>($: EngineInterface, e: E) {

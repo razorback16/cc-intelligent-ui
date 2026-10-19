@@ -1,8 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import {
-  claudeTmpOf, convertBox, convertCall, convertedPath, DEFAULT_CELL, folderOf, imageKindOf, isMarkdownPath, pasteDirOf, pastedImagePath, pastedNumbers,
-  COMMIT_MIN_MS, DEFAULT_HEIGHT, parseCommand, RESIZE_QUIET_MS, PICTURE_MAX_ROWS, PICTURE_ROOM_ROWS, pictureCells, pictureRowsFor, projectSlug, renderKey, sentFiles, sentImages,
+  claudeTmpOf, convertBox, convertCall, convertedPath, DEFAULT_CELL, factsAfter, folderOf, imageKindOf, isMarkdownPath, isNoPageError, isPdfPath, lastKnownPage,
+  NO_FACTS, pageControls, pageCountOf, pageOf, parsePage, pasteDirOf, pastedImagePath, pastedNumbers, COMMIT_MIN_MS, DEFAULT_HEIGHT, parseCommand, RESIZE_QUIET_MS, PICTURE_MAX_ROWS, PICTURE_ROOM_ROWS, pictureCells,
+  pictureRowsFor, projectSlug, renderKey, rowsAfter, sentFiles, sentImages, shortError, type Under,
 } from '../hooks/register'
 
 // ---- Pure helpers -----------------------------------------------------------
@@ -52,7 +53,7 @@ test('the height command: half, full, 6 to 200 rows, or nothing to show it', () 
   expect(parseCommand('height 12 rows')).toEqual({ kind: 'bad' })
 })
 
-test('only PNG, JPEG, WebP and SVG image attachments are drawn', () => {
+test('only PNG, JPEG, WebP, SVG and PDF attachments are drawn', () => {
   expect(sentImages({
     attachments: [
       { path: '/t/a.png', size: 1, isImage: true, media_type: 'image/png' },
@@ -68,7 +69,7 @@ test('only PNG, JPEG, WebP and SVG image attachments are drawn', () => {
       { path: '/t/i.SVG', size: 1, isImage: false },
       { path: '/t/j.svg', size: 1, isImage: false, media_type: 'text/plain' },
     ],
-  })).toEqual(['/t/a.png', '/t/b.png', '/t/c.jpg', '/t/e.webp', '/t/g.svg', '/t/h.svg', '/t/i.SVG'])
+  })).toEqual(['/t/a.png', '/t/b.png', '/t/c.jpg', '/t/d.pdf', '/t/e.webp', '/t/g.svg', '/t/h.svg', '/t/i.SVG'])
   expect(sentImages(undefined)).toEqual([])
   expect(sentImages('error text')).toEqual([])
   expect(sentImages({ attachments: 'x' })).toEqual([])
@@ -116,6 +117,34 @@ test('a Markdown file: .md or .markdown, not an image; all files in their order,
   expect(sentFiles(null)).toEqual([])
 })
 
+test('a PDF: by its media type application/pdf, else by its .pdf name; not Markdown; in the attachments order', () => {
+  expect(isPdfPath('/t/a.pdf')).toBe(true)
+  expect(isPdfPath('/t/A.PDF')).toBe(true)
+  expect(isPdfPath('/t/a.pdf.md')).toBe(false)
+  expect(isPdfPath('/t/pdf')).toBe(false)
+  expect(sentFiles({
+    attachments: [
+      { path: '/t/notes.md', size: 1, isImage: false },
+      // As Claude Code sends a PDF: not an image, its media type.
+      { path: '/t/a.pdf', size: 1, isImage: false, media_type: 'application/pdf' },
+      { path: '/t/b.png', size: 1, isImage: true },
+      { path: '/t/c', size: 1, isImage: false, media_type: ' Application/PDF ' },
+      { path: '/t/d.PDF', size: 1, isImage: false },
+      // The media type wins over the name.
+      { path: '/t/e.pdf', size: 1, isImage: false, media_type: 'text/plain' },
+      { path: '/t/f.md', size: 1, isImage: false, media_type: 'application/pdf' },
+      { path: '/t/a.pdf', size: 1, isImage: false, media_type: 'application/pdf' },
+    ],
+  })).toEqual([
+    { path: '/t/notes.md', kind: 'markdown' },
+    { path: '/t/a.pdf', kind: 'pdf' },
+    { path: '/t/b.png', kind: 'png' },
+    { path: '/t/c', kind: 'pdf' },
+    { path: '/t/d.PDF', kind: 'pdf' },
+    { path: '/t/f.md', kind: 'pdf' },
+  ])
+})
+
 test('the folder of a file, for the relative images of a Markdown file', () => {
   expect(folderOf('/t/docs/notes.md')).toBe('/t/docs')
   expect(folderOf('/notes.md')).toBe('/')
@@ -142,6 +171,15 @@ test('a converted PNG is named by the file, its stat stamp and the box, in a key
   expect(convertedPath('/c', '/t/a.jpg', '1:1000', { width: 1568, height: 768 })).not.toBe(one)
 })
 
+test("each page of a PDF has a PNG of its own; with no page the name is as before", () => {
+  const one = convertedPath('/c', '/t/a.pdf', '1:1000', BOX, 1)
+  expect(one).toMatch(/^\/c\/[0-9a-f]{16}\/image\.png$/)
+  expect(convertedPath('/c', '/t/a.pdf', '1:1000', BOX, 1)).toBe(one)
+  expect(convertedPath('/c', '/t/a.pdf', '1:1000', BOX, 2)).not.toBe(one)
+  expect(convertedPath('/c', '/t/a.pdf', '1:1000', BOX)).not.toBe(one)
+  expect(convertedPath('/c', '/t/a.jpg', '1:1000', BOX, undefined)).toBe(convertedPath('/c', '/t/a.jpg', '1:1000', BOX))
+})
+
 test('the conversion call: render/convert.typ at 72 ppi, the file and the box as inputs, no network', () => {
   const { argv, env } = convertCall({ typst: '/usr/bin/typst', root: '/r', cache: '/c', file: '/t/a b.webp', box: BOX, out: '/c/k/image.png' })
   expect(argv).toEqual([
@@ -150,6 +188,91 @@ test('the conversion call: render/convert.typ at 72 ppi, the file and the box as
   ])
   expect(env.TYPST_PACKAGE_CACHE_PATH).toBe('/c/pkg-cache')
   expect(env.HTTPS_PROXY).toBe('http://127.0.0.1:9')
+})
+
+test('the conversion call of a PDF page: the page as an input, the errors in the human format (its hint has the page count)', () => {
+  const { argv } = convertCall({ typst: '/usr/bin/typst', root: '/r', cache: '/c', file: '/t/a.pdf', box: BOX, out: '/c/k/image.png', page: 3 })
+  expect(argv.slice(-6)).toEqual(['--input', 'maxh=640', '--input', 'page=3', '/r/render/convert.typ', '/c/k/image.png'])
+  expect(argv.slice(4, 8)).toEqual(['--format', 'png', '--diagnostic-format', 'human'])
+})
+
+test("Typst's error for a page that is not there; another error, short", () => {
+  const typ = '../../r/render/convert.typ:55:30'
+  expect(isNoPageError(`${typ}: error: failed to load PDF (page 4 does not exist)\n`)).toBe(true)
+  expect(isNoPageError('error: failed to load PDF (page 99 does not exist in doc.pdf)')).toBe(true)
+  expect(isNoPageError(`${typ}: error: failed to load PDF (the PDF could not be loaded)`)).toBe(false)
+  expect(isNoPageError('')).toBe(false)
+  expect(shortError(`${typ}: error: failed to load PDF (the PDF could not be loaded)\n`)).toBe('the PDF could not be loaded')
+  expect(shortError(`warning: x\n${typ}: error: file is encrypted\n  hint: y`)).toBe('file is encrypted')
+  expect(shortError('did not run: timeout')).toBe('did not run: timeout')
+  expect(shortError('')).toBe('Typst could not read it')
+})
+
+// Typst's human format for a page that is not there, with its hint.
+const NO_PAGE = (page: number, pages: number) =>
+  `error: failed to load PDF (page ${page} does not exist)\n   ┌─ render/convert.typ:55:30\n   │\n   = hint: the document only has ${pages} page${pages === 1 ? '' : 's'}\n`
+
+test('what is known of the pages of a PDF: the highest page made, the first page that is not there, the count, the errors', () => {
+  const made = factsAfter(NO_FACTS, 3, null)
+  expect(made).toEqual({ made: 3, missing: 0, pages: 0, errors: {} })
+  expect(factsAfter(made, 2, null).made).toBe(3)
+  // No hint (the short format): only that page and the pages after it are gone.
+  const gone = factsAfter(made, 9, 'error: failed to load PDF (page 9 does not exist)')
+  expect(gone).toEqual({ made: 3, missing: 9, pages: 0, errors: {} })
+  expect(factsAfter(gone, 12, 'error: failed to load PDF (page 12 does not exist)').missing).toBe(9)
+  expect(factsAfter(gone, 4, 'error: failed to load PDF (page 4 does not exist)').missing).toBe(4)
+  // The hint gives the count: the last page at once.
+  expect(pageCountOf(NO_PAGE(300, 3))).toBe(3)
+  expect(pageCountOf(NO_PAGE(2, 1))).toBe(1)
+  expect(pageCountOf('error: failed to load PDF (page 2 does not exist)')).toBe(0)
+  expect(factsAfter(made, 300, NO_PAGE(300, 3))).toEqual({ made: 3, missing: 4, pages: 3, errors: {} })
+  // Another error is kept for its page, until that page is made.
+  const bad = factsAfter(made, 4, 'error: failed to load PDF (the PDF could not be loaded)')
+  expect(bad.errors).toEqual({ 4: 'the PDF could not be loaded' })
+  expect(bad.missing).toBe(0)
+  expect(factsAfter(bad, 5, null).errors).toEqual({ 4: 'the PDF could not be loaded' })
+  expect(factsAfter(bad, 4, null).errors).toEqual({})
+})
+
+test('the last page known for a row whose page is gone: the count, else the page before the first missing one when it was made, else 1', () => {
+  expect(lastKnownPage({ ...NO_FACTS, pages: 3, missing: 4 })).toBe(3)
+  expect(lastKnownPage({ ...NO_FACTS, made: 5, missing: 6 })).toBe(5)
+  expect(lastKnownPage({ ...NO_FACTS, made: 0, missing: 300 })).toBe(1)
+  expect(lastKnownPage({ ...NO_FACTS, made: 2, missing: 300 })).toBe(1)
+})
+
+test('the page shown and its control line: ‹ dim on page 1, › dim on the last page, no line for one page', () => {
+  expect(pageOf(1, 0)).toBe(1)
+  expect(pageOf(0, 0)).toBe(1)
+  expect(pageOf(7, 0)).toBe(7)
+  expect(pageOf(7, 5)).toBe(4)
+  expect(pageOf(3, 2)).toBe(1)
+  // The last page not known: › acts.
+  expect(pageControls(1, 0)).toEqual({ back: false, forward: true })
+  expect(pageControls(4, 0)).toEqual({ back: true, forward: true })
+  // Page 3 of 3 (page 4 is not there).
+  expect(pageControls(3, 4)).toEqual({ back: true, forward: false })
+  expect(pageControls(2, 4)).toEqual({ back: true, forward: true })
+  expect(pageControls(1, 4)).toEqual({ back: false, forward: true })
+  // One page: no line.
+  expect(pageControls(1, 2)).toBe(null)
+})
+
+test('a page number typed: a whole number from 1, spaces around it allowed', () => {
+  expect(parsePage('3')).toBe(3)
+  expect(parsePage(' 12 \n')).toBe(12)
+  expect(parsePage('007')).toBe(7)
+  for (const bad of ['', ' ', '0', '-1', '1.5', '2e3', 'x', '3 4', '+3', '99999999999999999999']) expect(parsePage(bad)).toBe(null)
+})
+
+test('a PDF page counts its control line, and an error line its row, in the rows after a drawing', () => {
+  const picture = { source: { file: '/c/a.png', format: 'png' as const }, columns: 40, rows: 10, alt: 'a.png' }
+  const line = { row: 'tu-1\n/t/a.pdf', file: '/t/a.pdf', stamp: '1:1000', page: 2, back: true, forward: true, box: BOX }
+  const under: Under[] = [
+    picture, { ...picture, pdf: line }, { note: 'PDF: the PDF could not be loaded' }, { note: 'PDF: page 2: boom', pdf: line }, picture,
+  ]
+  expect(rowsAfter(under, 0, 98)).toBe(10 + 1 + 1 + 2 + 10)
+  expect(rowsAfter(under, 1, 98)).toBe(1 + 2 + 10)
 })
 
 test('a Markdown file folder is part of the key; with none, the key is as before', () => {
@@ -199,7 +322,9 @@ const TALL = '89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52 00 00 02 80 00 00 
 // mtimes (1 when not set). `typst`: Typst is found; it makes a PNG of a JPEG
 // or WebP (unless `failConvert`, or from run number `failConvertFrom`; `mv`
 // moves it, unless `failMove`), and
-// compiles Markdown to one page.
+// compiles Markdown to one page. `pdfs`: the PDFs by path, their page
+// count (a run for a page past it fails as Typst's does, with the hint
+// that gives the count, unless `noHint`).
 // `holdConvert`: a conversion ends only once its file had that many stats
 // (other rows reached it while it runs). `holdRun`: conversion number `at`
 // (from 1) ends only when `until` settles. `holdCompile`: a Markdown compile
@@ -220,6 +345,8 @@ function world(on: any, o: {
   holdConvert?: number
   holdRun?: { at: number; until: Promise<void> }
   holdCompile?: Promise<void>
+  pdfs?: Record<string, number>
+  noHint?: boolean
 } = {}) {
   // Intelligent UI's store in memory (as mock.store), and its writes by key;
   // `redrawsAt`: by key, the `done` writes (redraws) made when its write ended.
@@ -297,6 +424,11 @@ function world(on: any, o: {
       if ((stats.get(file) ?? 0) < (o.holdConvert ?? 0)) await new Promise<void>(done => waits.push({ path: file, done }))
       if (o.holdRun?.at === converts.length) await o.holdRun.until
       if (o.failConvert || converts.length >= (o.failConvertFrom ?? Infinity)) return ok('', 1)
+      const page = Number(argv.find(a => a.startsWith('page='))?.slice(5) ?? 1)
+      if (o.pdfs && page > (o.pdfs[file] ?? Infinity)) {
+        const stderr = o.noHint ? `error: failed to load PDF (page ${page} does not exist)\n` : NO_PAGE(page, o.pdfs[file]!)
+        return { value: { exitCode: 1, stdout: '', stderr, isStdoutTruncated: false, isStderrTruncated: false } }
+      }
       files[argv.at(-1)!] = HEAD
       return ok('')
     }
@@ -426,6 +558,320 @@ test('a JPEG, a WebP and an SVG Claude sends are made PNGs by Typst once, and dr
   expect(images(await ui.drawn()).length).toBe(3)
   expect(converts.length).toBe(3)
   expect(heads).not.toContain('/t/photo.jpg')
+})
+
+// ---- PDFs ---------------------------------------------------------------------
+
+// PDFs as Claude Code sends them: not images, the media type application/pdf.
+const pdfs = (...paths: string[]) => ({ attachments: paths.map(path => ({ path, size: 1000, isImage: false, media_type: 'application/pdf' })) })
+const all = (tree: any, type: string): any[] =>
+  tree && typeof tree === 'object' ? [...(tree.type === type ? [tree] : []), ...(tree.children ?? []).flatMap((c: any) => all(c, type))] : []
+const textOf = (tree: any): string => (typeof tree === 'string' ? tree : (tree?.children ?? []).map(textOf).join(''))
+const pageArgs = (converts: string[][]) => converts.map(argv => `${argv.find(a => a.startsWith('f='))!.slice(2)}#${argv.find(a => a.startsWith('page='))?.slice(5)}`)
+// The control line under the picture `i` of a SendUserFile row.
+const lineOf = (tree: any, i = 0) => tree.children[1].children[i].children[1]
+// A refresh (here a setting): the rows draw anew and see a new stat.
+const refreshed = async ($: any, clock: any) => {
+  await $.command.run({ command: 'iui', args: 'size 100' } as any)
+  await clock.settle()
+}
+const PANE = {
+  plugin: 'cc-intelligent-ui', surface: 'terminal' as const, component: 'Pane' as const, requestId: 'iui-page',
+  props: { title: 'Page', isFocused: true, bodyColumns: 24, placement: 'inline' } as any, viewport: { columns: 100, rows: 40 },
+}
+
+test('a PDF Claude sends draws its first page with a control line; the next page is made too', async ($, on) => {
+  const { converts } = world(on, { typst: true, pdfs: { '/t/doc.pdf': 3 }, files: { '/t/doc.pdf': '' } })
+  await ready($)
+  const ui = await $.ui.mount(sent(pdfs('/t/doc.pdf')))
+  const tree: any = await ui.drawn()
+  expect(tree.children[0]).toMatchObject(ENGINE)
+  const [image] = images(tree)
+  expect(image.props.source.file).toBe(convertedPath('/c', '/t/doc.pdf', '1:1000', BOX, 1))
+  expect(image.props.alt).toBe('doc.pdf')
+  expect(pageArgs(converts)).toEqual(['/t/doc.pdf#1', '/t/doc.pdf#2'])
+  expect(converts[0]).toContain('maxw=1568')
+  // One row: ‹ dim (page 1), the page number and › as Buttons; no page count.
+  const line = lineOf(tree)
+  expect(line.props).toMatchObject({ height: 1 })
+  expect(textOf(line)).toBe('‹  1  ›')
+  expect(line.children[0]).toMatchObject({ type: 'Text', props: { dimColor: true } })
+  expect(all(line, 'Button').map(b => b.props.key)).toEqual(['pdf0-page-number', 'pdf0-page-forward'])
+  // A redraw makes nothing again.
+  await ui.redraw(sent(pdfs('/t/doc.pdf')).props)
+  expect(converts.length).toBe(2)
+})
+
+test('› and ‹ turn the pages: the page made ahead draws at once; › is dim on the last page', async ($, on) => {
+  const { clock, converts } = world(on, { typst: true, pdfs: { '/t/doc.pdf': 3 }, files: { '/t/doc.pdf': '' } })
+  await ready($)
+  const ui = await $.ui.mount(sent(pdfs('/t/doc.pdf')))
+  await ui.press({ key: 'pdf0-page-forward' })
+  let tree: any = await ui.drawn()
+  expect(images(tree)[0].props.source.file).toBe(convertedPath('/c', '/t/doc.pdf', '1:1000', BOX, 2))
+  expect(textOf(lineOf(tree))).toBe('‹  2  ›')
+  expect(all(lineOf(tree), 'Button').map(b => b.props.key)).toEqual(['pdf0-page-back', 'pdf0-page-number', 'pdf0-page-forward'])
+  await clock.settle()
+  expect(pageArgs(converts)).toEqual(['/t/doc.pdf#1', '/t/doc.pdf#2', '/t/doc.pdf#3'])
+  await ui.press({ key: 'pdf0-page-forward' })
+  await clock.settle()
+  tree = await ui.drawn()
+  expect(images(tree)[0].props.source.file).toBe(convertedPath('/c', '/t/doc.pdf', '1:1000', BOX, 3))
+  // Page 4 is not there: page 3 is the last, › is dim.
+  expect(pageArgs(converts)).toEqual(['/t/doc.pdf#1', '/t/doc.pdf#2', '/t/doc.pdf#3', '/t/doc.pdf#4'])
+  expect(textOf(lineOf(tree))).toBe('‹  3  ›')
+  expect(lineOf(tree).children.at(-1)).toMatchObject({ type: 'Text', props: { dimColor: true } })
+  expect(all(lineOf(tree), 'Button').map(b => b.props.key)).toEqual(['pdf0-page-back', 'pdf0-page-number'])
+  // Back to page 2: made before, no run.
+  await ui.press({ key: 'pdf0-page-back' })
+  await clock.settle()
+  tree = await ui.drawn()
+  expect(images(tree)[0].props.source.file).toBe(convertedPath('/c', '/t/doc.pdf', '1:1000', BOX, 2))
+  expect(converts.length).toBe(4)
+})
+
+test('a PDF of one page draws its page with no control line', async ($, on) => {
+  const { converts } = world(on, { typst: true, pdfs: { '/t/one.pdf': 1 }, files: { '/t/one.pdf': '' } })
+  await ready($)
+  const ui = await $.ui.mount(sent(pdfs('/t/one.pdf')))
+  const tree: any = await ui.drawn()
+  expect(images(tree).map(i => i.props.source.file)).toEqual([convertedPath('/c', '/t/one.pdf', '1:1000', BOX, 1)])
+  expect(all(tree, 'Button')).toEqual([])
+  expect(textOf(tree.children[1])).toBe('')
+  expect(pageArgs(converts)).toEqual(['/t/one.pdf#1', '/t/one.pdf#2'])
+})
+
+test('a PDF that Typst can not read: the row and one dim line with the error', async ($, on) => {
+  world(on, { typst: true, failConvert: true, files: { '/t/locked.pdf': '' } })
+  await ready($)
+  const ui = await $.ui.mount(sent(pdfs('/t/locked.pdf')))
+  const tree: any = await ui.drawn()
+  expect(tree.children[0]).toMatchObject(ENGINE)
+  expect(images(tree)).toEqual([])
+  const [note] = tree.children[1].children
+  expect(note).toMatchObject({ type: 'Text', props: { dimColor: true, wrap: 'truncate-end' } })
+  expect(textOf(note)).toBe('PDF: boom')
+})
+
+test('two PDFs in one result: each its own page and control line', async ($, on) => {
+  const { clock } = world(on, { typst: true, pdfs: { '/t/a.pdf': 3, '/t/b.pdf': 3 }, files: { '/t/a.pdf': '', '/t/b.pdf': '' } })
+  await ready($)
+  const ui = await $.ui.mount(sent(pdfs('/t/a.pdf', '/t/b.pdf')))
+  await ui.press({ key: 'pdf1-page-forward' })
+  await clock.settle()
+  const tree: any = await ui.drawn()
+  expect(images(tree).map(i => i.props.source.file)).toEqual([
+    convertedPath('/c', '/t/a.pdf', '1:1000', BOX, 1),
+    convertedPath('/c', '/t/b.pdf', '1:1000', BOX, 2),
+  ])
+  expect([textOf(lineOf(tree, 0)), textOf(lineOf(tree, 1))]).toEqual(['‹  1  ›', '‹  2  ›'])
+  // Another row of the same PDF keeps its own page.
+  const other = await $.ui.mount(sent(pdfs('/t/b.pdf'), false, 'tu-2'))
+  expect(textOf(lineOf(await other.drawn()))).toBe('‹  1  ›')
+})
+
+test('the page number opens the page field: a page that is not there keeps it open with a note; a page goes there', async ($, on) => {
+  const { clock, converts } = world(on, { typst: true, pdfs: { '/t/doc.pdf': 5 }, files: { '/t/doc.pdf': '' } })
+  const opens: any[] = []
+  const closes: any[] = []
+  on('ui.open', async ($: any, e: any) => (opens.push(e), { value: { isPlaced: true } }))
+  on('ui.close', async ($: any, e: any) => (closes.push(e), { value: undefined }))
+  await ready($)
+  const ui = await $.ui.mount(sent(pdfs('/t/doc.pdf')))
+  await ui.press({ key: 'pdf0-page-number' })
+  expect(opens).toMatchObject([{ id: 'iui-page', focus: true, closeOnEscape: true }])
+  const field = await $.ui.mount(PANE)
+  const input = () => field.drawn().then((tree: any) => all(tree, 'Input')[0])
+  expect((await input()).props).toMatchObject({ key: 'page', value: '1', autoFocus: true })
+  await field.input({ key: 'page', text: '9' })
+  expect(textOf(await field.drawn())).toContain('No page 9')
+  expect((await input()).props.value).toBe('9')
+  expect(closes).toEqual([])
+  // Page 12 is past page 9: known, no run.
+  const runs = converts.length
+  await field.input({ key: 'page', text: '12' })
+  expect(textOf(await field.drawn())).toContain('No page 12')
+  expect(converts.length).toBe(runs)
+  await field.input({ key: 'page', text: 'two' })
+  expect(textOf(await field.drawn())).toContain('Type a page number')
+  await field.input({ key: 'page', text: ' 4 ' })
+  expect(closes).toMatchObject([{ id: 'iui-page' }])
+  await clock.settle()
+  const tree: any = await ui.drawn()
+  expect(images(tree)[0].props.source.file).toBe(convertedPath('/c', '/t/doc.pdf', '1:1000', BOX, 4))
+  expect(textOf(lineOf(tree))).toBe('‹  4  ›')
+  expect(pageArgs(converts).filter(p => p === '/t/doc.pdf#4')).toEqual(['/t/doc.pdf#4'])
+})
+
+test('a file that got shorter under a row on a high page: one failed run, then its last page (the count in the hint)', async ($, on) => {
+  const counts: Record<string, number> = { '/t/doc.pdf': 300 }
+  const { clock, converts, mtimes } = world(on, { typst: true, pdfs: counts, files: { '/t/doc.pdf': '' } })
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('ui.close', async () => ({ value: undefined }))
+  await ready($)
+  const ui = await $.ui.mount(sent(pdfs('/t/doc.pdf')))
+  await ui.press({ key: 'pdf0-page-number' })
+  const field = await $.ui.mount(PANE)
+  await field.input({ key: 'page', text: '299' })
+  await clock.settle()
+  expect(textOf(lineOf(await ui.drawn()))).toBe('‹  299  ›')
+  counts['/t/doc.pdf'] = 3
+  mtimes['/t/doc.pdf'] = 2
+  const n = converts.length
+  await refreshed($, clock)
+  const tree: any = await ui.drawn()
+  // Page 299 and the look-ahead for page 300 run side by side; then page 3.
+  expect(pageArgs(converts.slice(n))).toEqual(['/t/doc.pdf#299', '/t/doc.pdf#300', '/t/doc.pdf#3'])
+  expect(images(tree)[0].props.source.file).toBe(convertedPath('/c', '/t/doc.pdf', '2:1000', BOX, 3))
+  expect(textOf(lineOf(tree))).toBe('‹  3  ›')
+  expect(all(lineOf(tree), 'Button').map(b => b.props.key)).toEqual(['pdf0-page-back', 'pdf0-page-number'])
+  // The page is stored: ‹ goes to page 2.
+  await ui.press({ key: 'pdf0-page-back' })
+  await clock.settle()
+  expect(textOf(lineOf(await ui.drawn()))).toBe('‹  2  ›')
+})
+
+test('a file that got shorter, with no count in the error: page 1 at once', async ($, on) => {
+  const counts: Record<string, number> = { '/t/doc.pdf': 300 }
+  const { clock, converts, mtimes } = world(on, { typst: true, noHint: true, pdfs: counts, files: { '/t/doc.pdf': '' } })
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('ui.close', async () => ({ value: undefined }))
+  await ready($)
+  const ui = await $.ui.mount(sent(pdfs('/t/doc.pdf')))
+  await ui.press({ key: 'pdf0-page-number' })
+  await (await $.ui.mount(PANE)).input({ key: 'page', text: '299' })
+  await clock.settle()
+  counts['/t/doc.pdf'] = 3
+  mtimes['/t/doc.pdf'] = 2
+  const n = converts.length
+  await refreshed($, clock)
+  const tree: any = await ui.drawn()
+  expect(pageArgs(converts.slice(n))).toEqual(['/t/doc.pdf#299', '/t/doc.pdf#300', '/t/doc.pdf#1', '/t/doc.pdf#2'])
+  expect(textOf(lineOf(tree))).toBe('‹  1  ›')
+})
+
+test('› while the next page is still made: the row waits for that page; past the last page it stays on the last page', async ($, on) => {
+  let release = () => {}
+  const until = new Promise<void>(done => (release = done))
+  // Run 4 is the look-ahead for page 4, made while page 3 shows.
+  const { clock, converts } = world(on, { typst: true, pdfs: { '/t/doc.pdf': 3 }, files: { '/t/doc.pdf': '' }, holdRun: { at: 4, until } })
+  await ready($)
+  const ui = await $.ui.mount(sent(pdfs('/t/doc.pdf')))
+  await ui.press({ key: 'pdf0-page-forward' })
+  await ui.press({ key: 'pdf0-page-forward' })
+  let tree: any = await ui.drawn()
+  expect(textOf(lineOf(tree))).toBe('‹  3  ›')
+  expect(pageArgs(converts)).toEqual(['/t/doc.pdf#1', '/t/doc.pdf#2', '/t/doc.pdf#3', '/t/doc.pdf#4'])
+  // Page 4 is not known yet: › still acts.
+  const press = ui.press({ key: 'pdf0-page-forward' })
+  release()
+  await press
+  await clock.settle()
+  tree = await ui.drawn()
+  // The row waited for page 4: it is not there, so page 3 (never page 3's picture with the number 4).
+  expect(images(tree)[0].props.source.file).toBe(convertedPath('/c', '/t/doc.pdf', '1:1000', BOX, 3))
+  expect(textOf(lineOf(tree))).toBe('‹  3  ›')
+  expect(all(lineOf(tree), 'Button').map(b => b.props.key)).toEqual(['pdf0-page-back', 'pdf0-page-number'])
+  expect(converts.length).toBe(4)
+  // One ‹ goes to page 2.
+  await ui.press({ key: 'pdf0-page-back' })
+  await clock.settle()
+  tree = await ui.drawn()
+  expect(textOf(lineOf(tree))).toBe('‹  2  ›')
+  expect(images(tree)[0].props.source.file).toBe(convertedPath('/c', '/t/doc.pdf', '1:1000', BOX, 2))
+})
+
+test('a page that fails for another reason: its error line and the control line, never the page before; the field says so too', async ($, on) => {
+  // From run 3 (the look-ahead for page 3) Typst fails.
+  const { clock, converts } = world(on, { typst: true, pdfs: { '/t/doc.pdf': 5 }, files: { '/t/doc.pdf': '' }, failConvertFrom: 3 })
+  const closes: any[] = []
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('ui.close', async ($: any, e: any) => (closes.push(e), { value: undefined }))
+  await ready($)
+  const ui = await $.ui.mount(sent(pdfs('/t/doc.pdf')))
+  await ui.press({ key: 'pdf0-page-forward' })
+  await clock.settle()
+  await ui.press({ key: 'pdf0-page-forward' })
+  await clock.settle()
+  let tree: any = await ui.drawn()
+  expect(images(tree)).toEqual([])
+  const [box] = tree.children[1].children
+  expect(textOf(box.children[0])).toBe('PDF: page 3: boom')
+  expect(textOf(box.children[1])).toBe('‹  3  ›')
+  // The failed page is not run again.
+  expect(pageArgs(converts).filter(p => p === '/t/doc.pdf#3')).toEqual(['/t/doc.pdf#3'])
+  await ui.press({ key: 'pdf0-page-back' })
+  await clock.settle()
+  tree = await ui.drawn()
+  expect(images(tree)[0].props.source.file).toBe(convertedPath('/c', '/t/doc.pdf', '1:1000', BOX, 2))
+  // In the field: page 3 keeps it open, with the error.
+  await ui.press({ key: 'pdf0-page-number' })
+  const field = await $.ui.mount(PANE)
+  await field.input({ key: 'page', text: '3' })
+  expect(textOf(await field.drawn())).toContain('Page 3: boom')
+  expect(closes).toEqual([])
+})
+
+test('the field opened from row A, then from row B while A\'s Enter runs: A\'s result is not used', async ($, on) => {
+  let release = () => {}
+  const until = new Promise<void>(done => (release = done))
+  // Runs 1-4 draw the two rows; run 5 is A's page 7.
+  const { clock, converts } = world(on, {
+    typst: true, pdfs: { '/t/a.pdf': 9, '/t/b.pdf': 9 }, files: { '/t/a.pdf': '', '/t/b.pdf': '' }, holdRun: { at: 5, until },
+  })
+  const closes: any[] = []
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('ui.close', async ($: any, e: any) => (closes.push(e), { value: undefined }))
+  await ready($)
+  const a = await $.ui.mount(sent(pdfs('/t/a.pdf'), false, 'tu-a'))
+  const b = await $.ui.mount(sent(pdfs('/t/b.pdf'), false, 'tu-b'))
+  expect(converts.length).toBe(4)
+  const field = await $.ui.mount(PANE)
+  await a.press({ key: 'pdf0-page-number' })
+  const enter = field.input({ key: 'page', text: '7' })
+  while (converts.length < 5) await clock.settle()
+  await b.press({ key: 'pdf0-page-number' })
+  release()
+  await enter
+  await clock.settle()
+  // The field is B's, still open, with B's page and no note.
+  expect(closes).toEqual([])
+  const input = all(await field.drawn(), 'Input')[0]
+  expect(input.props.value).toBe('1')
+  expect(textOf(await field.drawn())).toBe('')
+  expect(textOf(lineOf(await a.drawn()))).toBe('‹  1  ›')
+  expect(textOf(lineOf(await b.drawn()))).toBe('‹  1  ›')
+  // Two Enters: the later one acts.
+  await field.input({ key: 'page', text: '5' })
+  expect(textOf(lineOf(await b.drawn()))).toBe('‹  5  ›')
+})
+
+test('a run of the old file that ends after the file changed does not change what is known of the new file', async ($, on) => {
+  let release = () => {}
+  const until = new Promise<void>(done => (release = done))
+  // Run 3 is the look-ahead for page 3 of the old file.
+  const counts: Record<string, number> = { '/t/doc.pdf': 3 }
+  const { clock, converts, mtimes } = world(on, { typst: true, pdfs: counts, files: { '/t/doc.pdf': '' }, holdRun: { at: 3, until } })
+  await ready($)
+  const ui = await $.ui.mount(sent(pdfs('/t/doc.pdf')))
+  await ui.press({ key: 'pdf0-page-forward' })
+  expect(converts.length).toBe(3)
+  // The file now has one page.
+  counts['/t/doc.pdf'] = 1
+  mtimes['/t/doc.pdf'] = 2
+  await refreshed($, clock)
+  let tree: any = await ui.drawn()
+  expect(images(tree)[0].props.source.file).toBe(convertedPath('/c', '/t/doc.pdf', '2:1000', BOX, 1))
+  expect(all(tree, 'Button')).toEqual([])
+  const n = converts.length
+  // The old run ends (as made): the new file's facts stay.
+  counts['/t/doc.pdf'] = 3
+  release()
+  await clock.settle()
+  await refreshed($, clock)
+  tree = await ui.drawn()
+  expect(all(tree, 'Button')).toEqual([])
+  expect(converts.length).toBe(n)
 })
 
 test('a JPEG by its name; two rows at once convert it once; a changed file converts again', async ($, on) => {

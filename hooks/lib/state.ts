@@ -11,6 +11,7 @@ import type { Drawn } from './copy'
 import type { GridMetrics } from './grid'
 import type { Checked } from './updates'
 import type { ClipWay } from './clipboard'
+import type { PdfFacts, PixelBox } from './images'
 import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } from './settings'
 import { uiInvalidate } from './api'
 
@@ -233,15 +234,25 @@ export const INLINE_KEPT = 64
 // PNG), and the pasted-images folder of each session once found.
 export const pictures = new Map<string, { stamp: string; size: { width: number; height: number } | null }>()
 export const pasteDirs = new Map<string, string>()
-// SendUserFile: the PNG Typst made of each JPEG, WebP or SVG by its file, stat
-// stamp and box (null: it failed), the ones Typst makes now (same keys), the
-// last PNG made of each file (any box: it draws while a new box is made),
-// and the text of each Markdown file by its stat stamp (null: it does not
-// draw).
+// SendUserFile: the PNG Typst made of each JPEG, WebP or SVG, or PDF page,
+// by its file, stat stamp, box and page (null: it failed), the ones Typst
+// makes now (same keys), the last PNG shown of each file (a PDF's by its
+// row; any box or page: it draws while a new box is made), and the text of
+// each Markdown file by its stat stamp (null: it does not draw).
 export const converted = new Map<string, string | null>()
 export const converting = new Map<string, Promise<string | null>>()
 export const lastConverted = new Map<string, { stamp: string; png: string }>()
 export const sentTexts = new Map<string, { stamp: string; text: string | null }>()
+// SendUserFile PDFs: what is known of each file's pages (by `<file>@<stat
+// stamp>`), and the page each row shows of each PDF (by
+// `<tool_use_id>\n<path>`; page 1 when not set). In memory only.
+export const pdfFacts = new Map<string, PdfFacts>()
+export const pdfPages = new Map<string, number>()
+// The page field (pictures.tsx): the row and PDF it is for, the box of its
+// picture, the text it holds and its note (''); null while it is closed.
+export const pageAsk = {
+  now: null as { row: string; file: string; box: PixelBox; value: string; note: string } | null,
+}
 // The link rows (draw.tsx): whether each absolute path is a file (at most
 // LINK_FILES_KEPT).
 export const linkFiles = new Map<string, boolean>()

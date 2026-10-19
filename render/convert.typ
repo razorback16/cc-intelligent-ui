@@ -1,8 +1,11 @@
-// Intelligent UI: makes a PNG of a JPEG, WebP or SVG (the engine's Image
-// draws PNG only). Compiled at 72 ppi, where 1 pt is 1 pixel.
+// Intelligent UI: makes a PNG of a JPEG, WebP or SVG, or of one page of a
+// PDF (the engine's Image draws PNG only). Compiled at 72 ppi, where 1 pt
+// is 1 pixel.
 //
 // Inputs: f = the image's absolute path (with --root /); maxw, maxh = the
-// box in pixels the PNG must fit (0 or absent: no limit on that side).
+// box in pixels the PNG must fit (0 or absent: no limit on that side);
+// page = the page of a PDF (default 1). A page that does not exist fails
+// the compile ("page N does not exist").
 //
 // Typst sizes an image by its own DPI (a 300 dpi JPEG is drawn at a quarter
 // of its pixels), so the pixel size is read from the file and set as the
@@ -42,12 +45,25 @@
 }
 
 #let svg = lower(f).ends-with(".svg")
+#let pdf = has-tag(0, "%PDF-") or lower(f).ends-with(".pdf")
 #let size = if has-tag(0, "RIFF") and has-tag(8, "WEBP") { webp-size() } else if at(0) == 0xff and at(1) == 0xd8 { jpeg-size() }
+
+// A PDF page is vector: its size in pt is its size in pixels, and it fits
+// the box, the aspect kept (it can be made larger).
+#context if pdf {
+  let page = int(sys.inputs.at("page", default: "1"))
+  let natural = measure(image(data, format: "pdf", page: page))
+  let (w, h) = (natural.width / 1pt, natural.height / 1pt)
+  let side(key) = int(sys.inputs.at(key, default: "0"))
+  let (maxw, maxh) = (side("maxw"), side("maxh"))
+  let scale = if maxw > 0 and maxh > 0 { calc.min(maxw / w, maxh / h) } else if maxw > 0 { maxw / w } else if maxh > 0 { maxh / h } else { 1 }
+  image(data, format: "pdf", page: page, width: w * scale * 1pt)
+}
 
 // The sides as drawn: the pixel size, swapped when Typst turns the image by
 // its EXIF orientation; else Typst's own size. Then it fits the box, the
 // aspect kept; an image is never made larger.
-#context {
+#context if not pdf {
   let natural = measure(image(data))
   let natural = if svg { (width: natural.width / 0.75, height: natural.height / 0.75) } else { natural }
   let (w, h) = if size == none or size.at(0) == 0 or size.at(1) == 0 { (natural.width / 1pt, natural.height / 1pt) } else { size }
