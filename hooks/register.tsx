@@ -110,6 +110,7 @@ const done = atom({ plugin: 'cc-intelligent-ui', key: 'done' } as const, 0)
 async function pictureEnv($: EngineInterface, e: { viewport?: RenderViewport }): Promise<{ env: Env; done: number } | null> {
   if (!(await read($, isOn))) return null
   if (e.viewport) noteView($, e.viewport)
+  if (typeof e.viewport?.isFullscreen === 'boolean') S.isFullscreen = e.viewport.isFullscreen
   // Read so the end of setUp, a compile and a commit draw this row again.
   const now = await read($, done)
   if (!S.env) {
@@ -296,10 +297,12 @@ function clipChanged($: EngineInterface, count: number | null, first: boolean) {
 
 // The clipboard changed: one read (clipboardNow). Placeholders that are not our
 // own write are read and written back as text. A clipboard with no
-// placeholders is never touched. When this session has a selection
-// (fullscreen), the clipboard is rewritten only when it is that selection:
-// another session's copy is that session's to read. A change while a read
-// runs (a probe can take a second) reads once more after it.
+// placeholders is never touched. When this session has a selection, the
+// clipboard is rewritten only when it is that selection: another session's
+// copy is that session's to read. In fullscreen a copy of this session's
+// pictures is always of its selection, so with no selection that has
+// placeholders the clipboard is not even read. A change while a read runs
+// (a probe can take a second) reads once more after it.
 async function readClipboard($: EngineInterface) {
   if (clip.busy) {
     clip.again = true
@@ -309,11 +312,12 @@ async function readClipboard($: EngineInterface) {
   try {
     do {
       clip.again = false
+      const selected = await uiSelection($).catch(() => undefined)
+      if (S.isFullscreen && !(selected && hasPlaceholders(selected.text))) continue
       const text = await clipboardNow($)
       if (text === null || text === clip.seen) continue
       clip.seen = text
       if (text === clip.wrote || !hasPlaceholders(text)) continue
-      const selected = await uiSelection($).catch(() => undefined)
       if (selected && !sameCopy(selected.text, text)) continue
       await copyRead($, text, selected?.requestId)
     } while (clip.again)

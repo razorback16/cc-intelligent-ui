@@ -770,6 +770,34 @@ test('a clipboard with picture cells that is not this session\'s selection is no
   expect(w.copies).toEqual([COPIED])
 })
 
+test('in fullscreen the clipboard is read only with a selection of picture cells; with none it is another session\'s copy', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await $.ui.mount({ ...message('ans-1', SMALL_MD), viewport: { columns: 100, rows: 40, isFullscreen: true } })
+  await w.clock.settle()
+  await ui.redraw(props(SMALL_MD))
+  await w.clock.settle()
+  await w.clock.advance(300)
+  await w.clock.settle()
+  // No selection here: another fullscreen session's copy, not even read.
+  w.selection = undefined
+  w.copy(COPY)
+  await w.clock.settle()
+  expect(w.pastes).toBe(0)
+  expect(w.copies).toEqual([])
+  // A selection of text only: a copy of it has no picture cells.
+  w.selection = { text: 'my own text', requestId: 'u1' }
+  w.copy('my own text')
+  await w.clock.settle()
+  expect(w.pastes).toBe(0)
+  expect(w.copies).toEqual([])
+  // This session's own selection: rewritten.
+  w.selection = { text: COPY, requestId: 'ans-1' }
+  w.copy(`${COPY}\n`)
+  await w.clock.settle()
+  expect(w.copies).toEqual([COPIED])
+})
+
 test('a watcher that starts again does not copy the clipboard that was there before (its first count is only noted)', async ($, on) => {
   const w = world(on)
   // Picture cells on the clipboard before this load (a hot reload).
