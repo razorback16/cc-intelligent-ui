@@ -12,10 +12,15 @@
 // `code-size` that size in body text (none: the `code` input); `pad` the
 // padding in pt over the first line of a quote, a code block and a table
 // cell (md.typ rounds it to whole rows).
+//
+// `fonts`: the theme's `body` and `code` font lists (merged over vscode),
+// and `plain`: its list markers and numbering are ASCII only (fonts.ts uses
+// the lean font set only then).
 #import "fonts.typ": sans, mono-base, line-ink
 #import "theme.typ": T, at-level
 #let fam = sys.inputs.at("term-font", default: "")
 #let probe = "the quick brown fox jumps over the lazy dog"
+#let is-ascii(v) = type(v) != str or v.match(regex("^[ -~]*$")) != none
 #let m(fonts, body, edge) = measure(text(
   font: fonts, size: 100pt, top-edge: edge, bottom-edge: "baseline", fallback: false, body,
 ))
@@ -53,5 +58,6 @@
       code-size: if type(T.code-block.size) in (int, float) { float(T.code-block.size) } else { none },
       pad: (quote: T.quote.pad-y-em * 11, code: T.code-block.pad-px * px, table: T.table.pad-y-px * px),
     ),
+    fonts: (body: sans, code: mono-base, plain: (T.list.markers + (T.list.numbering,)).all(is-ascii)),
   )) <m>]
 }

@@ -5,7 +5,7 @@
 ## The steps
 
 1. A `ui.render` hook on `AssistantMessage` gets each block of the answer as Markdown.
-2. While Claude writes a block, the block is hidden. The block is final when the model request starts its next block (a tool call, more text) or ends. If the mod did not see the request, the block is final after its text stops changing for 400 ms. Then the mod writes the block to a JSON file and runs `typst compile` with `render/md.typ`. Long answers are cut at block boundaries into pages. One page is one PNG.
+2. While Claude writes a block, Claude Code shows its own text: Claude Code gives the hook the text of a block only when the block is complete (versions 2.1.299 to 2.1.303 at least). The block is final when the model request starts its next block (a tool call, more text) or ends. If the mod did not see the request, the block is final after its text stops changing for 400 ms. Then the mod writes the block to a JSON file and runs `typst compile` with `render/md.typ`. For plain text, Typst loads only some fonts (refer to [The lean font set](#the-lean-font-set)). Long answers are cut at block boundaries into pages. One page is one PNG.
 3. The hook draws one `Image` per PNG, in place of the text.
 4. Text size: the mod finds the terminal font (iTerm2 profile, Ghostty, kitty or Rio config; on Linux, else fontconfig's `monospace` font; else the metrics of the theme's code font, Menlo on macOS) and the cell size in pixels. Typst then measures both fonts so that 100% looks as large as the terminal text.
 5. If a compile fails (a bad Typst block or an unknown LaTeX command), the mod compiles once more in safe mode: Typst blocks and math show as code. A dim line under the picture names the error. If that also fails, the normal text shows.
@@ -13,6 +13,27 @@
 7. Links: the mod finds the web links, file paths and commands in the Markdown (not in code blocks or math). It draws one dim row for each under the pages, with a `Link` (an OSC 8 link) for a web link or a file, and a `Button` that copies a command (`$.ui.copy`). It keeps a file row only when the file exists (`$.fs.exists`, kept in memory for 512 paths). Each row is one terminal row, cut at its end. The copy (step 9) counts these rows under the pages, so it still finds the page that you select.
 8. The plan: a `ui.render` hook on the ExitPlanMode `ToolUse` row draws the plan through the same steps. Claude Code shows that row above the approval question. The approved result row then shows only its header, so the plan does not show two times. A `tool.call` hook on ExitPlanMode asks the mod's question (`$.ui.ask`) before Claude Code asks for permission. Then a `classic.PermissionRequest` hook gives the answer to Claude Code at once, so the Claude Code dialog does not show. For an approval, the hook sends the plan (`updatedInput`) and the new permission mode (`setMode`). For the person's text, the `tool.call` hook refuses the call with that text.
 9. Copy: one long-lived `perl` process watches the terminal size (at each SIGWINCH) and the clipboard. On macOS, it uses `/usr/bin/perl` with Apple's PerlObjCBridge and reads the change counter of the clipboard (`NSPasteboard changeCount`) every 0.3 s. This read is in the process and starts no other process (approximately 0.05% of one CPU core). On Linux, the process starts a child in a process group of its own. The child runs a tool that prints a line at each clipboard change (`wl-paste --watch`, `clipnotify` or GTK 3 from Python, refer to [Linux](install.md#linux)) and gives the mod a counter for each line. Nothing runs between two changes. When the `perl` process stops, it stops that process group. The clipboard part starts only while the mod is on and after the mod drew its first picture in this session; then the mod starts the process again with the clipboard part (and again without it after `/iui off`). When the counter changes, the mod reads the clipboard one time (`pbpaste` on macOS; `wl-paste`, `xclip`, `xsel` or GTK on Linux). The first counter after a start is not a change, so an old clipboard is not copied. A picture cell holds its row and its column (kitty placeholder U+10EEEE plus two combining marks). The mod finds the drawn page that has these rows, at the size that it is drawn. Then it finds the position of each word on that page: it runs the probe (`typst query` on the same template, with the same inputs as the PNG compile, plus `probe=1` and `page=<n>`) for the selected pages only. The mod keeps the positions of the last 64 pages in memory. It writes nothing to disk for this, and the PNGs do not change. The mod takes the words in the selected cells. Immediately before it writes the text with `$.ui.copy`, it reads the clipboard again. If the clipboard has a newer copy, the mod does not write over it, and it reads that copy next. If the process stops, the mod starts it again after 1 s (3 times at most). At `/clear` or a resume, the process continues without the clipboard part. At other session ends (for example `/exit`), the mod stops the process and does not start a new one. A `ui.copy` hook also changes a copy with picture cells to the text.
+
+## The lean font set
+
+At each start, Typst reads all the fonts of the computer. On macOS, this is approximately 70 ms of each compile. Plain text does not need most of these fonts. Plain text has only ASCII characters, no math outside code, no live Typst block, no image and no HTML entity. In the answers that we measured, approximately 3 of 4 blocks are plain text.
+
+For plain text, Typst loads only these fonts:
+
+- The terminal font.
+- The body fonts and the code fonts of the theme, but not the CJK fonts and the emoji fonts.
+- The fonts in Typst (for example, the math font).
+
+The mod puts links to these font files in one folder in the cache (`fonts-<hash>`). It gives Typst `--ignore-system-fonts --font-path <folder>`. Then a block of plain text compiles in approximately 0.03–0.07 s, not 0.1–0.15 s. The PNG does not change. For ASCII text, Typst takes each character from the first font of the list that has it, and that font is in the folder. Other text can need a character that no font of the list has. Then Typst looks in all the fonts of the computer, so other text compiles with all the fonts.
+
+The mod makes the folder one time in each session, after the first compile of plain text. `typst fonts --variants` gives the files. The mod does not use the folder in these conditions:
+
+- The first installed font of a list is a CJK font or an emoji font.
+- A list has no installed font.
+- One style of a font is in two files (then the order in which Typst reads the files can change the font that it uses).
+- The list markers or the numbering of the theme are not ASCII.
+
+If a compile with the folder fails, the mod compiles again with all the fonts. The probe of a copy (step 9) uses the same fonts as the PNG compile. If the folder is not there (the cleanup at start deletes folders that are older than 2 days), the mod uses all the fonts and makes the folder again.
 
 ## How `auto` is resolved
 

@@ -3,7 +3,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { COMPILE_TIMEOUT_MS, MAX_IMAGE_ROWS, NO_NETWORK, SEGMENT_ROWS, TOUCH_FLUSH_MS, TYPST_FALLBACKS } from './settings'
-import { DEFAULT_METRICS, type Cell, type FontMetrics, type Job, type Metrics, type Page, type Result } from './state'
+import { DEFAULT_METRICS, type Cell, type FontMetrics, type Job, type LeanFonts, type Metrics, type Page, type Result } from './state'
 import { firstLine, imagePathOf, localImages, plainOf, splitInTwo, splitSegments } from './markdown'
 import { inlineBudget } from './terminal'
 import { fontFit, placeFirstLine, sizing } from './draw'
@@ -11,10 +11,12 @@ import { DEFAULT_GRID, gridOf } from './grid'
 import { HEADERS_SH } from './host'
 import { logDebug } from './log'
 import { positionsOf, type Mark, type Positions } from './copy'
+import { leanFontsFor } from './fonts'
 import { clockAfter, envGet, fsExists, fsList, fsRead, fsWrite, processRun, processSpawn } from './api'
 
 // The typst command and its environment. Network off (see NO_NETWORK) and a
-// package cache of our own, so only the vendored packages load.
+// package cache of our own, so only the vendored packages load. `fonts`:
+// the lean font folder (fonts.ts) in place of all system fonts.
 export function typstCall(o: {
   typst: string
   root: string
@@ -22,11 +24,13 @@ export function typstCall(o: {
   ppi: number
   inputs: Readonly<Record<string, string | number>>
   out: string
+  fonts?: string
 }): { argv: string[]; env: Record<string, string> } {
   const argv = [
     o.typst, 'compile',
     '--root', '/',
     '--package-path', `${o.root}/render/packages`,
+    ...fontArgs(o.fonts),
     '--format', 'png',
     '--diagnostic-format', 'short',
     '--ppi', o.ppi.toFixed(4),
@@ -36,6 +40,9 @@ export function typstCall(o: {
   ]
   return { argv, env: noNetworkEnv(o.cache) }
 }
+
+// The arguments that load only the fonts of a lean folder (and Typst's own).
+export const fontArgs = (fonts?: string) => (fonts ? ['--ignore-system-fonts', '--font-path', fonts] : [])
 
 // The typst command that makes a PNG of a JPEG or WebP (render/convert.typ)
 // that fits `box` (in pixels), never larger than its own pixel size: at 72
@@ -124,6 +131,13 @@ export const measureCall = (typst: string, root: string, family: string, themeDi
   '--input', `term-font=${family}`, '--input', `theme-dir=${themeDir}`,
 ]
 
+// The theme's font lists of a measure, when they are lists of names.
+export function leanFontsOf(v: unknown): LeanFonts | undefined {
+  const f = v as Partial<LeanFonts> | null | undefined
+  const names = (x: unknown): x is string[] => Array.isArray(x) && x.every(n => typeof n === 'string')
+  return f && names(f.body) && names(f.code) && typeof f.plain === 'boolean' ? { body: f.body, code: f.code, plain: f.plain } : undefined
+}
+
 // The fonts' metrics from render/measure.typ; the macOS defaults when that fails.
 export async function measureFonts($: EngineInterface, typst: string, root: string, cache: string, family: string, themeDir: string): Promise<Metrics> {
   const argv = measureCall(typst, root, family, themeDir)
@@ -131,7 +145,8 @@ export async function measureFonts($: EngineInterface, typst: string, root: stri
   try {
     const m = JSON.parse(got?.stdout ?? '') as Metrics
     const ok = (x: FontMetrics | null | undefined) => !!x && x.adv > 0 && x.xh > 0 && x.avg > 0
-    if (ok(m.menlo) && ok(m.body)) return { term: ok(m.term) ? m.term : null, menlo: m.menlo, body: m.body, grid: gridOf(m.grid) ?? DEFAULT_GRID }
+    const fonts = leanFontsOf(m.fonts)
+    if (ok(m.menlo) && ok(m.body)) return { term: ok(m.term) ? m.term : null, menlo: m.menlo, body: m.body, grid: gridOf(m.grid) ?? DEFAULT_GRID, ...(fonts ? { fonts } : {}) }
   } catch {}
   return DEFAULT_METRICS
 }
@@ -308,22 +323,43 @@ export function typstInputs(job: Job, segments: readonly string[], dir: string, 
   return { inputs, ppi }
 }
 
+// The lean font folder for a job's segments ('' none: all fonts), noted as in use.
+async function leanFor($: EngineInterface, job: Job, segments: readonly string[]): Promise<string> {
+  const fonts = await leanFontsFor($, job.env, segments, noNetworkEnv(job.env.cache)).catch(() => '')
+  if (fonts) touchLater($, fonts)
+  return fonts
+}
+
+// Runs a typst command with the lean fonts, else with all fonts. A lean
+// run that fails (not one that was cancelled or timed out) runs once more
+// with all fonts, so the lean set never makes a failure of its own.
+async function runFonts($: EngineInterface, job: Job, fonts: string, run: (fonts?: string) => Promise<Ran>): Promise<Ran> {
+  if (!fonts) return run()
+  const ran = await run(fonts)
+  if (ran.exitCode === 0 || ran.isCancelled || ran.stderr === 'timed out') return ran
+  await logDebug($, job.env.cache, `typst for ${job.key} with the lean fonts failed (now with all fonts):\n${ran.stderr}`)
+  return run()
+}
+
 export async function runTypst($: EngineInterface, job: Job, segments: readonly string[], dir: string, tag: string, isSafe: boolean, signal?: AbortSignal): Promise<Ran> {
   const { inputs, ppi } = typstInputs(job, segments, dir, isSafe)
-  const { argv, env: vars } = typstCall({ typst: job.env.typst!, root: job.env.root, cache: job.env.cache, ppi, inputs, out: `${dir}/${tag}-{0p}.png` })
-  return runKillable($, argv, { env: vars, timeoutMs: COMPILE_TIMEOUT_MS, ...(signal ? { signal } : {}) })
+  return runFonts($, job, await leanFor($, job, segments), fonts => {
+    const { argv, env: vars } = typstCall({ typst: job.env.typst!, root: job.env.root, cache: job.env.cache, ppi, inputs, out: `${dir}/${tag}-{0p}.png`, ...(fonts ? { fonts } : {}) })
+    return runKillable($, argv, { env: vars, timeoutMs: COMPILE_TIMEOUT_MS, ...(signal ? { signal } : {}) })
+  })
 }
 
 // ---- The probe: where the words are ---------------------------------------
 
 // `typst query` of the template's <mdpos> marks with probe=1: the PNG
-// compile's own inputs (and `page`), root, package path and env (no ppi,
-// format or out).
-export function probeCall(o: { typst: string; root: string; cache: string; inputs: Readonly<Record<string, string | number>> }): { argv: string[]; env: Record<string, string> } {
+// compile's own inputs (and `page`), root, package path, fonts and env (no
+// ppi, format or out).
+export function probeCall(o: { typst: string; root: string; cache: string; inputs: Readonly<Record<string, string | number>>; fonts?: string }): { argv: string[]; env: Record<string, string> } {
   const argv = [
     o.typst, 'query',
     '--root', '/',
     '--package-path', `${o.root}/render/packages`,
+    ...fontArgs(o.fonts),
     '--diagnostic-format', 'short',
     ...Object.entries({ ...o.inputs, probe: 1 }).flatMap(([k, v]) => ['--input', `${k}=${v}`]),
     `${o.root}/render/md.typ`,
@@ -352,9 +388,12 @@ export async function probePage(
     return null
   }
   if (!Array.isArray(segments) || segments.length !== o.pages || !job.env.typst) return null
+  const typst = job.env.typst
   const { inputs, ppi } = typstInputs(job, segments as string[], dir, o.isSafe)
-  const { argv, env } = probeCall({ typst: job.env.typst, root: job.env.root, cache: job.env.cache, inputs: { ...inputs, page: o.page + 1 } })
-  const ran = await runKillable($, argv, { env, timeoutMs: COMPILE_TIMEOUT_MS })
+  const ran = await runFonts($, job, await leanFor($, job, segments as string[]), fonts => {
+    const { argv, env } = probeCall({ typst, root: job.env.root, cache: job.env.cache, inputs: { ...inputs, page: o.page + 1 }, ...(fonts ? { fonts } : {}) })
+    return runKillable($, argv, { env, timeoutMs: COMPILE_TIMEOUT_MS })
+  })
   if (ran.exitCode !== 0) {
     await logDebug($, job.env.cache, `probe ${dir} page ${o.page + 1} failed:\n${ran.stderr}`)
     return null
