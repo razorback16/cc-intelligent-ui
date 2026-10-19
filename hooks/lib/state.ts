@@ -10,6 +10,7 @@ import type { PlanVerdict } from './plan'
 import type { Drawn } from './copy'
 import type { GridMetrics } from './grid'
 import type { Checked } from './updates'
+import type { ClipWay } from './clipboard'
 import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } from './settings'
 import { uiInvalidate } from './api'
 
@@ -167,16 +168,24 @@ export const S = {
   setupAsked: false,
   watch: null as { cancel: () => void } | null,
   checking: false,
+  // Linux: the tool that reads the desktop portal's colour scheme (host.ts;
+  // null: not tried yet, '': none works, so GNOME's gsettings is read).
+  portalTool: null as 'gdbus' | 'busctl' | '' | null,
+  // Linux: how the clipboard is read and watched (clipboard.ts; null: not
+  // looked up, as on macOS and over ssh).
+  clipWay: null as ClipWay | null,
   // Streaming: model requests of the main loop in flight.
   stepsLive: 0,
   // The plan (plan.tsx): the main loop's running turn (`turn.start`), the
   // verdict the mod's question gave for the PermissionRequest that follows
   // (null: none, the engine's dialog asks), the question asked now ('': none),
-  // and the `code` command's path (null: not looked up yet; '': none).
+  // and the `code` command's path (null: not looked up yet; '': none), and
+  // on Linux a GUI editor that waits (its path and flag; [] none).
   mainTurnId: '',
   planVerdict: null as PlanVerdict | null,
   planAsking: '',
   planCode: null as string | null,
+  planGui: null as string[] | null,
   // The update check (updates.ts), read once per load (`updatesLoading`):
   // `/iui updates` (on by default), the variable that turns the check off
   // ('' none), this mod's version ('' not known) and the last check (null:

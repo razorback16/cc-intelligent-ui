@@ -1,6 +1,8 @@
 // Font metrics for the hooks module, read with
 //   typst eval 'query(<m>).first().value' --in measure.typ --input term-font=<family>
-// Per 1 em: `adv` the width of "0", `xh` the x-height, `avg` the mean
+// Per 1 em: `adv` the width of "0", `xh` the x-height (the ink of "x":
+// fonts with no OS/2 x-height, such as DejaVu Sans Mono, give Typst's
+// ascender there; the metric only when "x" has no ink), `avg` the mean
 // advance over a lowercase pangram. `term` is none when the family is not
 // installed (Typst would fall back to another font).
 //
@@ -17,11 +19,14 @@
 #let m(fonts, body, edge) = measure(text(
   font: fonts, size: 100pt, top-edge: edge, bottom-edge: "baseline", fallback: false, body,
 ))
-#let metrics(fonts) = (
-  adv: m(fonts, "0", "cap-height").width / 100pt,
-  xh: m(fonts, "x", "x-height").height / 100pt,
-  avg: m(fonts, probe, "cap-height").width / 100pt / probe.len(),
-)
+#let metrics(fonts) = {
+  let ink = m(fonts, "x", "bounds").height
+  (
+    adv: m(fonts, "0", "cap-height").width / 100pt,
+    xh: (if ink > 0pt { ink } else { m(fonts, "x", "x-height").height }) / 100pt,
+    avg: m(fonts, probe, "cap-height").width / 100pt / probe.len(),
+  )
+}
 // The text as md.typ sets it: the body, a heading (in Typst's own heading
 // rule, which makes h1 1.4em and h2 1.2em) and code (md.typ's `mono`).
 #set text(font: sans, size: 11pt)

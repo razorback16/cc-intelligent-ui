@@ -14,6 +14,8 @@ Intelligent UI draws each answer from Claude as a typeset picture, with [Typst](
 brew install typst
 ```
 
+On Linux, you can also use `cargo install --locked typst-cli`, a package of your distribution, or the release file from GitHub. Refer to [Install](docs/install.md#install-typst-on-linux).
+
 Then, in Claude Code:
 
 ```
@@ -24,12 +26,12 @@ It works at once, with no restart.
 
 To get new versions, turn on auto-update for the `razorback16` marketplace in `/plugin`, or update manually. Refer to [Update](docs/install.md#update). The mod also shows a notice when a new version is available (`/iui updates off` stops it).
 
-You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15 and macOS. The pictures show only in some terminals:
+You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15, and macOS or Linux (X11 or Wayland). The pictures show only in some terminals:
 
 | Terminal | Pictures | What to do |
 |---|---|---|
-| kitty 0.28+, Ghostty, cmux | Yes | Nothing |
-| iTerm2 3.6+ | Yes | Run `/iui setup` one time |
+| kitty 0.28+, Ghostty, cmux (macOS) | Yes | Nothing |
+| iTerm2 3.6+ (macOS) | Yes | Run `/iui setup` one time |
 | Rio 0.5.27+ | Yes (not tested) | Set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` |
 | ssh | Yes, from kitty or Ghostty | Refer to [Install](docs/install.md#terminals) |
 | tmux, screen | No | — |
@@ -46,7 +48,7 @@ In other terminals, the mod shows the normal text. Refer to [Install](docs/insta
 - **LaTeX math.** Inline `$…$` and display `$$…$$` math, typeset.
 - **Live diagrams, charts and plots.** Claude writes Typst with CeTZ, cetz-plot and fletcher. The drawings use your theme's colours and work offline.
 - **Images and files.** Images in an answer, images that Claude sends, Markdown files that Claude sends, and images that you paste show in the transcript.
-- **Copy text from pictures.** Select and copy text with the mouse, as you do with normal text.
+- **Copy text from pictures.** Select and copy text with the mouse, as you do with normal text. On Linux, this needs a clipboard tool (refer to [Install](docs/install.md#linux)).
 - **Links you can click.** The links, file paths and commands of an answer show in rows under its picture. A cmd+click on a link opens it. A click on a command copies it.
 - **Plans you can read.** In plan mode, the plan shows rendered, with an approve, edit or reject question under it.
 - **Themes that follow light and dark.** Claude Code's own colours by default, or VS Code's Markdown preview. You can make your own.
@@ -85,7 +87,7 @@ More in the [gallery](docs/gallery.md): plots, fractals and a tour of all the Ma
 | `/iui grid on` / `off` | Puts each line of text on the terminal rows, so that a mouse selection covers the text (on by default) |
 | `/iui updates on` / `off` | Turns the daily check for a new version on or off (on by default) |
 | `/iui details` | Shows the terminal, font, mode and Typst that the mod found |
-| `/iui setup` | iTerm2: adds the shell line that turns pictures on |
+| `/iui setup` | iTerm2 (macOS): adds the shell line that turns pictures on |
 | `/iui grab` | Copies the text under your last mouse selection of pictures |
 | `/iui dump` | Shows how the mod read the last clipboard with picture cells (for a bug report) |
 

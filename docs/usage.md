@@ -7,7 +7,7 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
 ## What it draws
 
 - Headings, lists, task lists, tables, block quotes, links, footnotes and horizontal rules
-- Code blocks with syntax colours, in your terminal's font (found for iTerm2, Ghostty, kitty and Rio; else Menlo, SF Mono or DejaVu Sans Mono)
+- Code blocks with syntax colours, in your terminal's font (found for iTerm2, Ghostty, kitty and Rio; on Linux, else fontconfig's `monospace` font; else Menlo, SF Mono or DejaVu Sans Mono)
 - Math (`$…$` and `$$…$$`, LaTeX syntax, through mitex)
 - Images from `![alt](path)`. A relative path starts from the session's folder. Remote images show as an alt-text box.
 - Live Typst: a fenced block with the language `typst` (or `typ`) is rendered, not shown as code. These packages are in the mod and work offline:
@@ -36,7 +36,7 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
 | `/iui` | Shows the state, the theme, the text size, the width, the image height and the row grid, a problem that keeps pictures away, and a new version when there is one |
 | `/iui details` | Shows all that the mod found: where the mode comes from, the terminal font, the Typst path, why the terminal can or cannot show pictures, if the automatic copy is on (`Auto copy:`), and the state of the update check (`Update checks:`) |
 | `/iui on` / `off` | Turns the pictures on or off (kept for later sessions) |
-| `/iui setup` / `setup remove` | iTerm2: adds or removes the shell line that turns pictures on (then close the tab and open a new one) |
+| `/iui setup` / `setup remove` | iTerm2 (macOS only): adds or removes the shell line that turns pictures on (then close the tab and open a new one). On Linux, it changes no file. |
 | `/iui size <80–200>` | Text size in percent. 100 is the same visual size as your terminal text. |
 | `/iui width` | Shows the width: the most columns that a picture can use |
 | `/iui width <40–400>` | Sets the most columns that a picture can use (kept for later sessions) |
@@ -76,7 +76,7 @@ The mod does not take web links from code blocks, inline code or math. It takes 
 
 ## Copy text from a picture
 
-Select the text in a picture (an answer, a plan or a Markdown file that Claude sent) with the mouse, as you do with normal text. The selection puts picture cells on the clipboard. On macOS, while the mod is on and has drawn a picture in this session, the mod sees each change of the clipboard (in 0.3 s or less). When the clipboard has picture cells, the mod puts the text under your selection on the clipboard, and a toast shows the number of characters. Wait for this toast, then paste. In fullscreen mode, if this session has a selection, the mod changes the clipboard only when the clipboard holds that selection. Thus a copy from a different Claude Code session usually stays as it is. The mod does not change a clipboard that has no picture cells.
+Select the text in a picture (an answer, a plan or a Markdown file that Claude sent) with the mouse, as you do with normal text. The selection puts picture cells on the clipboard. While the mod is on and has drawn a picture in this session, the mod sees each change of the clipboard (on macOS in 0.3 s or less; on Linux at once, with the tools in [Linux](install.md#linux)). When the clipboard has picture cells, the mod puts the text under your selection on the clipboard, and a toast shows the number of characters. Wait for this toast, then paste. In fullscreen mode, if this session has a selection, the mod changes the clipboard only when the clipboard holds that selection. Thus a copy from a different Claude Code session usually stays as it is. The mod does not change a clipboard that has no picture cells.
 
 The mod finds the position of each word on a page when you copy from that page for the first time. This takes 0.15–0.5 s, and more (2–3 s) for a page with a large Typst drawing. No toast shows while it does this. Only the toast of the copy shows. The mod keeps the positions in memory, so the next copy from the same page is fast.
 
@@ -113,7 +113,7 @@ When Claude exits plan mode, the mod draws the plan as a picture in the transcri
 | Type something | Sends your text to Claude as changes to the plan. Claude stays in plan mode and writes a new plan. |
 | Esc | Rejects the plan and stops the turn. |
 
-The editor is VS Code (`code --wait`) when the `code` command is on your PATH. If `code` is not on the PATH, macOS uses TextEdit (`open -W -t`). In that case, quit TextEdit when you complete the edit. Over ssh and on Linux with no `code` command, the "Edit the plan" option does not show.
+The editor is VS Code (`code --wait`) when the `code` command is on your PATH. If `code` is not on the PATH, macOS uses TextEdit (`open -W -t`). In that case, quit TextEdit when you complete the edit. On Linux with a display, the mod uses the first of VSCodium (`codium --wait`), Zed (`zed --wait`), Sublime Text (`subl --wait`), Kate (`kate --block`), gedit (`gedit --wait`) and gvim (`gvim -f`) that is on the PATH. Close the file (or the window) when you complete the edit. Over ssh with no `code` command, and on Linux with none of these editors, the "Edit the plan" option does not show.
 
 The mod shows the plan file as it is when the question opens. Claude can write the plan file and exit plan mode in the same message. Then Claude Code sends the plan from before that write. In this case, the mod waits for the write to complete (5 seconds at most) and reads the file again. You approve the plan that you see, and Claude gets that plan.
 

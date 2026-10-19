@@ -19,7 +19,11 @@ export function settingOf(value: unknown): ThemeSetting {
 }
 
 // The OS appearance, and where it was read.
-export type HostMode = { mode: IuiTheme; source: 'terminal' | 'iTerm2' | 'Ghostty' | 'cmux' | 'kitty' | 'Rio' | 'macOS' | 'GNOME' | 'COLORFGBG'; detail?: string }
+export type HostMode = {
+  mode: IuiTheme
+  source: 'terminal' | 'iTerm2' | 'Ghostty' | 'cmux' | 'kitty' | 'Rio' | 'macOS' | 'GNOME' | 'desktop portal' | 'COLORFGBG'
+  detail?: string
+}
 
 // `defaults read -g AppleInterfaceStyle`: "Dark" in dark mode; in light mode
 // the key does not exist and the command fails.
@@ -34,6 +38,15 @@ export function modeOfGnome(stdout: string): IuiTheme | null {
   if (v === 'prefer-dark') return 'dark'
   if (v === 'prefer-light' || v === 'default') return 'light'
   return null
+}
+
+// The freedesktop portal's `org.freedesktop.appearance color-scheme`
+// (Settings.Read), as gdbus prints it (`(<<uint32 1>>,)`) or busctl (`v v u
+// 1`): 1 dark, 2 light, 0 no preference; null for anything else.
+export function schemeOfPortal(stdout: string): 'dark' | 'light' | 'no-preference' | null {
+  const m = /(?:\buint32|\bu)\s+(\d+)\b/.exec(stdout)
+  const v = m ? Number(m[1]) : -1
+  return v === 1 ? 'dark' : v === 2 ? 'light' : v === 0 ? 'no-preference' : null
 }
 
 // COLORFGBG, "fg;bg" or "fg;x;bg": the last field is the background colour

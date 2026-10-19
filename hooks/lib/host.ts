@@ -7,9 +7,10 @@ import type { IuiTheme } from '../../types'
 import { CLIP_WAKE_MS, HOST_CHECK_MS, HOST_POLL_MS, MODES } from './settings'
 import { S } from './state'
 import { beginEpoch } from './epoch'
-import { luminanceOf, modeOfColorFgBg, modeOfGnome, modeOfLuminance, modeOfMacAppearance, parseOsc11, resolveMode, type HostMode } from './mode'
+import { luminanceOf, modeOfColorFgBg, modeOfLuminance, modeOfMacAppearance, parseOsc11, resolveMode, schemeOfPortal, type HostMode } from './mode'
 import {
-  cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, ghosttyBackgroundOf, ghosttyFontOf, ghosttyHasColors, ghosttyThemePaths, ghosttyThemesOf,
+  cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, familyOfFc, GHOSTTY_DEFAULT_FONT, ghosttyBackgroundOf, ghosttyFontOf, ghosttyHasColors,
+  ghosttyThemePaths, ghosttyThemesOf,
   ghosttyValueOf, hexColorOf, itermAppearanceOf, itermFontOf, itermModeOf, jsoncOf, kittyAutoFileOf, kittyBackgroundOf,
   kittyConfigDirsOf, kittyEntriesOf, kittyFontOf, kittySchemeOfGnome, kittyValueOf, parseFontSpec, rioBackgroundOf,
   rioConfigDirOf, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf, type CmuxAppearance, type KittyEntries,
@@ -21,16 +22,20 @@ import { clockEvery, envGet, fsExists, fsRead, processRun } from './api'
 export const CELL_SH = `perl -e 'open(T, "</dev/tty") or exit 1; my $w = " " x 8; ioctl(T, ($^O eq "darwin" ? 0x40087468 : 0x5413), $w) or exit 1; print join(" ", unpack("S4", $w))'`
 // The watcher (frame.ts): one long-lived perl for the tty size and the
 // clipboard. It prints `pid <n>` first, then a line `size rows cols xpixel
-// ypixel` at start and at each change. With the argument `clip` (macOS
-// only: /usr/bin/perl, which has PerlObjCBridge) it also prints `clip <n>`,
-// the clipboard's change count, at start and at each change, read every
-// CLIP_WAKE_MS; `clip none` once when the bridge does not load (then only
-// the size). It sleeps in sigsuspend with SIGWINCH and SIGALRM blocked
-// outside it, so a SIGWINCH that comes while it reads is kept for the next
-// sleep (never lost), and it does no work between signals. With no clip,
-// an alarm each 10 s wakes it only to see that its parent still runs. Exit
-// 1 when /dev/tty does not open (and no clip); exit 0 when the parent dies
-// (its parent id changes) or stdout breaks.
+// ypixel` at start and at each change. With the argument `clip` alone
+// (macOS: /usr/bin/perl, which has PerlObjCBridge) it also prints `clip
+// <n>`, the clipboard's change count, at start and at each change, read
+// every CLIP_WAKE_MS; `clip none` once when the bridge does not load (then
+// only the size). With `clip` and a command (Linux: the notifier of
+// clipboard.ts), a child of its own process group runs that command and
+// prints `clip <n>` (0, 1, ...) for each line the command prints, and `clip
+// none` when it ends; the watcher stops that group when it exits. It sleeps
+// in sigsuspend with SIGWINCH and SIGALRM blocked outside it, so a SIGWINCH
+// that comes while it reads is kept for the next sleep (never lost), and it
+// does no work between signals. With no bridge, an alarm each 10 s wakes it
+// only to see that its parent still runs. Exit 1 when /dev/tty does not
+// open (and no clip); exit 0 when the parent dies (its parent id changes),
+// stdout breaks, or (with a notifier) at SIGTERM.
 export const WATCH_PL = [
   'use POSIX (); use Config; use Time::HiRes ();',
   'my %n; @n{split " ", $Config{sig_name}} = split " ", $Config{sig_num};',
@@ -39,14 +44,23 @@ export const WATCH_PL = [
   'my $parent = getppid(); my $last = ""; my $seen = ""; $| = 1;',
   '$SIG{PIPE} = sub { exit 0 }; $SIG{WINCH} = sub {}; $SIG{ALRM} = sub {};',
   'print "pid $$\\n" or exit 0;',
-  'my $pb;',
-  'if (($ARGV[0] // "") eq "clip") {',
+  'my $pb; my $relay;',
+  'if (($ARGV[0] // "") eq "clip" && @ARGV > 1) {',
+  '  $relay = fork();',
+  '  if (defined $relay && !$relay) {',
+  '    $SIG{PIPE} = "IGNORE"; $SIG{WINCH} = "DEFAULT"; $SIG{ALRM} = "DEFAULT"; setpgrp(0, 0); my $c; my $k = 0;',
+  '    if (open($c, "-|", @ARGV[1 .. $#ARGV])) { while (<$c>) { print "clip $k\\n" or last; $k++; } }',
+  '    print "clip none\\n"; kill "TERM", -$$; POSIX::_exit(0);',
+  '  }',
+  '  if ($relay) { setpgrp($relay, $relay); $SIG{TERM} = sub { exit 0 }; } else { print "clip none\\n" or exit 0; }',
+  '} elsif (($ARGV[0] // "") eq "clip") {',
   '  $pb = eval { require Foundation; Foundation->import;',
   '    NSBundle->bundleWithPath_("/System/Library/Frameworks/AppKit.framework")->load;',
   '    @NSPasteboard::ISA = ("PerlObjCBridge"); my $p = NSPasteboard->generalPasteboard; defined $p->changeCount ? $p : undef };',
   '  print "clip none\\n" or exit 0 unless $pb;',
   '}',
-  'exit 1 unless $tty || $pb;',
+  'END { kill "TERM", -$relay if $relay; }',
+  'exit 1 unless $tty || $pb || $relay;',
   'POSIX::sigprocmask(POSIX::SIG_BLOCK(), POSIX::SigSet->new($n{WINCH}, $n{ALRM}));',
   'my $none = POSIX::SigSet->new();',
   'while (1) {',
@@ -98,10 +112,32 @@ export const HEADERS_SH = `for f in "$@"; do head -c 24 "$f" | od -An -v -tx1; e
 
 // The terminal's font family: iTerm2's profile font, Ghostty's font-family,
 // kitty's font_family, Rio's [fonts] family; '' elsewhere or when it can't
-// be read.
+// be read. On Linux, when the terminal's config names none: fontconfig's
+// monospace font (fc-match), which kitty and most terminals use.
 export async function termFontOf($: EngineInterface, program: string, isMac: boolean): Promise<string> {
   // Over ssh, a config here is not the one of the user's terminal.
   if (S.isRemote) return ''
+  const font = await configFontOf($, program, isMac)
+  if (font || isMac) return font
+  return fcFamily($, 'monospace')
+}
+
+// A family fontconfig gives for a pattern (the first of its names), '' when
+// fc-match fails. `fc-match` always gives a font, the nearest one.
+async function fcFamily($: EngineInterface, pattern: string): Promise<string> {
+  const got = await processRun($, ['fc-match', pattern, '-f', '%{family}'], { timeoutMs: 5000 }).catch(() => null)
+  return got?.exitCode === 0 ? familyOfFc(got.stdout) : ''
+}
+
+// Ghostty draws its own JetBrains Mono when no font-family is set. On Linux
+// it is used when fontconfig has it too (Typst can then draw it).
+async function ghosttyDefaultFont($: EngineInterface): Promise<string> {
+  const got = await processRun($, ['fc-list', '-q', GHOSTTY_DEFAULT_FONT], { timeoutMs: 5000 }).catch(() => null)
+  return got?.exitCode === 0 ? GHOSTTY_DEFAULT_FONT : ''
+}
+
+// The font that the terminal's own config or profile names.
+async function configFontOf($: EngineInterface, program: string, isMac: boolean): Promise<string> {
   if (S.isIterm && isMac) {
     const profile = await envGet($, 'ITERM_PROFILE')
     const [marks, guid] = await Promise.all([
@@ -115,21 +151,20 @@ export async function termFontOf($: EngineInterface, program: string, isMac: boo
   }
   if (/ghostty/i.test(program)) {
     const shown = await processRun($, ['sh', '-c', GHOSTTY_SH], { timeoutMs: 5000 }).catch(() => null)
-    return ghosttyFontOf(shown?.stdout ?? '') ?? ''
+    const family = ghosttyFontOf(shown?.stdout ?? '')
+    return family ?? (isMac ? '' : await ghosttyDefaultFont($))
   }
   if (S.isKitty) {
-    // A family name as is; a PostScript name to its family (macOS); the
-    // system's monospace from fontconfig (Linux; on macOS it is Menlo).
+    // A family name as is; a PostScript name to its family (macOS: AppKit;
+    // Linux: fontconfig); the system's monospace from fontconfig (Linux,
+    // termFontOf; on macOS it is Menlo).
     const font = kittyFontOf(kittyValueOf((await readKittyConfig($)).entries, 'font_family'))
     if (font && 'family' in font) return font.family
     if (font && isMac) {
       const named = await processRun($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_JXA, font.postscript], { timeoutMs: 5000 }).catch(() => null)
       return named?.exitCode === 0 ? firstLine(named.stdout) : ''
     }
-    if (!font && !isMac) {
-      const got = await processRun($, ['fc-match', 'monospace', '-f', '%{family}'], { timeoutMs: 5000 }).catch(() => null)
-      return got?.exitCode === 0 ? (got.stdout.split(',')[0] ?? '').trim() : ''
-    }
+    if (font) return fcFamily($, `:postscriptname=${font.postscript}`)
     return ''
   }
   if (isRioHere()) return rioFontOf((await readRioConfig($)).config)
@@ -285,10 +320,8 @@ async function readKittyMode($: EngineInterface): Promise<HostMode | null> {
   let auto: { file: string; entries: KittyEntries } | null = null
   if (found.some(Boolean)) {
     let scheme: (typeof schemes)[number] | null = null
-    if (S.hostOs === 'Linux') {
-      const got = await processRun($, ['gsettings', 'get', 'org.gnome.desktop.interface', 'color-scheme'], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
-      scheme = got && got.exitCode === 0 ? kittySchemeOfGnome(got.stdout) : null
-    } else scheme = (await readOsMode($).catch(() => null))?.mode ?? null
+    if (S.hostOs === 'Linux') scheme = (await readLinuxScheme($).catch(() => null))?.scheme ?? null
+    else scheme = (await readOsMode($).catch(() => null))?.mode ?? null
     if (scheme && found[schemes.indexOf(scheme)]) {
       const file = kittyAutoFileOf(scheme)
       auto = { file, entries: await kittyEntriesOf(`${dir}/${file}`, path => readText($, path), { home }) }
@@ -324,18 +357,46 @@ async function readRioMode($: EngineInterface): Promise<HostMode | null> {
   return bg ? { mode: modeOfLuminance(luminanceOf(bg)), source: 'Rio', detail: got.detail } : null
 }
 
-// The OS appearance: macOS, or GNOME's colour scheme on Linux.
+// The OS appearance: macOS, or on Linux the desktop's colour scheme
+// (readLinuxScheme; no preference is light, as GNOME's default is).
 async function readOsMode($: EngineInterface): Promise<HostMode | null> {
   if (S.hostOs === 'Darwin') {
     const got = await processRun($, ['defaults', 'read', '-g', 'AppleInterfaceStyle'], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
     return got ? { mode: modeOfMacAppearance(got.exitCode, got.stdout), source: 'macOS' } : null
   }
   if (S.hostOs === 'Linux') {
-    const got = await processRun($, ['gsettings', 'get', 'org.gnome.desktop.interface', 'color-scheme'], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
-    const mode = got && got.exitCode === 0 ? modeOfGnome(got.stdout) : null
-    if (mode) return { mode, source: 'GNOME' }
+    const seen = await readLinuxScheme($).catch(() => null)
+    if (seen) return { mode: seen.scheme === 'dark' ? 'dark' : 'light', source: seen.source }
   }
   return null
+}
+
+// The freedesktop portal's colour scheme (GNOME, KDE and others: the value
+// kitty reads too), by gdbus, else busctl. The first tool that works is
+// kept, so each check runs one process; when neither works, GNOME's
+// gsettings is read in its place.
+const PORTAL_ARGS = {
+  gdbus: ['gdbus', 'call', '--session', '--dest', 'org.freedesktop.portal.Desktop', '--object-path', '/org/freedesktop/portal/desktop',
+    '--method', 'org.freedesktop.portal.Settings.Read', 'org.freedesktop.appearance', 'color-scheme'],
+  busctl: ['busctl', '--user', 'call', 'org.freedesktop.portal.Desktop', '/org/freedesktop/portal/desktop', 'org.freedesktop.portal.Settings',
+    'Read', 'ss', 'org.freedesktop.appearance', 'color-scheme'],
+} as const
+type LinuxScheme = { scheme: 'dark' | 'light' | 'no-preference'; source: 'desktop portal' | 'GNOME' }
+async function readLinuxScheme($: EngineInterface): Promise<LinuxScheme | null> {
+  const tools = S.portalTool === null ? (['gdbus', 'busctl'] as const) : S.portalTool ? [S.portalTool] : []
+  for (const tool of tools) {
+    const got = await processRun($, PORTAL_ARGS[tool], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
+    const scheme = got && got.exitCode === 0 ? schemeOfPortal(got.stdout) : null
+    if (scheme) {
+      S.portalTool = tool
+      return { scheme, source: 'desktop portal' }
+    }
+  }
+  if (S.portalTool === null) S.portalTool = ''
+  if (S.portalTool) return null
+  const got = await processRun($, ['gsettings', 'get', 'org.gnome.desktop.interface', 'color-scheme'], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
+  const scheme = got && got.exitCode === 0 ? kittySchemeOfGnome(got.stdout) : null
+  return scheme ? { scheme, source: 'GNOME' } : null
 }
 
 // One read of the OS appearance (never two at once); a changed mode redraws.

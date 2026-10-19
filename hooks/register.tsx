@@ -22,7 +22,7 @@ import type { EngineInterface, Register, RenderElement, RenderViewport } from 'c
 
 import {
   DEFAULT_THEME, gridText, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
-  widthText,
+  typstHintOf, widthText,
 } from './lib/settings'
 import { clip, drawnAnswers, editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env } from './lib/state'
 import { beginEpoch } from './lib/epoch'
@@ -37,13 +37,14 @@ import { finalizeAll } from './lib/stream'
 import { noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf } from './lib/probe'
 import { codePointsOf, decodeSelection, hasPlaceholders, joinSegments, pageTopsOf, pickPages, textOfRun, type Pick, type Segment } from './lib/copy'
 import { pagesOf, type Drawing } from './lib/answer'
+import { autoCopyText, clipboardNow, clipWatchArgs, clipWayReady } from './lib/clipboard'
 import { setUp } from './lib/env'
 import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/frame'
 import { roomColumns } from './lib/terminal'
 import { onScreenOf, pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
 import { pasteDir, rowsAfter, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
 import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
-import { clockNow, fsWrite, processRun, sessionSurfaces, storeSet, uiCopy, uiResolve, uiSelection, uiToast } from './lib/api'
+import { clockNow, fsWrite, sessionSurfaces, storeSet, uiCopy, uiResolve, uiSelection, uiToast } from './lib/api'
 import {
   currentPlan, decidePlan, decisionOf, drawAskLine, drawPlanResult, drawPlanUse, isPlanQuestion, planFileOf, planInputOf, planOf,
   planShownOf, scheduleClear, type PlanVerdict,
@@ -72,7 +73,7 @@ export {
   type ThemeInfo, type ThemeProblem, type ThemeSyntax,
 } from './lib/themes'
 export { commandSuggestions, parseCommand, type Command, type Suggestion } from './lib/command'
-export { hasSetup, SETUP_END, SETUP_START, setupBlock, shellRcOf, withoutSetup, withSetup, type ShellRc } from './lib/setup'
+export { hasSetup, SETUP_END, SETUP_NOT_MAC, SETUP_START, setupBlock, shellRcOf, withoutSetup, withSetup, type ShellRc } from './lib/setup'
 export { OSC11_PL, perlFor, WATCH_PL } from './lib/host'
 export {
   convertCall, isSafePage, measureCall, noNetworkEnv, pageRowsOf, parseOd, pngSize, probeCall, resultOf, roomInputs, shouldRetrySafe, typstCall, typstInputs,
@@ -83,12 +84,13 @@ export {
 export { nextJob } from './lib/stream'
 export * from './lib/images'
 export * from './lib/copy'
+export { autoCopyText, CLIP_TOOLS, clipToolsOf, clipWayOf, FIND_SH, GTK_READ_PY, GTK_WATCH_PY, WL_WATCH_SH, X11_WATCH_SH, type ClipTool, type ClipWay } from './lib/clipboard'
 export {
   agoText, checkedOf, compareVersions, isDue, isNewer, parseVersion, shouldTell, toldOf, UPDATE_EVERY_MS, UPDATE_FETCH_MS, UPDATE_STEPS, UPDATE_TOAST_MS,
   UPDATE_URL, updateLine, updateNotice, updateToast, versionOf,
 } from './lib/updates'
 export {
-  choiceOf, decisionOf, editorArgv, feedbackOf, isPlanQuestion, normalPath, PLAN_ASK_LINE, PLAN_AUTO, PLAN_CLEAR, PLAN_DRAWING, PLAN_EDIT,
+  choiceOf, decisionOf, editorArgv, feedbackOf, guiEditorOf, LINUX_EDITORS, isPlanQuestion, normalPath, PLAN_ASK_LINE, PLAN_AUTO, PLAN_CLEAR, PLAN_DRAWING, PLAN_EDIT,
   PLAN_FEEDBACK, PLAN_HEADER, PLAN_IMPLEMENT, PLAN_MANUAL, PLAN_QUESTION, PLAN_QUESTION_EDITED, PLAN_REJECTED, planFileOf, planInputOf,
   planOf, planOptions, planShownOf, shortPath, verdictOf, type PlanChoice, type PlanVerdict,
 } from './lib/plan'
@@ -203,9 +205,10 @@ async function planEnv($: EngineInterface): Promise<Env | null> {
 
 // ---- Copy -----------------------------------------------------------------
 // A mouse copy over a picture puts kitty placeholder cells on the clipboard,
-// and no hook sees that copy. On macOS the watcher (lib/frame.ts) prints the
-// clipboard's change count when it changes; at a change the clipboard is
-// read once (pbpaste) and, when it holds placeholders, written again with
+// and no hook sees that copy. The watcher (lib/frame.ts) prints a line when
+// the clipboard changes (macOS: its change count; Linux: a notifier's
+// line, lib/clipboard.ts); at a change the clipboard is read once (pbpaste,
+// wl-paste, xclip, xsel or GTK) and, when it holds placeholders, written again with
 // the words under them (see lib/copy.ts; the drawn pages and the words of
 // a page are in lib/probe.ts). No timer reads the clipboard or the
 // selection.
@@ -247,12 +250,6 @@ async function readCopy($: EngineInterface, raw: string, requestId?: string): Pr
   return read
 }
 
-// The clipboard now (pbpaste, UTF-8); null when it can not be read.
-async function clipboardNow($: EngineInterface): Promise<string | null> {
-  const got = await processRun($, ['pbpaste'], { timeoutMs: 2000, env: { LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' } }).catch(() => null)
-  return got && got.exitCode === 0 ? got.stdout : null
-}
-
 // Writes the text read for `raw` (placeholders) to the clipboard, once:
 // our own write is never read back as new. Just before the write the
 // clipboard is read again: a newer copy (made while the picture was read,
@@ -283,9 +280,9 @@ async function copyRead($: EngineInterface, raw: string, requestId?: string) {
 // line breaks that the selection does not have, or the other way).
 const sameCopy = (a: string, b: string) => a.replace(/\r\n/g, '\n').replace(/\s+$/, '') === b.replace(/\r\n/g, '\n').replace(/\s+$/, '')
 
-// A watcher line `clip <count>` (null: `clip none`, no PerlObjCBridge: the
-// automatic copy stays off). The first count of a child (at its start) is
-// only noted: the clipboard then is no new copy (after a hot reload, it can
+// A watcher line `clip <count>` (null: `clip none`, no PerlObjCBridge or
+// the Linux notifier ended: the automatic copy stays off). The first count
+// of a child (at its start) is only noted: the clipboard then is no new copy (after a hot reload, it can
 // be an old copy of picture cells).
 function clipChanged($: EngineInterface, count: number | null, first: boolean) {
   if (count === null) {
@@ -296,7 +293,7 @@ function clipChanged($: EngineInterface, count: number | null, first: boolean) {
   if (!first) void readClipboard($).catch(() => undefined)
 }
 
-// The clipboard changed: one read (pbpaste). Placeholders that are not our
+// The clipboard changed: one read (clipboardNow). Placeholders that are not our
 // own write are read and written back as text. A clipboard with no
 // placeholders is never touched. When this session has a selection
 // (fullscreen), the clipboard is rewritten only when it is that selection:
@@ -324,15 +321,16 @@ async function readClipboard($: EngineInterface) {
   }
 }
 
-// The watcher's clipboard part: on macOS, on this computer (over ssh
-// pbpaste reads the remote one's clipboard), only while Intelligent UI is
-// on (its callers draw, or read the atom) and a picture is drawn. It is a
-// new child (the flag is an argument): its first count is only noted. A
-// child that runs is kept; one that ended is started again (watchFrame
-// caps it). With no
-// PerlObjCBridge the child goes on as it is (size only).
+// The watcher's clipboard part: on macOS, or on Linux with a tool that sees
+// the changes (lib/clipboard.ts), on this computer (over ssh the clipboard
+// read is the remote one's), only while Intelligent UI is on (its callers
+// draw, or read the atom) and a picture is drawn. It is a new child (the
+// flag is an argument): its first count is only noted. A child that runs
+// is kept; one that ended is started again (watchFrame caps it). With no
+// PerlObjCBridge (or a notifier that ended) the child goes on as it is
+// (size only).
 function watchClipboard($: EngineInterface) {
-  if (!S.env?.isMac || S.isRemote || !drawnAnswers.size || clip.none) return
+  if (!S.env || S.isRemote || !drawnAnswers.size || clip.none || clipWatchArgs(S.env.isMac) === null) return
   watchFrame($, (count, first) => clipChanged($, count, first))
 }
 
@@ -344,13 +342,11 @@ function stopClipboard($: EngineInterface) {
 
 // The automatic copy now, for /iui details and dump.
 function autoCopyOf(isOn: boolean): string {
-  if (!S.env?.isMac) return 'off (not macOS)'
-  if (S.isRemote) return 'off (ssh)'
-  if (!isOn) return 'off (Intelligent UI is off)'
-  if (clip.none) return 'off (no PerlObjCBridge in /usr/bin/perl)'
-  if (!drawnAnswers.size) return 'off (no picture yet)'
   const now = watchState()
-  return now?.clip && !now.ended ? 'on' : 'off (the watcher does not run)'
+  return autoCopyText({
+    isMac: !!S.env?.isMac, hostOs: S.hostOs, isRemote: S.isRemote, isOn, none: clip.none, drawn: drawnAnswers.size > 0,
+    running: !!now?.clip && !now.ended, way: S.clipWay,
+  })
 }
 
 // The update check's state now, for /iui, /iui details and /iui updates.
@@ -392,6 +388,7 @@ function screenText(pick: { id: string; page: number }): string {
 // read, and the same in full in <cache>/copy-debug.json. `on`: Intelligent
 // UI is on.
 async function dump($: EngineInterface, on: boolean): Promise<string> {
+  await clipWayReady()
   const auto = autoCopyOf(on)
   if (!clip.raw) return `Intelligent UI: no clipboard text with picture cells seen yet (auto copy ${auto}; ${drawnAnswers.size} pictures drawn).`
   const read = await readCopy($, clip.raw, clip.rawRow)
@@ -564,11 +561,12 @@ export const register: Register = on => {
     const bad = asked.kind === 'bad' ? `Not understood: "${e.args.trim()}".\n` : ''
     const theme = S.look?.name ?? DEFAULT_THEME
     if (asked.kind === 'details') {
-      const font = ready.termFont ? `terminal font ${ready.termFont}` : 'terminal font not known (Menlo assumed)'
-      const typst = ready.typst ? `Typst: ${ready.typst}` : 'Typst: not found (brew install typst)'
+      const font = ready.termFont ? `terminal font ${ready.termFont}` : `terminal font not known (${ready.isMac ? 'Menlo' : "the theme's code font"} assumed)`
+      const typst = ready.typst ? `Typst: ${ready.typst}` : `Typst: not found (${typstHintOf(ready.isMac)})`
       const terminal = ready.canDraw
         ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
         : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+ and Rio 0.5.27+ with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
+      await clipWayReady()
       const auto = `Auto copy: ${autoCopyOf(state === 'on')}`
       const updates = `Update checks: ${updateLine(await updateState($))}`
       return { text: `Intelligent UI is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, row grid ${S.grid ? 'on' : 'off'}, ${font}. ${typst}; ${terminal}.\n${auto}\n${updates}` }
@@ -577,8 +575,11 @@ export const register: Register = on => {
     const sized = (v: number | 'full' | 'half', unit: string) => (typeof v === 'number' ? `${v} ${unit}` : v)
     const lines = [`Intelligent UI is ${state}: theme ${theme}, ${S.theme}, text ${S.size}%, width ${sized(S.width, 'columns')}, height ${sized(S.height, 'rows')}, grid ${S.grid ? 'on' : 'off'}.`]
     if (S.setupNeeded) lines.push('In iTerm2, run /iui setup once to show pictures.')
-    else if (!ready.canDraw) lines.push('This terminal shows no pictures, so answers stay text. Pictures show in kitty, Ghostty and iTerm2 3.6+.')
-    if (!ready.typst) lines.push('Typst is not installed, so answers stay text. Install it: brew install typst')
+    else if (!ready.canDraw) {
+      const where = ready.isMac ? 'kitty, Ghostty and iTerm2 3.6+' : 'kitty and Ghostty, and in Rio with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1'
+      lines.push(`This terminal shows no pictures, so answers stay text. Pictures show in ${where}.`)
+    }
+    if (!ready.typst) lines.push(`Typst is not installed, so answers stay text. Install it: ${typstHintOf(ready.isMac)}`)
     const notice = updateNotice(await updateState($))
     if (notice) lines.push(notice)
     lines.push('Change: /iui on | off | size | width | height | grid | updates | theme. More: /iui details')

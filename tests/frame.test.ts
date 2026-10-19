@@ -117,8 +117,8 @@ test('WATCH_PL sleeps in sigsuspend with SIGWINCH and SIGALRM blocked outside it
   expect(WATCH_PL).not.toContain('sleep')
 })
 
-test('WATCH_PL loads the bridge in an eval only with the clip argument, and says clip none when it fails', () => {
-  expect(WATCH_PL).toContain('if (($ARGV[0] // "") eq "clip")')
+test('WATCH_PL loads the bridge in an eval only with the clip argument alone, and says clip none when it fails', () => {
+  expect(WATCH_PL).toContain('} elsif (($ARGV[0] // "") eq "clip") {')
   expect(WATCH_PL).toContain('$pb = eval { require Foundation; Foundation->import;')
   expect(WATCH_PL).toContain('@NSPasteboard::ISA = ("PerlObjCBridge")')
   expect(WATCH_PL).toContain('print "clip none\\n" or exit 0 unless $pb;')
@@ -126,9 +126,19 @@ test('WATCH_PL loads the bridge in an eval only with the clip argument, and says
   expect(WATCH_PL).toContain('print "size $line\\n"')
   expect(WATCH_PL).toContain('print "pid $$\\n"')
   // No tty and no clipboard part: exit 1.
-  expect(WATCH_PL).toContain('exit 1 unless $tty || $pb;')
+  expect(WATCH_PL).toContain('exit 1 unless $tty || $pb || $relay;')
   expect(perlFor(true)).toBe('/usr/bin/perl')
   expect(perlFor(false)).toBe('perl')
+})
+
+test('WATCH_PL with clip and a command (Linux): a child in its own group relays the lines, and the group stops with the watcher', () => {
+  expect(WATCH_PL).toContain('if (($ARGV[0] // "") eq "clip" && @ARGV > 1) {')
+  expect(WATCH_PL).toContain('setpgrp(0, 0)')
+  expect(WATCH_PL).toContain('open($c, "-|", @ARGV[1 .. $#ARGV])')
+  expect(WATCH_PL).toContain('print "clip $k\\n" or last; $k++;')
+  expect(WATCH_PL).toContain('print "clip none\\n"; kill "TERM", -$$; POSIX::_exit(0);')
+  expect(WATCH_PL).toContain('setpgrp($relay, $relay); $SIG{TERM} = sub { exit 0 };')
+  expect(WATCH_PL).toContain('END { kill "TERM", -$relay if $relay; }')
 })
 
 // ---- The quiet timer ----------------------------------------------------------------

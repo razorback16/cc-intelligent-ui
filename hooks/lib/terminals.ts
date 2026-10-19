@@ -114,6 +114,7 @@ export function ghosttyThemePaths(name: string, o: { xdgConfig?: string; home: s
     ...(o.resources ? [`${o.resources}/themes/${name}`] : []),
     `/Applications/Ghostty.app/Contents/Resources/ghostty/themes/${name}`,
     `/usr/share/ghostty/themes/${name}`,
+    `/usr/local/share/ghostty/themes/${name}`,
   ]
 }
 
@@ -133,6 +134,13 @@ export function ghosttyBackgroundOf(config: string, appearance: IuiTheme | null,
   if (!appearance) return null
   return themeBg[appearance] || null
 }
+
+// The font Ghostty carries and draws when no font-family is set.
+export const GHOSTTY_DEFAULT_FONT = 'JetBrains Mono'
+
+// fontconfig's `%{family}` (fc-match -f): the first of its names, which
+// can be a list (`Noto Sans Mono,Noto Sans Mono Regular`).
+export const familyOfFc = (stdout: string) => (stdout.split(',')[0] ?? '').trim()
 
 // The first `font-family = X` of `ghostty +show-config`.
 export function ghosttyFontOf(config: string): string | null {

@@ -61,8 +61,16 @@ export const GRID_VERSION = '2'
 export const COMPILE_TIMEOUT_MS = 20000
 export const ALT_CHARS = 200
 // Where Typst is when the login shell's PATH does not find it. `~` is $HOME.
-export const TYPST_FALLBACKS = ['/opt/homebrew/bin/typst', '/usr/local/bin/typst', '/usr/bin/typst', '/snap/bin/typst', '~/.cargo/bin/typst', '~/.local/bin/typst']
+export const TYPST_FALLBACKS = [
+  '/opt/homebrew/bin/typst', '/usr/local/bin/typst', '/usr/bin/typst', '/snap/bin/typst', '~/.cargo/bin/typst', '~/.local/bin/typst',
+  '/home/linuxbrew/.linuxbrew/bin/typst', '~/.linuxbrew/bin/typst',
+]
 export const NO_TYPST = 'Intelligent UI: install Typst (brew install typst) to see rendered answers'
+// How to install Typst: brew on macOS; on Linux, cargo or a release file
+// (docs/install.md has more ways).
+export const typstHintOf = (isMac: boolean) =>
+  isMac ? 'brew install typst' : 'cargo install --locked typst-cli, or a release from github.com/typst/typst/releases'
+export const noTypstOf = (isMac: boolean) => (isMac ? NO_TYPST : `Intelligent UI: install Typst (${typstHintOf(false)}) to see rendered answers`)
 // Typst downloads a package it doesn't find under --package-path; a proxy
 // nobody listens on makes that fail at once, so a live block never fetches.
 export const NO_NETWORK = 'http://127.0.0.1:9'

@@ -67,8 +67,14 @@ async function shellRc($: EngineInterface): Promise<ShellRc | null> {
   })
 }
 
+// What /iui setup says where iTerm2 does not run (not macOS): it changes no file.
+export const SETUP_NOT_MAC = '/iui setup is for iTerm2, which runs on macOS only, so Intelligent UI changed no file. ' +
+  'On Linux, kitty and Ghostty show pictures with no setup. ' +
+  'For Rio, set CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 before you start Claude Code. Run /iui details to see if this terminal shows pictures.'
+
 // Adds (or removes) the setup block. Returns what to tell the person.
 export async function runSetup($: EngineInterface, remove: boolean): Promise<string> {
+  if (S.hostOs && S.hostOs !== 'Darwin') return SETUP_NOT_MAC
   const rc = await shellRc($)
   const manual = `export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 (only in iTerm2, not in tmux or screen)`
   if (!rc) return `Intelligent UI does not know your shell, so it changed no file. Add this to your shell's start file: ${manual}`
