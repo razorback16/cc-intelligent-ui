@@ -273,6 +273,10 @@ test('with the row grid, no top margin and the bullet on the row of the first li
   for (const [md, rows] of Object.entries(drawn)) {
     rowsPt.forEach((rowPt, i) => expect([md, placeFirstLine(md, rowPt, grid)]).toEqual([md, { topPt: 0, bulletRow: rows[i] }]))
   }
+  // A "grid" table (claude-code): the half row above its box and its
+  // padding of whole rows and a half put its first line one row lower.
+  const boxed = { metrics: { ...DEFAULT_GRID, pad: { ...DEFAULT_GRID.pad, table: 7.8571 }, tableStyle: 'grid' as const }, code: 0.8785 }
+  rowsPt.forEach((rowPt, i) => expect(placeFirstLine('| a | b |\n|---|---|', rowPt, boxed)).toEqual({ topPt: 0, bulletRow: [1, 2, 2, 2, 3][i] }))
   // Grid off: the margin and row of before.
   for (const md of Object.keys(drawn)) expect(placeFirstLine(md, 11)).toEqual(alignFirstLine(firstLineOf(md), 11))
 })
@@ -302,17 +306,20 @@ test('a line box of n rows has its ink centre on row floor(n / 2), under the pad
 test('the grid numbers of the font measure are read, and a bad one is refused', () => {
   const measured = {
     body: 11.2836, heading: [31.8, 20.4, 14.2, 11.4, 9.9, 9.7], code: 1.0775, 'code-size': null,
-    pad: { quote: 6.05, code: 12.57, table: 3.93 },
+    pad: { quote: 6.05, code: 12.57, table: 3.93 }, 'table-style': 'rules',
   }
   expect(gridOf(measured)).toEqual({
-    body: 11.2836, heading: [31.8, 20.4, 14.2, 11.4, 9.9, 9.7], code: 1.0775, codeSize: null, pad: { quote: 6.05, code: 12.57, table: 3.93 },
+    body: 11.2836, heading: [31.8, 20.4, 14.2, 11.4, 9.9, 9.7], code: 1.0775, codeSize: null, pad: { quote: 6.05, code: 12.57, table: 3.93 }, tableStyle: 'rules',
   })
+  expect(gridOf({ ...measured, 'table-style': 'grid' })?.tableStyle).toBe('grid')
   expect(gridOf({ ...measured, 'code-size': 1 })?.codeSize).toBe(1)
   expect(gridOf(undefined)).toBe(null)
   expect(gridOf({ ...measured, heading: [1, 2] })).toBe(null)
   expect(gridOf({ ...measured, body: '11' })).toBe(null)
   expect(gridOf({ ...measured, pad: { quote: 1 } })).toBe(null)
   expect(gridOf({ ...measured, 'code-size': 'terminal' })).toBe(null)
+  expect(gridOf({ ...measured, 'table-style': 'box' })).toBe(null)
+  expect(gridOf({ ...measured, 'table-style': undefined })).toBe(null)
 })
 
 test('pages are padded to whole rows, so rows round; a page keeps the box it was compiled for', () => {

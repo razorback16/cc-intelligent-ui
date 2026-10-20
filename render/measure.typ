@@ -11,7 +11,8 @@
 // a line in pt (line-ink); `code` the code font's per pt of its size, and
 // `code-size` that size in body text (none: the `code` input); `pad` the
 // padding in pt over the first line of a quote, a code block and a table
-// cell (md.typ rounds it to whole rows).
+// cell (md.typ rounds it to whole rows); `table-style` the theme's
+// table.style ("grid" or "rules").
 //
 // `fonts`: the theme's `body` and `code` font lists (merged over vscode),
 // and `plain`: its list markers and numbering are ASCII only (fonts.ts uses
@@ -57,6 +58,7 @@
       code: query(<mc>).first().value,
       code-size: if type(T.code-block.size) in (int, float) { float(T.code-block.size) } else { none },
       pad: (quote: T.quote.pad-y-em * 11, code: T.code-block.pad-px * px, table: T.table.pad-y-px * px),
+      table-style: if T.table.style == "grid" { "grid" } else { "rules" },
     ),
     fonts: (body: sans, code: mono-base, plain: (T.list.markers + (T.list.numbering,)).all(is-ascii)),
   )) <m>]

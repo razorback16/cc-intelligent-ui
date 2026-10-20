@@ -102,6 +102,7 @@
     "pad-y-em": 0.55
   },
   "table": {
+    "style": "rules",
     "pad-x-px": 10,
     "pad-y-px": 5,
     "border-px": 1,

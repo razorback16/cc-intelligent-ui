@@ -58,6 +58,7 @@ Example: pink inline code, rounder boxes.
 | `code-block.size`, `line-height` | `1.0`, `1.357` | |
 | `code-block.pad-px`, `radius-px`, `border-px` | `16`, `3`, `1` | |
 | `quote.bar-px`, `radius-px`, `pad-left-px`, `pad-right-px`, `pad-y-em` | `5`, `2`, `10`, `16`, `0.55` | |
+| `table.style` | `"rules"` | `"rules"`: VS Code's preview (a rule under the header and between the rows). `"grid"`: Claude Code's own tables (a box and a rule between all rows and columns, all in `th-border`). Another value draws as `"rules"`. Each column, its header too, has the alignment of the Markdown (`:---` left, `:---:` centre, `---:` right, `---` left). |
 | `table.pad-x-px`, `pad-y-px`, `border-px`, `header-weight` | `10`, `5`, `1`, `700` | |
 | `rule.border-px`, `gap-em` | `1`, `1.5` | Horizontal rule |
 
@@ -65,6 +66,7 @@ With `/iui grid on`, the lines of text lie on the terminal's rows. Then some key
 
 - `text.leading-em`, `text.paragraph-em`, `heading.leading-em`, `heading.rule-pad-em`, `list.item-spacing-em` and `code-block.line-height` are not used. Each line is one row (a large heading is two or more rows; a line of an even number of rows is half a row down, with half a row more above and below its block). The gap between paragraphs and blocks is one row. The items of a tight list have no gap. The items of a loose list (a list with a blank line between its items or in an item) have a gap of one row.
 - `heading.above-em` and `below-em`, `rule.gap-em`, `code-block.pad-px`, `quote.pad-y-em` and `table.pad-y-px` are rounded to the nearest whole number of rows. Gaps above and below headings and rules are one row or more.
+- With `table.style` `"grid"`, `table.pad-y-px` is rounded to the nearest whole number of rows and a half (half a row or more), and the table has half a row more above and below its box. Each rule is then in the middle of a row.
 
 ## Licence
 

@@ -64,5 +64,9 @@
   "quote": {
     "bar-px": 3,
     "radius-px": 0
+  },
+  "table": {
+    "style": "grid",
+    "pad-y-px": 10
   }
 }

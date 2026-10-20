@@ -373,7 +373,7 @@ test('with the grid on, the bullet row comes from the grid numbers that the font
   // Body text that needs 2 rows (a large size): its line is half a row down, its text in row 1.
   const measured = (body: number) => JSON.stringify({
     term: null, menlo: { adv: 0.602, xh: 0.547, avg: 0.602 }, body: { adv: 0.63, xh: 0.526, avg: 0.483 },
-    grid: { body, heading: [31.8, 20.4, 14.2, 11.4, 9.9, 9.7], code: 1.0775, 'code-size': 1, pad: { quote: 6.05, code: 12.57, table: 3.93 } },
+    grid: { body, heading: [31.8, 20.4, 14.2, 11.4, 9.9, 9.7], code: 1.0775, 'code-size': 1, pad: { quote: 6.05, code: 12.57, table: 3.93 }, 'table-style': 'rules' },
   })
   const { clock, compiles } = world(on, { TERM: 'xterm-kitty' }, HEAD, { grid: true }, undefined, { metrics: () => measured(20) })
   await $.command.run({ command: 'iui', args: '' } as any)
@@ -381,6 +381,25 @@ test('with the grid on, the bullet row comes from the grid numbers that the font
   await clock.settle()
   await ui.redraw(props('Some text.'))
   expect(compiles[0]).toMatchObject({ grid: '1', top: '0' })
+  expect(bulletRowOf(await ui.drawn())).toBe(1)
+})
+
+test('with the grid on, a page that starts with a "grid" table has its bullet one row lower, on its first line', async ($, on) => {
+  // A measure of table.style "grid" with padding 5 px, at rows of 11.63 pt:
+  // the box's half row and the cell's half row put the first line in row 1
+  // ("rules": row 0).
+  const measured = (style: string, table: number) => JSON.stringify({
+    term: null, menlo: { adv: 0.602, xh: 0.547, avg: 0.602 }, body: { adv: 0.63, xh: 0.526, avg: 0.483 },
+    grid: { body: 11.2836, heading: [31.8, 20.4, 14.2, 11.4, 9.9, 9.7], code: 1.0775, 'code-size': 1, pad: { quote: 6.05, code: 12.57, table }, 'table-style': style },
+  })
+  const table = '| a | b |\n|---|---|\n| 1 | 2 |'
+  const { clock, compiles } = world(on, { TERM: 'xterm-kitty' }, HEAD, { grid: true }, undefined, { metrics: () => measured('grid', 3.93) })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await $.ui.mount(message('g-5', table))
+  await clock.settle()
+  await ui.redraw(props(table))
+  expect(compiles[0]).toMatchObject({ grid: '1', top: '0' })
+  expect(compiles[0]!.row).toBe('11.6331')
   expect(bulletRowOf(await ui.drawn())).toBe(1)
 })
 

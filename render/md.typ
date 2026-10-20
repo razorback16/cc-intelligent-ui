@@ -426,32 +426,34 @@
 }
 
 // ---------- tables ----------
+// table.style: "rules" (VS Code's preview: a rule under the header and
+// between the rows) or "grid" (Claude Code's own tables). Another value
+// draws as "rules". Each column, its header too, has the alignment of the
+// Markdown's delimiter row.
 // The grid: each table row is whole rows (padding of whole rows: 5px is
 // none), so the rules lie on row boundaries.
-// Claude Code's own table look: a full grid of thin rules (border-px,
-// th-border), the header centred (a column's own alignment wins) and half
-// a row more padding above and below the text of a cell.
+#let table-pad = E.table.pad-y-px * px
+#let rules-inset = (x: E.table.pad-x-px * px, y: if on-grid { rows-near(table-pad) } else { table-pad })
+#let rules-stroke = (x, y) => if y == 1 { (top: E.table.border-px * px + C.th-border) } else if y > 1 { (top: E.table.border-px * px + C.border) }
+// "grid": a full grid of thin rules (border-px, th-border). On the row grid
+// the padding is whole rows and a half, so each rule is in the middle of a
+// row.
 #let table-line = E.table.border-px * px + C.th-border
-#let table-rules = (x, y) => (left: if x > 0 { table-line }, top: if y > 0 { table-line })
-#set table(
-  inset: (x: E.table.pad-x-px * px, y: if on-grid { rows-near(E.table.pad-y-px * px) + row / 2 } else { 2 * E.table.pad-y-px * px }),
-  stroke: table-rules,
-)
+#let grid-stroke = (x, y) => (left: if x > 0 { table-line }, top: if y > 0 { table-line })
+#let grid-inset = (x: E.table.pad-x-px * px, y: if on-grid { rows-near(calc.max(0pt, table-pad - row / 2)) + row / 2 } else { table-pad })
+#let table-grid = E.table.style == "grid"
+#set table(inset: if table-grid { grid-inset } else { rules-inset }, stroke: if table-grid { grid-stroke } else { rules-stroke })
 // The outer border is the block's, inside the table's edges (a negative
 // outset changes no layout), so a table at a page's edge (no left margin)
 // keeps all of it. The clip trims the rule ends that Typst draws past the
-// edges. On the grid, half a row around the box keeps the text on its rows
-// and puts each rule in the middle of a row.
-#show table: it => if it.stroke == table-rules {
-  show table.cell.where(y: 0): set align(center)
+// edges. On the row grid, half a row around the box keeps the text on its
+// rows and puts each rule in the middle of a row.
+#show table: it => if it.stroke == grid-stroke {
   let framed = block(stroke: table-line, outset: -table-line.thickness / 2, clip: true, it)
   if on-grid { block(inset: (y: row / 2), framed) } else { framed }
 } else { it }
-// Live ```typst drawings (the only scale here) keep the earlier rules.
-#show scale: set table(
-  inset: (x: E.table.pad-x-px * px, y: if on-grid { rows-near(E.table.pad-y-px * px) } else { E.table.pad-y-px * px }),
-  stroke: (x, y) => if y == 1 { (top: E.table.border-px * px + C.th-border) } else if y > 1 { (top: E.table.border-px * px + C.border) },
-)
+// Live ```typst drawings (the only scale here) keep the "rules" look.
+#show scale: set table(inset: rules-inset, stroke: rules-stroke)
 #show table.cell.where(y: 0): set text(weight: E.table.header-weight)
 #show table: set par(leading: 0.38em)
 
