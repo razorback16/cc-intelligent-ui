@@ -539,9 +539,22 @@ test('Claude is told about typst blocks', () => {
   expect(TYPST_PROMPT.includes('```typst')).toBe(true)
   expect(TYPST_PROMPT.includes('#import "@preview/cetz:0.5.2"')).toBe(true)
   expect(TYPST_PROMPT.includes('#import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge')).toBe(true)
-  expect(TYPST_PROMPT.includes('$math$ (LaTeX)')).toBe(true)
+  expect(TYPST_PROMPT.includes('LaTeX math (`$…$` inline, `$$…$$` for display)')).toBe(true)
+  expect(TYPST_PROMPT.includes('Make your answers visual where a picture explains more than words')).toBe(true)
+  expect(TYPST_PROMPT.includes('Each typst block compiles alone')).toBe(true)
   expect(TYPST_PROMPT.includes('theme.code-bg')).toBe(true)
+  expect(TYPST_PROMPT.includes('break a long label with `\\`')).toBe(true)
   expect(TYPST_PROMPT.endsWith('keep replies readable as plain text too.')).toBe(true)
+})
+
+test('each typst example in the prompt imports what it uses', () => {
+  const blocks = [...TYPST_PROMPT.matchAll(/```typst\n([\s\S]*?)```/g)].map(m => m[1]!)
+  expect(blocks.length).toBe(3)
+  for (const b of blocks) {
+    if (/\b(diagram|node|edge)\(/.test(b)) expect(b.includes('#import "@preview/fletcher:0.5.8"')).toBe(true)
+    if (b.includes('cetz.')) expect(b.includes('#import "@preview/cetz:0.5.2"')).toBe(true)
+    if (b.includes('plot.')) expect(b.includes('#import "@preview/cetz-plot:0.1.4"')).toBe(true)
+  }
 })
 
 

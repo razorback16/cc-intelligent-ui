@@ -142,14 +142,61 @@ export const CONVERT_MAX_SIDE = 4096
 
 // What Claude is told while the mod draws its answers (a system prompt
 // section, added last).
-export const TYPST_PROMPT = `Your replies in this terminal are drawn as rendered Markdown pictures (VS Code preview look), so use Markdown freely: headings, tables, task lists, code blocks, $math$ (LaTeX), images by absolute path.
-For anything Markdown can't show well — diagrams, flow charts, plots, coloured tables, complex layouts or math — write a fenced \`\`\`typst block: it is rendered live with Typst 0.15 (full Typst markup; begin code lines with #).
-Packages available offline:
+export const TYPST_PROMPT = `Your replies in this terminal are drawn as rendered Markdown pictures (VS Code preview look), so use Markdown freely: headings, tables, task lists, code blocks, images by absolute path, and LaTeX math (\`$…$\` inline, \`$$…$$\` for display).
+Make your answers visual where a picture explains more than words: draw a process, a structure, a timeline or data in a fenced \`\`\`typst block. It is rendered live with Typst 0.15 (full Typst markup; begin code lines with #). For what Markdown shows well, such as tables and lists, use Markdown.
+Each typst block compiles alone, with only \`theme\` in scope, so start it with the #import of each package it uses. These are available offline:
 #import "@preview/cetz:0.5.2"
 #import "@preview/cetz-plot:0.1.4": plot, chart
 #import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge
-A \`theme\` dictionary is in scope: theme.fg, theme.muted, theme.link, theme.border, theme.accent, theme.bg, theme.code-bg, theme.red/green/blue/yellow/orange/purple, theme.palette (6 colours), theme.width (content width), theme.height (the height a drawing should fit in), theme.dark (bool).
-Default strokes in cetz, fletcher and cetz-plot are black and invisible on a dark theme, so always pass theme colours: cetz \`set-style(stroke: theme.fg)\`; fletcher \`diagram(node-stroke: theme.fg, edge-stroke: theme.fg, ...)\`; cetz-plot \`set-style(axes: (stroke: theme.fg, tick: (stroke: theme.fg)), legend: (fill: theme.bg, stroke: theme.border))\`; fills like \`theme.blue.transparentize(70%)\`; size drawings to fit theme.width × theme.height; Intelligent UI scales them when the terminal changes.
-Inside a typst block, #page, #pagebreak and #set page are errors. If a block fails to compile, it is shown as code instead.
+\`theme\` has: theme.fg, theme.muted, theme.link, theme.border, theme.accent, theme.bg, theme.code-bg, theme.red/green/blue/yellow/orange/purple, theme.palette (6 colours), theme.width (content width, a length), theme.height (the height a drawing should fit in, a length), theme.text-size, theme.sans and theme.mono (font lists), theme.dark (bool).
+Rules (the examples below follow them):
+- Size: fit theme.width × theme.height. A drawing taller than theme.height is not made smaller. The terminal is wide and short, so lay flows out left to right.
+- Colours: text already has theme.fg and the body font. Default strokes are black and invisible on a dark theme, so always pass theme colours as the examples do. Fill shapes with a theme colour \`.transparentize(80%)\`, colour data with theme.palette in order, and use theme.muted for secondary text.
+- fletcher makes no space for edge labels and does not route edges around nodes. Keep labels short, make each gap wider than its label, break a long label with \`\\\`, and go around nodes with corner points, not \`bend\`.
+- #page, #pagebreak and #set page are errors. A block that fails to compile shows as code.
+A flow chart (fletcher; \`node-shape: rect\` keeps small nodes from becoming circles, \`stroke: none\` is a text-only node):
+\`\`\`typst
+#import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge
+#diagram(
+  node-stroke: theme.fg, edge-stroke: theme.fg, node-shape: rect,
+  crossing-fill: theme.bg, spacing: (3em, 2em),
+  node((0, 0), [Push], fill: theme.blue.transparentize(80%), name: <p>),
+  node((1, 0), [Build], fill: theme.purple.transparentize(80%), name: <b>),
+  node((2, 0), [Test], fill: theme.orange.transparentize(80%), name: <t>),
+  node((3, 0), [Deploy], fill: theme.green.transparentize(80%), name: <d>),
+  node((4, 0), [live], stroke: none, name: <l>),
+  edge(<p>, <b>, "->"),
+  edge(<b>, <t>, "->"),
+  edge(<t>, <d>, "->", [pass]),
+  edge(<d>, <l>, "-->"),
+  edge(<t>, (2, 1), (1, 1), <b>, "->", [fail], label-side: right),
+)
+\`\`\`
+A timeline (cetz; lay the drawing out in a W × H unit box, here 10 × 2):
+\`\`\`typst
+#import "@preview/cetz:0.5.2"
+#cetz.canvas(length: calc.min(theme.width / 10, theme.height / 2), {
+  import cetz.draw: *
+  set-style(stroke: theme.fg)
+  line((0, 0), (10, 0), mark: (end: ">"))
+  for (x, name, date, c) in ((1, [v1.0], [Jan], theme.blue), (4, [v1.1], [Apr], theme.green), (8, [v2.0], [Oct], theme.orange)) {
+    circle((x, 0), radius: 0.15, fill: c, stroke: none)
+    content((x, 0.5), name)
+    content((x, -0.5), text(fill: theme.muted, date))
+  }
+})
+\`\`\`
+A plot (cetz-plot):
+\`\`\`typst
+#import "@preview/cetz:0.5.2"
+#import "@preview/cetz-plot:0.1.4": plot
+#cetz.canvas(length: calc.min(theme.width / 14, theme.height / 6), {
+  cetz.draw.set-style(axes: (stroke: theme.fg, tick: (stroke: theme.fg)), legend: (fill: theme.bg, stroke: theme.border))
+  plot.plot(size: (12, 4), x-label: [requests], y-label: [ms], legend: "inner-north-west", {
+    plot.add(((1, 20), (2, 45), (4, 90), (8, 190)), label: [no cache], style: (stroke: theme.palette.at(0)))
+    plot.add(((1, 20), (2, 24), (4, 30), (8, 38)), label: [cache], style: (stroke: theme.palette.at(1)))
+  })
+})
+\`\`\`
 A plan (the plan file you write in plan mode) is drawn the same way when ExitPlanMode asks for approval, so the same Markdown, $math$ and typst blocks work there.
 The stored text stays Markdown, so keep replies readable as plain text too.`
