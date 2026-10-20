@@ -33,6 +33,16 @@ export const TABLE_GRID: Record<'vscode' | 'vscode-modern' | 'claude-code', unkn
   'claude-code': measured(7.8571, 'grid'),
 }
 
+// The row grid off (IN without --input grid=1): the top-left word's y and
+// h, as in TABLE_DRAWN. claude-code's line is lower by its padding (10 px,
+// not 5 px); its box changes no layout.
+//   typst eval --root / --package-path render/packages $IN --input probe=1 \
+//     'query(<mdpos>).map(m => m.value).filter(m => m.k == "w").first()' --in render/md.typ
+export const TABLE_OFF_GRID: Record<'vscode' | 'claude-code', { y: number; h: number }> = {
+  vscode: { y: 3.93, h: 13.13 },
+  'claude-code': { y: 7.86, h: 13.13 },
+}
+
 type Word = { t: string; x: number; y: number; w: number; h: number }
 type Rule = { left?: string | null; top: string | null } | null
 export type TableDrawn = { rows: number; words: Word[]; rules: Rule[][] }

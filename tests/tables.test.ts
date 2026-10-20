@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { placeFirstLine } from '../hooks/lib/draw'
 import { DEFAULT_GRID, gridFirstRow, gridOf } from '../hooks/lib/grid'
-import { TABLE_DRAWN, TABLE_GRID, TABLE_MD, TABLE_ROW, type TableDrawn } from './table-fixture'
+import { TABLE_DRAWN, TABLE_GRID, TABLE_MD, TABLE_OFF_GRID, TABLE_ROW, type TableDrawn } from './table-fixture'
 
 // The row of a word's ink centre (its line box is centred on its ink).
 const rowOf = (w: { y: number; h: number }) => Math.floor((w.y + w.h / 2) / TABLE_ROW)
@@ -70,4 +70,22 @@ test('with the row grid, the bullet of a page that starts with a table is on its
   expect(gridFirstRow('table', 0, 10, { ...GRID_GRID, body: 9, pad: { ...GRID_GRID.pad, table: 0 } }, 1)).toBe(1)
   expect(gridFirstRow('table', 0, 10, { ...GRID_GRID, body: 9, pad: { ...GRID_GRID.pad, table: 9 } }, 1)).toBe(1)
   expect(gridFirstRow('table', 0, 10, { ...GRID_GRID, body: 9, pad: { ...GRID_GRID.pad, table: 11 } }, 1)).toBe(2)
+})
+
+test('with the row grid off, the first line of a page that starts with a table is centred on the bullet row, in both styles', () => {
+  const rowsPt = [16, 13.091, 11.6331, 8.7273]
+  const rules = rowsPt.map(rowPt => placeFirstLine(TABLE_MD, rowPt, undefined, RULES_GRID))
+  const boxed = rowsPt.map(rowPt => placeFirstLine(TABLE_MD, rowPt, undefined, GRID_GRID))
+  // vscode: the margin and row of before.
+  expect(rules).toEqual(rowsPt.map(rowPt => placeFirstLine(TABLE_MD, rowPt)))
+  expect(rules).toEqual([{ topPt: -3.27, bulletRow: 0 }, { topPt: -4.72, bulletRow: 0 }, { topPt: -5.45, bulletRow: 0 }, { topPt: 1.82, bulletRow: 1 }])
+  // claude-code: a margin over 0 keeps the box's top rule in the picture.
+  expect(boxed).toEqual([{ topPt: 8.8, bulletRow: 1 }, { topPt: 4.44, bulletRow: 1 }, { topPt: 2.25, bulletRow: 1 }, { topPt: 6.62, bulletRow: 2 }])
+  // Its first line is as far from its bullet row's centre as vscode's (on it).
+  const fromCentre = (w: { y: number; h: number }, p: { topPt: number; bulletRow: number }, rowPt: number) =>
+    w.y + w.h / 2 + p.topPt - (p.bulletRow + 0.5) * rowPt
+  rowsPt.forEach((rowPt, i) => {
+    const off = fromCentre(TABLE_OFF_GRID['claude-code'], boxed[i]!, rowPt) - fromCentre(TABLE_OFF_GRID.vscode, rules[i]!, rowPt)
+    expect(Math.abs(off)).toBeLessThan(0.02)
+  })
 })

@@ -7,7 +7,7 @@ import type { EngineInterface, RenderComponent, RenderSurface, RenderViewport, R
 import type { IuiTheme } from '../../types'
 import { BODY_PT, bulletOf, GRID_VERSION, GUTTER, LINK_FILES_KEPT, MARGIN_TOP, TEMPLATE_VERSION } from './settings'
 import { INLINE_KEPT, inlined, keep, linkFiles, S, type Cell, type Look, type Metrics, type Result, type Room } from './state'
-import { gridFirstRow, type GridMetrics } from './grid'
+import { DEFAULT_GRID, gridFirstRow, type GridMetrics } from './grid'
 import { FENCE, imagePathOf } from './markdown'
 import { linksOf, type LinkItem } from './links'
 import { fitBox, fitsInline, roomColumns } from './terminal'
@@ -89,8 +89,8 @@ export function renderKey(o: {
 }
 
 // Where the first line of a page's text lies with no top margin, in the
-// template's pt (measured from its PNGs at 11 pt body text): the centre of
-// its ink, and the top of its ink. By what the answer starts with.
+// template's pt (measured from its PNGs at 11 pt body text, vscode): the
+// centre of its ink, and the top of its ink. By what the answer starts with.
 export type FirstLine = 'para' | 'h1' | 'h2' | 'h3' | 'h4' | 'quote' | 'code' | 'table'
 const FIRST_LINE: Record<FirstLine, { centre: number; inkTop: number }> = {
   para: { centre: 7.45, inkTop: 2.55 },
@@ -115,22 +115,36 @@ export function firstLineOf(md: string): FirstLine {
   return 'para'
 }
 
+// FIRST_LINE in a theme (its grid numbers): a quote's, code block's or
+// table's first line moves by the theme's padding less vscode's. A "grid"
+// table's ink starts at its box's top rule, so the box is not cut.
+function firstLineIn(kind: FirstLine, g: GridMetrics): { centre: number; inkTop: number } {
+  const at = FIRST_LINE[kind]
+  if (kind !== 'quote' && kind !== 'code' && kind !== 'table') return at
+  const more = g.pad[kind] - DEFAULT_GRID.pad[kind]
+  return { centre: at.centre + more, inkTop: kind === 'table' && g.tableStyle === 'grid' ? 0 : at.inkTop + more }
+}
+
 // The first page's top margin (pt, may be negative) that puts the centre of
 // the first line of text on the centre of a terminal row, and which row that
 // is: row 0 when the line fits there, else the first row its ink can reach
 // without being cut at the picture's top. The bullet is drawn on that row.
-export function alignFirstLine(kind: FirstLine, rowPt: number): { topPt: number; bulletRow: number } {
-  const { centre, inkTop } = FIRST_LINE[kind]
+// `g`: the theme's grid numbers (its padding).
+export function alignFirstLine(kind: FirstLine, rowPt: number, g: GridMetrics = DEFAULT_GRID): { topPt: number; bulletRow: number } {
+  const { centre, inkTop } = firstLineIn(kind, g)
   const bulletRow = Math.max(0, Math.ceil((centre - inkTop + 0.5) / rowPt - 0.5 - 1e-9))
   return { topPt: Math.round(((bulletRow + 0.5) * rowPt - centre) * 100) / 100, bulletRow }
 }
 
 // The first page's top margin and bullet row. With the row grid (the
 // fonts' grid numbers and the job's code size): no margin, and the row of
-// the first line's ink centre (gridFirstRow).
-export function placeFirstLine(md: string, rowPt: number, grid?: { metrics: GridMetrics; code: number }): { topPt: number; bulletRow: number } {
+// the first line's ink centre (gridFirstRow). Off the grid, `metrics` gives
+// the theme's padding.
+export function placeFirstLine(
+  md: string, rowPt: number, grid?: { metrics: GridMetrics; code: number }, metrics: GridMetrics = grid?.metrics ?? DEFAULT_GRID,
+): { topPt: number; bulletRow: number } {
   const kind = firstLineOf(md)
-  if (!grid) return alignFirstLine(kind, rowPt)
+  if (!grid) return alignFirstLine(kind, rowPt, metrics)
   const level = HEADING.exec(firstTextLine(md))?.[1]!.length ?? 0
   return { topPt: 0, bulletRow: gridFirstRow(kind, level, rowPt, grid.metrics, grid.code) }
 }

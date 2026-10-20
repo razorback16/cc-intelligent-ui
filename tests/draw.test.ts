@@ -4,6 +4,7 @@ import {
   alignFirstLine, scaledBulletRow, base64Bytes, canDrawIn, COMMIT_MIN_MS, DEFAULT_CELL, fileHref, fitsInline, INLINE_MAX_BYTES, INLINE_MAX_SIDE, inlineBudget, renderKey,
   RESIZE_QUIET_MS, resolveLinks, SEGMENT_ROWS, WATCH_PL,
 } from '../hooks/register'
+import { TABLE_GRID } from './table-fixture'
 
 // ---- Where pictures draw ----------------------------------------------------
 
@@ -415,6 +416,25 @@ test('a heading with the grid off keeps its bullet row and top margin', async ($
   const { bulletRow } = alignFirstLine('h1', Number(compiles[0]!.row))
   expect(bulletRow).toBe(1)
   expect(bulletRowOf(await ui.drawn())).toBe(bulletRow)
+})
+
+test('with the grid off, a page that starts with a "grid" table (claude-code) has the top margin of its padding', async ($, on) => {
+  // claude-code's measure (10 px, its box), at rows of 11.63 pt: its line
+  // is lower than vscode's (margin -5.45, row 0), so a margin that puts it
+  // on row 1 and keeps the box's top rule.
+  const measured = JSON.stringify({
+    term: null, menlo: { adv: 0.602, xh: 0.547, avg: 0.602 }, body: { adv: 0.63, xh: 0.526, avg: 0.483 }, grid: TABLE_GRID['claude-code'],
+  })
+  const table = '| a | b |\n|---|---|\n| 1 | 2 |'
+  const { clock, compiles } = world(on, { TERM: 'xterm-kitty' }, HEAD, { grid: false }, undefined, { metrics: () => measured })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await $.ui.mount(message('g-6', table))
+  await clock.settle()
+  await ui.redraw(props(table))
+  expect(compiles[0]!.grid).toBe(undefined)
+  expect(compiles[0]!.row).toBe('11.6331')
+  expect(Number(compiles[0]!.top)).toBe(2.25)
+  expect(bulletRowOf(await ui.drawn())).toBe(1)
 })
 
 test('a bad kept grid is on (the default); a bad value is refused and not kept', async ($, on) => {

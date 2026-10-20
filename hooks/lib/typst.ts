@@ -303,8 +303,9 @@ export async function runKillable(
 function firstLinePlace(job: Job, segments: readonly string[]) {
   const fit = fontFit(job.env.metrics, job.size)
   const { rowPt } = sizing(job.columns, job.cell, fit.columnPt)
-  const grid = job.grid ? { metrics: job.env.metrics.grid ?? DEFAULT_GRID, code: fit.code } : undefined
-  return placeFirstLine(segments[0] ?? '', rowPt, grid)
+  const metrics = job.env.metrics.grid ?? DEFAULT_GRID
+  const grid = job.grid ? { metrics, code: fit.code } : undefined
+  return placeFirstLine(segments[0] ?? '', rowPt, grid, metrics)
 }
 
 // The template's inputs for a job and its ppi (the PNG compile and the

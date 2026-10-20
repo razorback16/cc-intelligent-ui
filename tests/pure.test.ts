@@ -250,6 +250,14 @@ test('the first line of text is centred on the bullet row', () => {
       expect(inkTop[kind] + topPt).toBeGreaterThan(0)
     }
   }
+  // A theme's padding over a quote or code block moves its first line by what it pads more.
+  for (const kind of ['quote', 'code'] as const) {
+    const padded = { ...DEFAULT_GRID, pad: { ...DEFAULT_GRID.pad, [kind]: DEFAULT_GRID.pad[kind] + 2 } }
+    const { topPt, bulletRow } = alignFirstLine(kind, 11)
+    const moved = alignFirstLine(kind, 11, padded)
+    expect(moved.bulletRow).toBe(bulletRow)
+    near(moved.topPt, topPt - 2, 0.001)
+  }
 })
 
 test('with the row grid, no top margin and the bullet on the row of the first line\'s ink centre', () => {
