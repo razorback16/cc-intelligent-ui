@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { designKey, designPath, designText, hashOf, loadDesign, parseDesign, recordDesign } from '../hooks/register'
+import { DESIGNS_IN_MEMORY, designInMemory, forgetDesigns, noteDesign } from '../hooks/lib/designs'
 import { forgetTouches, TOUCH_BATCH } from '../hooks/lib/typst'
 import { TOUCH_FLUSH_MS } from '../hooks/lib/settings'
 
@@ -35,8 +36,9 @@ test('a bad or empty design file is missing', () => {
 
 // A fake engine with an in-memory fs: the files, and what the host did.
 // Its clock runs a timer only at `advance` (by the time asked of it).
-function disk(files: Record<string, string>) {
+function disk(files: Record<string, string>, failWrite = false) {
   forgetTouches()
+  forgetDesigns()
   const seen = { reads: [] as string[], writes: [] as string[], touches: [] as string[], runs: [] as string[][] }
   let timers: Array<{ ms: number; fn: () => void; isOff: boolean }> = []
   const advance = (ms: number) => {
@@ -60,6 +62,7 @@ function disk(files: Record<string, string>) {
       },
       exists: async (path: string) => path in files,
       write: async (path: string, text: string) => {
+        if (failWrite) throw new Error('EACCES')
         seen.writes.push(path)
         files[path] = text
       },
@@ -135,4 +138,60 @@ test('record then load gives the value without a read', async () => {
   await recordDesign($, '/d', 'ff00000000000006', d)
   expect(await loadDesign($, '/d', 'ff00000000000006')).toEqual(d)
   expect(seen.reads).toEqual([])
+})
+
+test('a design noted at queue time is in memory, is not replaced by a later note, and is saved by record', async () => {
+  const { $, seen } = disk({})
+  const first = { widthPt: 400, heightPt: 250 }
+  expect(designInMemory('gg00000000000007')).toBe(undefined)
+  noteDesign('gg00000000000007', first)
+  noteDesign('gg00000000000007', { widthPt: 1, heightPt: 1 })
+  expect(designInMemory('gg00000000000007')).toEqual(first)
+  expect(await loadDesign($, '/d', 'gg00000000000007')).toEqual(first)
+  expect(seen.reads).toEqual([])
+  await recordDesign($, '/d', 'gg00000000000007', first)
+  expect(seen.writes).toEqual(['/d/gg/gg00000000000007'])
+  await recordDesign($, '/d', 'gg00000000000007', first)
+  expect(seen.writes.length).toBe(1)
+})
+
+test('a missing design is null in memory, not undefined', async () => {
+  const { $ } = disk({})
+  await loadDesign($, '/d', 'hh00000000000008')
+  expect(designInMemory('hh00000000000008')).toBe(null)
+})
+
+test('record keeps the design of a file another session wrote first, and writes nothing', async () => {
+  const path = designPath('/d', 'ii00000000000009')
+  const { $, seen } = disk({ [path]: '500 300' })
+  noteDesign('ii00000000000009', { widthPt: 1, heightPt: 1 })
+  await recordDesign($, '/d', 'ii00000000000009', { widthPt: 1, heightPt: 1 })
+  expect(seen.writes).toEqual([])
+  expect(designInMemory('ii00000000000009')).toEqual({ widthPt: 500, heightPt: 300 })
+  // Saved now, so a second record returns at once, with no read.
+  const reads = seen.reads.length
+  await recordDesign($, '/d', 'ii00000000000009', { widthPt: 2, heightPt: 2 })
+  expect(seen.reads.length).toBe(reads)
+})
+
+test('record writes over a file that is not a design', async () => {
+  const path = designPath('/d', 'jj0000000000000a')
+  const { $, seen } = disk({ [path]: 'junk' })
+  await recordDesign($, '/d', 'jj0000000000000a', { widthPt: 400, heightPt: 250 })
+  expect(seen.writes).toEqual([path])
+  expect(await loadDesign($, '/d', 'jj0000000000000a')).toEqual({ widthPt: 400, heightPt: 250 })
+})
+
+test('record never throws when the write fails; the design stays only noted', async () => {
+  const { $ } = disk({}, true)
+  noteDesign('kk0000000000000b', { widthPt: 400, heightPt: 250 })
+  await recordDesign($, '/d', 'kk0000000000000b', { widthPt: 400, heightPt: 250 })
+  expect(designInMemory('kk0000000000000b')).toEqual({ widthPt: 400, heightPt: 250 })
+})
+
+test('the designs in memory are bounded: the oldest go', () => {
+  disk({})
+  for (let i = 0; i <= DESIGNS_IN_MEMORY; i++) noteDesign(`m${i}`, { widthPt: 1, heightPt: 1 })
+  expect(designInMemory('m0')).toBe(undefined)
+  expect(designInMemory(`m${DESIGNS_IN_MEMORY}`)).toEqual({ widthPt: 1, heightPt: 1 })
 })

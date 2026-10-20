@@ -252,3 +252,77 @@ test('a job that ends with no epoch open redraws; during a burst it redraws once
   releaseJobs($)
   expect(await redraws()).toBe(2)
 })
+
+test('a cancel that throws does not stop the new epoch: the others are cancelled, the queue emptied', async () => {
+  await fresh()
+  const cancelled: string[] = []
+  running.set('a', { job: job('a'), cancel: () => void cancelled.push('a'), signal: SIGNAL })
+  running.set('bad', { job: job('bad'), cancel: () => { throw new Error('gone') }, signal: SIGNAL })
+  running.set('c', { job: job('c'), cancel: () => void cancelled.push('c'), signal: SIGNAL })
+  queue.push(job('d'))
+  beginEpoch($, frame(80))
+  expect(cancelled).toEqual(['a', 'c'])
+  expect(queue.length).toBe(0)
+  expect(epochOpen()).toBe(true)
+})
+
+test('a commit shows the target with its height setting and epoch; before it the old ones stay', async () => {
+  await fresh()
+  S.height = 'half'
+  S.shownHeight = 'half'
+  const before = S.shownEpoch
+  S.height = 24
+  beginEpoch($, frame(80))
+  expect(S.shownHeight).toBe('half')
+  expect(S.shownEpoch).toBe(before)
+  await clock.advance(COMMIT_MIN_MS)
+  expect(S.shownHeight).toBe(24)
+  expect(S.shownEpoch).toBe(S.epoch)
+  expect(S.epoch).toBe(before + 1)
+})
+
+test('a new epoch forgets a job that ended during a burst: no redraw at the release but the commit\'s', async () => {
+  await fresh()
+  holdJobs()
+  jobDone($)
+  expect(S.missed).toBe(true)
+  beginEpoch($, frame(80))
+  expect(S.missed).toBe(false)
+  expect(await redraws()).toBe(1)
+  await clock.advance(COMMIT_MIN_MS)
+  expect(await redraws()).toBe(2)
+})
+
+test('a job that ends during a burst in an open epoch does not redraw at the release; the commit does', async () => {
+  await fresh()
+  beginEpoch($, frame(80))
+  holdJobs()
+  jobDone($)
+  expect(S.missed).toBe(true)
+  releaseJobs($)
+  expect(S.missed).toBe(false)
+  // The begin only: the epoch is not ready yet, and the job's end made no redraw.
+  expect(epochOpen()).toBe(true)
+  expect(await redraws()).toBe(1)
+  await clock.advance(COMMIT_MIN_MS)
+  expect(await redraws()).toBe(2)
+})
+
+test('a job that ends in an open epoch before it is ready only waits: no redraw, no early commit', async () => {
+  await fresh()
+  beginEpoch($, frame(80))
+  jobDone($)
+  expect(epochOpen()).toBe(true)
+  expect(await redraws()).toBe(1)
+})
+
+test('with no target at all, an epoch begins and commits with the target still none', async () => {
+  await fresh()
+  S.frame = null
+  S.shown = null
+  beginEpoch($)
+  expect(S.frame).toBe(null)
+  await clock.advance(COMMIT_MIN_MS)
+  expect(epochOpen()).toBe(false)
+  expect(S.shown).toBe(null)
+})

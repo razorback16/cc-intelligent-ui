@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
-  alignFirstLine, DEFAULT_METRICS, DEFAULT_SIZE, firstLineOf, fontFit, ghosttyFontOf, itermFontOf, parseCommand, parseFontSpec, typstCall,
+  alignFirstLine, DEFAULT_METRICS, DEFAULT_SIZE, firstLineOf, fontFit, ghosttyFontOf, itermFontOf, parseFontSpec, typstCall,
   blocksOf, canDrawIn, columnsFor, DEFAULT_CELL, hashOf, imagePathOf, isSet, localImages, DEFAULT_WIDTH, IMAGE_MAX_COLUMNS,
   parseOd, plainOf, pngSize, shouldRetrySafe, sizeOf, sizing, splitSegments, themeOf, TYPST_PROMPT,
   escapeControls, luminanceOf, modeOfLuminance, OSC11_PL, parseOsc11, pickProfile, itermAppearanceOf, itermModeOf,
@@ -10,9 +10,10 @@ import {
   BASE_THEME, DEFAULT_THEME, chooseTheme, isSyntaxPath, isThemeName, measureCall, pickThemes, renderKey, themeEntry, themeFiles, themeListing,
   needsRoom, nextJob, pageRowsOf, resultOf, roomInputs, rowsOfBlock, splitInTwo, typstInputs,
   composeFrame, fitBox, pictureColumns, roomColumns, scaledBulletRow,
+  firstLine, gridText, heightText, isTypstInfo, widthText,
 } from '../hooks/register'
 import { DRAWING_ROWS } from '../hooks/lib/settings'
-import { wrapPid } from '../hooks/lib/typst'
+import { noNetworkEnv, wrapPid } from '../hooks/lib/typst'
 import { S, type Env, type Job } from '../hooks/lib/state'
 import { placeFirstLine } from '../hooks/lib/draw'
 import { DEFAULT_GRID, gridFirstRow, gridOf, gridRowsOf } from '../hooks/lib/grid'
@@ -179,45 +180,6 @@ test('the width: full by default (the viewport less the bullet), a cap when set,
   expect(columnsFor(400, 'full', { width: 20, height: 40 })).toBe(204)
   expect(columnsFor(150, 'full', { width: 20, height: 40 })).toBe(148)
   expect(columnsFor(400, 'full', null)).toBe(IMAGE_MAX_COLUMNS)
-})
-
-test('the width command: a value of 40 to 400, full, or nothing to show it', () => {
-  expect(parseCommand('width')).toEqual({ kind: 'width' })
-  expect(parseCommand('width full')).toEqual({ kind: 'width', width: 'full' })
-  expect(parseCommand('WIDTH Full')).toEqual({ kind: 'width', width: 'full' })
-  expect(parseCommand('width 40')).toEqual({ kind: 'width', width: 40 })
-  expect(parseCommand('width 160')).toEqual({ kind: 'width', width: 160 })
-  expect(parseCommand('width 400')).toEqual({ kind: 'width', width: 400 })
-  expect(parseCommand('width 39')).toEqual({ kind: 'bad' })
-  expect(parseCommand('width 401')).toEqual({ kind: 'bad' })
-  expect(parseCommand('width 12.5')).toEqual({ kind: 'bad' })
-  expect(parseCommand('width wide')).toEqual({ kind: 'bad' })
-  expect(parseCommand('width 120 full')).toEqual({ kind: 'bad' })
-})
-
-test('the size command takes 80 to 200 percent', () => {
-  expect(parseCommand('')).toEqual({ kind: 'show' })
-  expect(parseCommand(' on ')).toEqual({ kind: 'on' })
-  expect(parseCommand('OFF')).toEqual({ kind: 'off' })
-  expect(parseCommand('size 130')).toEqual({ kind: 'size', percent: 130 })
-  expect(parseCommand('size 80%')).toEqual({ kind: 'size', percent: 80 })
-  expect(parseCommand('size 200')).toEqual({ kind: 'size', percent: 200 })
-  expect(parseCommand('size 79')).toEqual({ kind: 'bad' })
-  expect(parseCommand('size 201')).toEqual({ kind: 'bad' })
-  expect(parseCommand('size')).toEqual({ kind: 'bad' })
-  expect(parseCommand('size big')).toEqual({ kind: 'bad' })
-  expect(parseCommand('bigger')).toEqual({ kind: 'bad' })
-  expect(parseCommand('probe')).toEqual({ kind: 'probe' })
-  expect(parseCommand('details')).toEqual({ kind: 'details' })
-  expect(parseCommand('probe 3')).toEqual({ kind: 'bad' })
-})
-
-test('the grid command: on, off, or nothing to show it', () => {
-  expect(parseCommand('grid')).toEqual({ kind: 'grid' })
-  expect(parseCommand('grid on')).toEqual({ kind: 'grid', grid: true })
-  expect(parseCommand('GRID Off')).toEqual({ kind: 'grid', grid: false })
-  expect(parseCommand('grid yes')).toEqual({ kind: 'bad' })
-  expect(parseCommand('grid on off')).toEqual({ kind: 'bad' })
 })
 
 test('the first line of an answer is told by how it starts', () => {
@@ -583,14 +545,7 @@ test('Claude is told about typst blocks', () => {
 })
 
 
-test('the theme command lists, or switches to a name kept as typed', () => {
-  expect(parseCommand('theme')).toEqual({ kind: 'theme' })
-  expect(parseCommand('THEME')).toEqual({ kind: 'theme' })
-  expect(parseCommand('theme vscode')).toEqual({ kind: 'theme', name: 'vscode' })
-  expect(parseCommand('theme My.Dark_Theme-2')).toEqual({ kind: 'theme', name: 'My.Dark_Theme-2' })
-  expect(parseCommand('theme a b')).toEqual({ kind: 'bad' })
-  expect(parseCommand('theme ../up')).toEqual({ kind: 'bad' })
-  expect(parseCommand('theme a/b')).toEqual({ kind: 'bad' })
+test('a theme name is a plain word, not a hidden file', () => {
   expect(isThemeName('.hidden')).toBe(false)
   expect(isThemeName('nord')).toBe(true)
 })
@@ -841,5 +796,246 @@ test('a picture of the target always fits the room of the same viewport', () => 
       expect(columnsFor(frame.columns, width)).toBeLessThanOrEqual(roomColumns({ columns }))
       expect(pictureColumns(frame, true)).toBeLessThanOrEqual(roomColumns({ columns }))
     }
+  }
+})
+
+// ---- Markdown blocks and text ------------------------------------------------
+
+test('a ~~~ fence is a block; a closing mark needs the same char, as many marks, and nothing after it', () => {
+  const tilde = blocksOf('~~~sh\nls\n~~~')
+  expect(tilde).toEqual([{ lines: ['~~~sh', 'ls', '~~~'], fence: { mark: '~~~', info: 'sh' } }])
+  // A ``` line in a ~~~ fence, a shorter mark and a mark with an info do not close it.
+  const open = ['````md', '```', 'x', '```js', '````'].join('\n')
+  expect(blocksOf(`${open}\n\nAfter`).map(b => b.lines.length)).toEqual([5, 1])
+  expect(blocksOf('~~~\n```\n~~~').length).toBe(1)
+})
+
+test('a fence that never closes runs to the end of the text', () => {
+  const blocks = blocksOf('Intro\n\n```js\na()\n\nb()')
+  expect(blocks.length).toBe(2)
+  expect(blocks[1]!.lines).toEqual(['```js', 'a()', '', 'b()'])
+})
+
+test('an indented fence stays in its list item; a fence at the margin is a block of its own', () => {
+  const item = blocksOf('- item\n  ```js\n  x\n\n  y\n  ```\n- next')
+  expect(item.length).toBe(1)
+  expect(item[0]!.fence).toBe(undefined)
+  expect(item[0]!.lines.length).toBe(7)
+  expect(blocksOf('text\n```\nx\n```\nmore').map(b => !!b.fence)).toEqual([false, true, false])
+})
+
+test('a $$ math block keeps its blank lines and is marked', () => {
+  const blocks = blocksOf('$$\na = 1\n\nb = 2\n$$\n\nAfter')
+  expect(blocks.length).toBe(2)
+  expect(blocks[0]).toEqual({ lines: ['$$', 'a = 1', '', 'b = 2', '$$'], isMath: true })
+  expect(blocks[1]!.isMath).toBe(undefined)
+})
+
+test('line ends of any kind (CRLF, CR) give the same blocks as LF', () => {
+  const lf = blocksOf('a\nb\n\nc')
+  expect(blocksOf('a\r\nb\r\n\r\nc')).toEqual(lf)
+  expect(blocksOf('a\rb\r\rc')).toEqual(lf)
+  expect(blocksOf('')).toEqual([])
+})
+
+test('a typst info is typst or typ in any case, nothing longer', () => {
+  for (const info of ['typst', 'typ', 'Typst', 'TYP']) expect(isTypstInfo(info)).toBe(true)
+  for (const info of ['', 'typescript', 'typst2', 'ty']) expect(isTypstInfo(info)).toBe(false)
+})
+
+test('rows of a block: a heading of level 1 or 2 takes more; code rows are shorter than text rows; size scales it', () => {
+  const rows = (md: string, size?: number) => rowsOfBlock(blocksOf(md)[0]!, 100, size)
+  near(rows('text'), 1 + 1.3)
+  near(rows('# Title'), 1 + 1.3 + 1.5)
+  near(rows('## Title'), rows('# Title'))
+  near(rows('### Title'), rows('text'))
+  near(rows('```\nx\n```'), 1 + 3 * 1.1)
+  near(rows('text', 200), 1 + 1.3 * 2)
+  // An empty line counts as one character, so it takes a row.
+  near(rowsOfBlock({ lines: ['', ''] }, 100), 1 + 2 * 1.3)
+})
+
+test('a long line wraps into rows at the column count', () => {
+  const rows = (n: number, columns: number) => rowsOfBlock({ lines: ['x'.repeat(n)] }, columns)
+  expect(rows(114, 100)).toBe(1 + 1.3)
+  expect(rows(116, 100)).toBe(1 + 2 * 1.3)
+  expect(rows(116, 50)).toBe(1 + 3 * 1.3)
+})
+
+test('a short code fence of 2 lines is not cut, however long its lines', () => {
+  const md = `${'x'.repeat(5000)}\n\n\`\`\`\n\`\`\``
+  expect(splitSegments(md, 80, 5).join('').includes('```\n```')).toBe(true)
+  expect(splitSegments(`\`\`\`\n${'x'.repeat(5000)}\n\`\`\``, 80, 5)[0]!.startsWith('```\n')).toBe(true)
+})
+
+test('footnotes in a code fence do not join the answer; link definitions in a fence are not repeated', () => {
+  const long = Array.from({ length: 120 }, (_, i) => para(i)).join('\n\n')
+  expect(splitSegments(`${long}\n\n\`\`\`md\n[^1]: A note.\n\`\`\``, 80).length).toBeGreaterThan(1)
+  const segments = splitSegments(`${long}\n\n\`\`\`md\n[docs]: https://example.com\n\`\`\``, 80)
+  expect(segments.filter(s => s.endsWith('[docs]: https://example.com\n```')).length).toBe(1)
+  expect(segments.every(s => !s.endsWith('\n\n'))).toBe(true)
+})
+
+test('a link definition already in a segment is not added to it again', () => {
+  const long = Array.from({ length: 120 }, (_, i) => para(i)).join('\n\n')
+  const segments = splitSegments(`${long}\n\n[docs]: https://example.com`, 80)
+  for (const s of segments) expect(s.split('[docs]: https://example.com').length - 1).toBe(1)
+})
+
+test('images: angle brackets, a title, several on a line, and URLs with a scheme other than file are not local', () => {
+  expect(localImages('![a](<a.png>) ![b](c.png "t")')).toEqual(['a.png', 'c.png'])
+  expect(localImages('![](data:image/png;base64,AA) ![](http://x/y.png) ![](FILE:///a.png)')).toEqual(['FILE:///a.png'])
+  expect(localImages('![x](~~~)\n~~~\n![y](z.png)\n~~~\n![w](w.png)')).toEqual(['~~~', 'w.png'])
+  expect(imagePathOf('  a.png ', '/repo//')).toBe('/repo/a.png')
+  expect(imagePathOf('FILE:///a%20b.png', '/repo')).toBe('/a b.png')
+})
+
+test('the alt: an image gives its alt, a fence line is dropped, quotes, numbers and tags are stripped, and a long text ends with …', () => {
+  expect(plainOf('![a chart](x.png) and [a link](u)')).toBe('a chart and a link')
+  expect(plainOf('```js\ncode()\n```')).toBe('code()')
+  expect(plainOf('> quote\n\n1. one\n2) two\n\n<b>tag</b>')).toBe('quote one two tag')
+  expect(plainOf('~~gone~~ __x__ | a | b |')).toBe('gone x a b')
+  expect(plainOf('abcdefghij', 5)).toBe('abcd…')
+  expect(plainOf('abcde', 5)).toBe('abcde')
+  expect(plainOf('```\n```')).toBe(' ')
+})
+
+test('the first line is the first line with text, trimmed', () => {
+  expect(firstLine('\n  \n  Hello  \nWorld')).toBe('Hello')
+  expect(firstLine('')).toBe('')
+  expect(firstLine(' \n\t')).toBe('')
+})
+
+test('a text with an image in a fence only does not need the room; a typst fence with ~~~ does', () => {
+  expect(needsRoom('```md\n![x](a.png)\n```')).toBe(false)
+  expect(needsRoom('~~~typst\n#circle()\n~~~')).toBe(true)
+  expect(needsRoom('```typescript\nx\n```')).toBe(false)
+})
+
+// ---- Settings text and the grid numbers --------------------------------------
+
+test('the settings as words', () => {
+  expect(widthText('full')).toBe('full (the terminal width)')
+  expect(widthText(120)).toBe('120 columns')
+  expect(heightText('half')).toBe('half (half the terminal, 6 to 24 rows)')
+  expect(heightText('full')).toBe('full (the terminal height less 16 rows)')
+  expect(heightText(30)).toBe('30 rows')
+  expect(gridText(true)).toBe('on (each line of text on whole terminal rows)')
+  expect(gridText(false)).toBe('off')
+})
+
+test('a grid number must be a finite number of 0 or more; the code size must be over 0', () => {
+  const ok = {
+    body: 1, heading: [1, 1, 1, 1, 1, 1], code: 1, 'code-size': 1, pad: { quote: 0, code: 0, table: 0 }, 'table-style': 'rules',
+  }
+  expect(gridOf(ok)).not.toBe(null)
+  expect(gridOf({ ...ok, body: -1 })).toBe(null)
+  expect(gridOf({ ...ok, body: NaN })).toBe(null)
+  expect(gridOf({ ...ok, code: Infinity })).toBe(null)
+  expect(gridOf({ ...ok, heading: [1, 1, 1, 1, 1, -1] })).toBe(null)
+  expect(gridOf({ ...ok, heading: [1, 1, 1, 1, 1, 1, 1] })).toBe(null)
+  expect(gridOf({ ...ok, 'code-size': 0 })).toBe(null)
+  expect(gridOf({ ...ok, 'code-size': undefined })).toBe(null)
+  expect(gridOf({ ...ok, pad: undefined })).toBe(null)
+  expect(gridOf({ ...ok, pad: { ...ok.pad, table: -1 } })).toBe(null)
+  expect(gridOf(null)).toBe(null)
+  expect(gridOf('grid')).toBe(null)
+})
+
+test('grid rows: at least 1, and a small excess over whole rows is not a row', () => {
+  expect(gridRowsOf(0, 10)).toBe(1)
+  expect(gridRowsOf(10, 10)).toBe(1)
+  expect(gridRowsOf(10.0009, 10)).toBe(1)
+  expect(gridRowsOf(10.1, 10)).toBe(2)
+  expect(gridRowsOf(25, 10)).toBe(3)
+})
+
+// ---- Themes ------------------------------------------------------------------
+
+test('a theme name and description that are not strings are empty; the title is the folder name then', () => {
+  expect(themeEntry('t', '/u/t', true, '{"name":3,"description":null}')).toMatchObject({ title: 't', description: '' })
+  expect(themeEntry('t', '/u/t', true, '{"name":""}')).toMatchObject({ title: 't' })
+})
+
+test('a theme folder name with a bad character gives a reason; "syntax": null is not an object', () => {
+  expect(themeEntry('a b', '/u/a b', false, '{}')).toEqual({
+    name: 'a b', dir: '/u/a b', isUser: false, reason: 'the folder name has characters other than letters, digits, ., _ and -',
+  })
+  expect(themeEntry('a', '/u/a', true, '{"syntax":null}')).toMatchObject({ reason: '"syntax" is not an object of file names' })
+  expect(themeEntry('a', '/u/a', true, '{"syntax":{"dark":"../x"}}')).toMatchObject({ reason: expect.stringContaining('"syntax.dark"') })
+  expect(themeEntry('a', '/u/a', true, '{"syntax":{"sepia":"x.tmTheme"}}')).toMatchObject({ syntax: {} })
+})
+
+test('a syntax path is a non-empty relative name inside the folder', () => {
+  for (const bad of [undefined, null, 3, '', '  ', '/x', '..', 'a/../b', 'a\\b']) expect(isSyntaxPath(bad)).toBe(false)
+  for (const ok of ['x.tmTheme', 'sub/x.tmTheme', 'a..b']) expect(isSyntaxPath(ok)).toBe(true)
+})
+
+test('the theme names: a letter or digit first, then letters, digits, ., _ and -', () => {
+  for (const ok of ['a', '9', 'Sun.Light', 'a_b-c']) expect(isThemeName(ok)).toBe(true)
+  for (const bad of ['', '-a', '_a', 'a b', 'a/b', 'é']) expect(isThemeName(bad)).toBe(false)
+})
+
+test('the theme list is sorted by name, tells when there are none, and shows the folder as given without a home', () => {
+  const { themes, problems } = pickThemes([themeEntry('b', '/m/b', false, '{}'), themeEntry('a', '/m/a', false, '{"description":"first"}')])
+  const lines = themeListing(themes, problems, 'zzz', '/u/themes').split('\n')
+  expect(lines).toEqual(['Themes:', '- a: first', '- b', '', 'Change it with /iui theme <name>. Your own themes go in /u/themes/<name>/theme.json.'])
+  expect(themeListing(new Map(), [], 'x', '/u/themes')).toContain('Themes:\n- none found\n')
+  expect(themeListing(new Map(), [], 'x', '/home/me/t', '/home/me')).toContain('~/t/<name>/theme.json')
+  expect(themeListing(new Map(), [], 'x', '/homer/t', '/home')).toContain('/homer/t/')
+  expect(themeListing(new Map(), [{ name: 'p', dir: '/m/p', isUser: false, reason: 'bad' }], 'x', '/u')).toContain('- p: not usable, bad')
+})
+
+test('a built-in problem is listed without "(yours)"; a user theme of the base name does not replace the base for the fallback', () => {
+  const { themes, problems } = pickThemes([
+    themeEntry('x', '/m/x', false, '[]'),
+    themeEntry(BASE_THEME, '/u/vscode', true, '{}'),
+  ])
+  expect(problems.map(p => p.name)).toEqual(['x'])
+  expect(chooseTheme(themes, 'gone', '/mod')).toEqual({ name: BASE_THEME, dir: '/u/vscode', isFallback: true })
+})
+
+test('the stamp files: a base theme with its own syntax files is used for a mode the theme does not name', () => {
+  const base = themeEntry('vscode', '/mod/render/themes/vscode', false, '{"syntax":{"dark":"d2.tmTheme"}}') as any
+  const own = themeEntry('own', '/u/own', true, '{}') as any
+  expect(themeFiles(own, base, '/mod')).toEqual([
+    '/u/own/theme.json', '/mod/render/themes/vscode/theme.json', '/mod/render/themes/vscode/d2.tmTheme', '/mod/render/themes/vscode/light.tmTheme',
+  ])
+})
+
+test('the room is the smaller of the viewport and the tty, less the bullet; one of them alone is used', () => {
+  const saved = { tty: S.tty, view: S.viewColumns, frame: S.frame }
+  try {
+    S.frame = null
+    S.viewColumns = null
+    S.tty = null
+    expect(roomColumns({ columns: 100 })).toBe(98)
+    S.tty = { columns: 80, rows: 24, cell: { width: 16, height: 32 } } as any
+    expect(roomColumns({ columns: 100 })).toBe(78)
+    expect(roomColumns({ columns: 60 })).toBe(58)
+    expect(roomColumns(null)).toBe(78)
+    S.viewColumns = 70
+    expect(roomColumns()).toBe(68)
+  } finally {
+    S.tty = saved.tty
+    S.viewColumns = saved.view
+    S.frame = saved.frame
+  }
+})
+
+test('typst gets no network in either case of the proxy variables, and its package cache; fonts only when set', () => {
+  const saved = S.fontPaths
+  try {
+    S.fontPaths = ''
+    const env = noNetworkEnv('/c')
+    for (const k of ['HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'https_proxy', 'http_proxy', 'all_proxy']) expect(env[k]).toBe('http://127.0.0.1:9')
+    expect(env.NO_PROXY).toBe('')
+    expect(env.no_proxy).toBe('')
+    expect(env.TYPST_PACKAGE_CACHE_PATH).toBe('/c/pkg-cache')
+    expect('TYPST_FONT_PATHS' in env).toBe(false)
+    S.fontPaths = '/f1:/f2'
+    expect(noNetworkEnv('/c').TYPST_FONT_PATHS).toBe('/f1:/f2')
+  } finally {
+    S.fontPaths = saved
   }
 })

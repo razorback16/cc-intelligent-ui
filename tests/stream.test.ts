@@ -5,9 +5,13 @@ import { DEFAULT_CELL, DEFAULT_METRICS, DEFAULT_THEME, fontFit, hashOf, nextJob,
 // driven with this test's `$`: pagesOf and the queue and results it fills
 // are module state, which register.tsx does not export.
 import { epochOpen, lastKey, queue, results, running, S, type Env } from '../hooks/lib/state'
+import { finalized, inlined, INLINE_KEPT, live, pending, type Job } from '../hooks/lib/state'
+import { enqueue, finalizeAll, forget, pump, waitBlank } from '../hooks/lib/stream'
+import { inlineOf } from '../hooks/lib/draw'
 import { pagesOf } from '../hooks/lib/answer'
 import { beginEpoch } from '../hooks/lib/epoch'
 import { forgetTouches } from '../hooks/lib/typst'
+import { INLINE_MAX_BYTES } from '../hooks/lib/terminal'
 import { COMMIT_MIN_MS, TOUCH_FLUSH_MS } from '../hooks/lib/settings'
 
 // The world beneath the mod for one compile: a cache folder, a typst whose
@@ -573,4 +577,210 @@ test('a row drawn late in an epoch (150 ms after its begin) still swaps at the c
   // The commit's one redraw; all three swap.
   expect(redraws()).toBe(before + 1)
   for (const id of ids) expect(await draw(id, narrow)).toMatchObject({ kind: 'pages', result: { pages: [{ columns: 78 }] } })
+})
+
+// ---- The queue and the blocks on their own ----------------------------------------
+
+const jobOf = (key: string, requestId = key, more: Partial<Job> = {}): Job =>
+  ({
+    key, requestId, text: `Text of ${key}.`, columns: 98, cell: DEFAULT_CELL, theme: 'dark', size: 100, grid: false, themeDir: '/mod/t', env: ENV, epoch: 0, ...more,
+  }) as Job
+const RESULT = { pages: [{ ...PAGE, file: '/c/k/a-1.png' }], bulletRow: 0 }
+// The state a test of this part starts from, with no job able to start.
+function idle() {
+  const w = compiler()
+  live.clear()
+  pending.clear()
+  finalized.clear()
+  return w
+}
+
+test('a key that has a result is not queued', () => {
+  const { $ } = idle()
+  S.resizing = true
+  results.set('done', RESULT)
+  enqueue($, jobOf('done'))
+  expect(queue.length).toBe(0)
+  expect(running.size).toBe(0)
+})
+
+test('a job takes the place of one of the same request or the same key', () => {
+  const { $ } = idle()
+  S.resizing = true
+  enqueue($, jobOf('a', 'r1'))
+  enqueue($, jobOf('b', 'r1'))
+  expect(queue.map(j => j.key)).toEqual(['b'])
+  enqueue($, jobOf('b', 'r2'))
+  expect(queue.map(j => [j.key, j.requestId])).toEqual([['b', 'r2']])
+  enqueue($, jobOf('c', 'r3'))
+  expect(queue.length).toBe(2)
+})
+
+test('no job starts during a burst, and the queue runs once it ends', async () => {
+  const { $, runs } = idle()
+  S.resizing = true
+  enqueue($, jobOf('a'))
+  pump($)
+  await drain()
+  expect(running.size).toBe(0)
+  expect(runs.length).toBe(0)
+  S.resizing = false
+  pump($)
+  await drain()
+  expect(running.has('a')).toBe(true)
+  expect(runs.length).toBe(1)
+})
+
+test('a key that runs is not queued again; one that was cancelled is', async () => {
+  const { $, runs } = idle()
+  enqueue($, jobOf('a', 'r1'))
+  await drain()
+  const first = running.get('a')!
+  enqueue($, jobOf('a', 'r2'))
+  expect(queue.length).toBe(0)
+  expect(running.get('a')).toBe(first)
+  first.cancel()
+  enqueue($, jobOf('a', 'r3'))
+  expect(running.get('a')).not.toBe(first)
+  expect(running.get('a')!.job.requestId).toBe('r3')
+  for (const run of runs) run.end(null)
+  await drain()
+})
+
+test('a blocks still live is final at once by finalizeAll: queued, blank, and drawn again', async () => {
+  const { $, redraws } = idle()
+  S.resizing = true
+  const cancelled: string[] = []
+  for (const id of ['x', 'y']) live.set(id, { job: jobOf(id), still: { cancel: () => cancelled.push(id) } })
+  finalizeAll($)
+  await drain()
+  expect(cancelled).toEqual(['x', 'y'])
+  expect(live.size).toBe(0)
+  expect([...finalized]).toEqual(['x', 'y'])
+  expect(queue.map(j => j.requestId)).toEqual(['x', 'y'])
+  expect([...pending.keys()]).toEqual(['x', 'y'])
+  expect(pending.get('x')).toMatchObject({ showText: false, textHash: hashOf(['Text of x.']) })
+  expect(redraws()).toBe(2)
+})
+
+test('forget stops the live and pending timers of a block', () => {
+  idle()
+  const cancelled: string[] = []
+  live.set('f', { job: jobOf('f'), still: { cancel: () => cancelled.push('still') } })
+  pending.set('f', { textHash: 'h', showText: false, timer: { cancel: () => cancelled.push('timer') } })
+  forget('f')
+  expect(cancelled).toEqual(['still', 'timer'])
+  expect(live.has('f')).toBe(false)
+  expect(pending.has('f')).toBe(false)
+  forget('f')
+  expect(cancelled.length).toBe(2)
+})
+
+test('a final block stays blank for ms; the same text keeps its timer, another text starts a new one', async () => {
+  const { $, advance, redraws } = idle()
+  waitBlank($, 'w', 'h1', 100)
+  const first = pending.get('w')!
+  waitBlank($, 'w', 'h1', 100)
+  expect(pending.get('w')).toBe(first)
+  advance(99)
+  await drain()
+  expect(first.showText).toBe(false)
+  expect(redraws()).toBe(0)
+  advance(1)
+  await drain()
+  expect(first.showText).toBe(true)
+  expect(redraws()).toBe(1)
+  waitBlank($, 'w', 'h2', 100)
+  expect(pending.get('w')).not.toBe(first)
+  expect(pending.get('w')).toMatchObject({ textHash: 'h2', showText: false })
+})
+
+test('a compile that throws leaves a failed result, and a failed result draws as text', async () => {
+  const { $, runs } = idle()
+  $.fs.write = async () => {
+    throw new Error('disk full')
+  }
+  const draw = () => pagesOf($, { id: 'boom', text: 'Boom.', frame: FRAME, env: ENV, canStream: false, onScreen: true })
+  expect((await draw()).kind).toBe('blank')
+  await drain()
+  expect(runs.length).toBe(0)
+  expect(results.get(keyOf('Boom.'))).toBe('failed')
+  expect(running.size).toBe(0)
+  expect(await draw()).toEqual({ kind: 'text' })
+  expect(queue.length).toBe(0)
+})
+
+test('a pages.json that is not valid drops its key from the keys on disk, and the text compiles', async () => {
+  const { $, runs } = idle()
+  $.fs.read = async () => '{"pages": []}'
+  const key = keyOf('Old.')
+  S.onDisk = new Set([key])
+  const drawing = await pagesOf($, { id: 'bad-disk', text: 'Old.', frame: FRAME, env: ENV, canStream: false, onScreen: true })
+  expect(S.onDisk.has(key)).toBe(false)
+  expect(drawing.kind).toBe('blank')
+  await drain()
+  expect(runs.length).toBe(1)
+})
+
+// ---- Pages as bytes over ssh ----------------------------------------------------------
+
+function sshFs(read: (path: string) => Promise<{ base64: string }>) {
+  const reads: string[] = []
+  const $ = {
+    fs: {
+      read: async (path: string) => {
+        reads.push(path)
+        return read(path)
+      },
+    },
+  } as any
+  inlined.clear()
+  return { $, reads }
+}
+const small = (file: string, height = 64) => ({ ...PAGE, file, width: 1600, height })
+
+test('over ssh a page goes as its bytes, read once', async () => {
+  const { $, reads } = sshFs(async () => ({ base64: 'AAAA' }))
+  const result = { pages: [small('/c/i/a-1.png'), small('/c/i/a-2.png')], bulletRow: 0 }
+  expect(await inlineOf($, result)).toEqual(['AAAA', 'AAAA'])
+  expect(await inlineOf($, result)).toEqual(['AAAA', 'AAAA'])
+  expect(reads).toEqual(['/c/i/a-1.png', '/c/i/a-2.png'])
+})
+
+test('over ssh a page too tall for bytes is not read', async () => {
+  const { $, reads } = sshFs(async () => ({ base64: 'AAAA' }))
+  expect(await inlineOf($, { pages: [small('/c/t/a-1.png'), small('/c/t/a-2.png', 5000)], bulletRow: 0 })).toBe(null)
+  expect(reads).toEqual(['/c/t/a-1.png'])
+  expect(await inlineOf($, { pages: [small('/c/t/a-3.png', 5000)], bulletRow: 0 })).toBe(null)
+  expect(reads.length).toBe(1)
+})
+
+test('over ssh a file that can not be read is read again next time; one that is too large is not', async () => {
+  let readable = false
+  const { $, reads } = sshFs(async () => {
+    if (!readable) throw new Error('EACCES')
+    return { base64: 'A'.repeat(Math.ceil(INLINE_MAX_BYTES / 3) * 4 + 4) }
+  })
+  const result = { pages: [small('/c/u/a-1.png')], bulletRow: 0 }
+  expect(await inlineOf($, result)).toBe(null)
+  expect(inlined.has('/c/u/a-1.png')).toBe(false)
+  readable = true
+  expect(await inlineOf($, result)).toBe(null)
+  expect(inlined.get('/c/u/a-1.png')).toBe(null)
+  expect(await inlineOf($, result)).toBe(null)
+  expect(reads.length).toBe(2)
+})
+
+test('over ssh the bytes of the oldest files go past INLINE_KEPT', async () => {
+  const { $, reads } = sshFs(async () => ({ base64: 'AAAA' }))
+  const file = (i: number) => `/c/e/a-${i}.png`
+  for (let i = 0; i < INLINE_KEPT + 6; i++) await inlineOf($, { pages: [small(file(i))], bulletRow: 0 })
+  expect(inlined.size).toBe(INLINE_KEPT)
+  expect(inlined.has(file(0))).toBe(false)
+  expect(inlined.has(file(INLINE_KEPT + 5))).toBe(true)
+  const read = reads.length
+  await inlineOf($, { pages: [small(file(INLINE_KEPT + 5))], bulletRow: 0 })
+  expect(reads.length).toBe(read)
+  await inlineOf($, { pages: [small(file(0))], bulletRow: 0 })
+  expect(reads.length).toBe(read + 1)
 })

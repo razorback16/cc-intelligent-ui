@@ -5,6 +5,8 @@ import {
   placeholderCell, schemeOfPortal, SETUP_NOT_MAC, WATCH_PL, WL_WATCH_SH, X11_WATCH_SH, type ClipWay,
 } from '../hooks/register'
 import { CACHE_SH } from '../hooks/lib/env'
+import { clipboardNow, clipWatchArgs, clipWayReady, findClipWay } from '../hooks/lib/clipboard'
+import { S } from '../hooks/lib/state'
 import { SMALL_MARKS, SMALL_MD } from './copy-fixture'
 
 const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: exitCode ? 'error: boom' : '', isStdoutTruncated: false, isStderrTruncated: false } })
@@ -94,6 +96,72 @@ test('the automatic copy line: the macOS texts as they were, the Linux way or wh
   expect(autoCopyText({ ...linux, drawn: false })).toBe('off (no picture yet)')
   expect(autoCopyText({ ...linux, isFullscreen: false })).toBe('off on the main screen (use /iui grab)')
   expect(autoCopyText({ ...linux, hostOs: 'FreeBSD' })).toBe('off (not macOS or Linux)')
+})
+
+// A $ whose process.run answers `got` (or throws) and whose env.get reads `env`; `argvs` keeps each call.
+const fake$ = (got: { exitCode: number; stdout: string } | Error, env: Record<string, string> = {}) => {
+  const argvs: string[][] = []
+  const $ = {
+    process: { run: async (argv: string[]) => (argvs.push(argv), got instanceof Error ? Promise.reject(got) : { stderr: '', ...got }) },
+    env: { get: async (name: string) => env[name] },
+  } as any
+  return { $, argvs }
+}
+
+// Runs `fn` with S.env and S.clipWay as given, then puts them back.
+async function withClip<T>(isMac: boolean, clipWay: ClipWay | null, fn: () => Promise<T> | T): Promise<T> {
+  const was = { env: S.env, clipWay: S.clipWay }
+  try {
+    S.env = { isMac } as any
+    S.clipWay = clipWay
+    return await fn()
+  } finally {
+    S.env = was.env
+    S.clipWay = was.clipWay
+  }
+}
+
+const WL_WAY = clipWayOf({ wayland: true, x11: false, desktop: 'sway', found: ALL })
+
+test('the watcher arguments after clip: none on macOS, the notifier on Linux, null where changes can not be seen', async () => {
+  await withClip(true, null, () => expect(clipWatchArgs(true)).toEqual([]))
+  await withClip(false, WL_WAY, () => expect(clipWatchArgs(false)).toEqual(['/usr/bin/wl-paste', '--watch', 'sh', '-c', WL_WATCH_SH]))
+  await withClip(false, { off: 'no Wayland or X11 display' }, () => expect(clipWatchArgs(false)).toBe(null))
+  await withClip(false, null, () => expect(clipWatchArgs(false)).toBe(null))
+})
+
+test('the clipboard now: pbpaste on macOS (UTF-8), the way found on Linux; null when it can not be read', async () => {
+  const mac = fake$({ exitCode: 0, stdout: 'héllo' })
+  expect(await withClip(true, null, () => clipboardNow(mac.$))).toBe('héllo')
+  expect(mac.argvs).toEqual([['pbpaste']])
+  const lin = fake$({ exitCode: 0, stdout: 'text' })
+  expect(await withClip(false, WL_WAY, () => clipboardNow(lin.$))).toBe('text')
+  expect(lin.argvs).toEqual([['/usr/bin/wl-paste', '-n', '-t', 'text']])
+  // A read that fails, throws, or has no tool to run.
+  expect(await withClip(true, null, () => clipboardNow(fake$({ exitCode: 1, stdout: 'x' }).$))).toBe(null)
+  expect(await withClip(false, WL_WAY, () => clipboardNow(fake$(new Error('timeout')).$))).toBe(null)
+  const none = fake$({ exitCode: 0, stdout: 'x' })
+  expect(await withClip(false, { off: 'no wl-paste' }, () => clipboardNow(none.$))).toBe(null)
+  expect(await withClip(false, null, () => clipboardNow(none.$))).toBe(null)
+  expect(none.argvs).toEqual([])
+})
+
+test('looking up the clipboard way sets S.clipWay from the display, the desktop and the tools found; clipWayReady waits for it', async () => {
+  const found = fake$({ exitCode: 0, stdout: 'xclip /usr/bin/xclip\nclipnotify /usr/bin/clipnotify\n' }, { DISPLAY: ':0', XDG_CURRENT_DESKTOP: 'XFCE' })
+  const was = S.clipWay
+  try {
+    const way = findClipWay(found.$)
+    await clipWayReady()
+    expect(await way).toMatchObject({ name: 'clipnotify and xclip (X11)', wayland: false })
+    expect(S.clipWay).toBe(await way)
+    expect(found.argvs).toEqual([['sh', '-c', FIND_SH]])
+    // The tools can not be looked up: no tool, so the way is off.
+    const failed = findClipWay(fake$(new Error('boom'), { DISPLAY: ':0' }).$)
+    await clipWayReady()
+    expect(await failed).toEqual({ off: 'no xclip, xsel or GTK 3 for Python, and no clipnotify' })
+  } finally {
+    S.clipWay = was
+  }
 })
 
 // ---- Light or dark: the desktop portal ---------------------------------------------

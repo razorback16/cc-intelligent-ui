@@ -43,6 +43,28 @@ test('kitty includes are read in place, each file once (no loops); other include
   expect(await kittyEntriesOf('/none', async () => null, { home: '/h' })).toEqual([])
 })
 
+test('kitty reads at most 32 files; a chain of includes stops there', async () => {
+  const read: string[] = []
+  const entries = await kittyEntriesOf('/k/0.conf', async p => {
+    read.push(p)
+    const n = Number(/(\d+)\.conf$/.exec(p)![1])
+    return `font_size ${n}\ninclude ${n + 1}.conf\n`
+  }, { home: '/h' })
+  expect(read.length).toBe(32)
+  expect(entries.length).toBe(32)
+  expect(kittyValueOf(entries, 'font_size')).toBe('31')
+})
+
+test('kitty config lines: tabs and indents split the key, a key needs a letter first, # lines are comments even when indented', () => {
+  expect(kittyLinesOf('\tbackground\t#101010\n   # background #ffffff\n1x y\nforeground#000')).toEqual([['background', '#101010']])
+})
+
+test('a kitty include of ~ alone is the home folder, and a trailing-slash folder gets one slash', () => {
+  expect(kittyIncludePath('~', '/d', { home: '/h' })).toBe('/h')
+  expect(kittyIncludePath('a.conf', '/d//', { home: '/h' })).toBe('/d/a.conf')
+  expect(kittyIncludePath('  b.conf  ', '/d', { home: '/h' })).toBe('/d/b.conf')
+})
+
 test('kitty config folders: KITTY_CONFIG_DIRECTORY alone, else XDG, ~/.config, and on macOS ~/Library/Preferences', () => {
   expect(kittyConfigDirsOf({ kittyDir: '/x', xdgConfig: '/xdg', home: '/h', isMac: true })).toEqual(['/x'])
   expect(kittyConfigDirsOf({ home: '/h', isMac: false })).toEqual(['/h/.config/kitty'])
@@ -123,6 +145,12 @@ test('the TOML reader: tables, dotted and quoted keys, strings, inline tables, c
   expect(v['navigation.renderer.backend']).toBe('Metal')
 })
 
+test('the TOML reader: array tables count as tables, numbers and arrays are skipped, a bad line is skipped', () => {
+  const v = tomlStringsOf(['[[keyboard.bindings]]', 'key = "q"', 'with = \'literal \\n\'', 'list = ["a", "b"]', 'not a line', '= "x"', 'ok = "y" # c'].join('\n'))
+  expect(v).toEqual({ 'keyboard.bindings.key': 'q', 'keyboard.bindings.with': 'literal \\n', 'keyboard.bindings.ok': 'y' })
+  expect(tomlStringsOf('')).toEqual({})
+})
+
 test('Rio config folder and theme files', () => {
   expect(rioConfigDirOf({ rioHome: '/r', xdgConfig: '/xdg', home: '/h', isMac: false })).toBe('/r')
   expect(rioConfigDirOf({ xdgConfig: '/xdg', home: '/h', isMac: false })).toBe('/xdg/rio')
@@ -192,6 +220,22 @@ test("cmux settings: app.appearance and terminal.adaptiveDefaultTheme, nested or
   expect(cmuxAppearanceOf(undefined, 'system\n')).toBe('system')
   expect(cmuxAppearanceOf(undefined, '')).toBe('system')
   expect(cmuxAppearanceOf('light', 'dark')).toBe('light')
+})
+
+test('cmux appearance: the saved value is read in any case, a word it does not know is system', () => {
+  expect(cmuxAppearanceOf(undefined, ' Light\n')).toBe('light')
+  expect(cmuxAppearanceOf(undefined, 'DARK')).toBe('dark')
+  expect(cmuxAppearanceOf(undefined, 'sepia')).toBe('system')
+  expect(cmuxSettingsOf({ 'terminal.adaptiveDefaultTheme': true })).toEqual({ adaptive: true })
+  expect(cmuxSettingsOf({ app: 'x', terminal: null })).toEqual({})
+  expect(cmuxSettingsOf([])).toEqual({})
+})
+
+test('JSONC: a comment marker inside a string stays, an unclosed block comment is not valid, a trailing comma in an array goes', () => {
+  expect(jsoncOf('{"u": "http://x/y", "a": [1, 2,],}')).toEqual({ u: 'http://x/y', a: [1, 2] })
+  expect(jsoncOf('{"a": 1 /* open')).toBe(null)
+  expect(jsoncOf('// only a comment')).toBe(null)
+  expect(jsoncOf('{"a": "x,}"}')).toEqual({ a: 'x,}' })
 })
 
 test('Ghostty colours of your own: a theme, background, foreground or palette', () => {

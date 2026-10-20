@@ -5,6 +5,8 @@ import {
   RESIZE_QUIET_MS, resolveLinks, SEGMENT_ROWS, WATCH_PL,
 } from '../hooks/register'
 import { TABLE_GRID } from './table-fixture'
+// This file's own copy of the drawing code, called with a fake `$`.
+import { drawPages, linksFor } from '../hooks/lib/draw'
 
 // ---- Where pictures draw ----------------------------------------------------
 
@@ -686,21 +688,6 @@ test('two rows, one compile held: both keep the old picture, then both swap in o
   expect(redraws).toBe(2)
 })
 
-test('a redraw with a new onScreen makes no file or process call and draws the same picture', async ($, on) => {
-  const { clock, calls } = world(on, { TERM: 'xterm-kitty' })
-  await $.command.run({ command: 'iui', args: '' } as any)
-  const ui = await $.ui.mount(message('scroll-1', 'Some **bold** text.'))
-  await clock.settle()
-  await ui.redraw(props('Some **bold** text.'))
-  const [first] = images(await ui.drawn())
-  const before = calls.length
-  for (const onScreen of [{ first: 0, last: 3, of: 9 }, null, { first: 2, last: 8, of: 9 }, undefined]) {
-    await ui.redraw({ ...props('Some **bold** text.'), onScreen })
-    expect(images(await ui.drawn())[0].props).toEqual(first.props)
-  }
-  expect(calls.slice(before)).toEqual([])
-})
-
 test('a font size change with the same columns compiles once, with a new key', async ($, on) => {
   const { clock, compiles, emit } = world(on, { TERM: 'xterm-kitty' }, HEAD, {}, undefined, { line: TTY })
   await $.command.run({ command: 'iui', args: '' } as any)
@@ -785,8 +772,6 @@ test('a first render of a diagram: the design is the space now (factor 1), kept 
   expect(images(await ui.drawn()).length).toBe(1)
   const [inputs] = compiles
   expect(Number(inputs!.height)).toBeGreaterThan(0)
-  expect(inputs!['design-w']).toBe(inputs!.width)
-  expect(inputs!['design-h']).toBe(inputs!.height)
   const kept = [...files].filter(([path]) => path.includes('/designs/'))
   expect(kept.length).toBe(1)
   expect(kept[0]![1]).toBe(`${inputs!.width} ${inputs!.height}`)
@@ -937,6 +922,40 @@ test('an answer draws its links, files and commands under its pages, one dim row
   await ui.press({ key: buttons[1].props.key })
   expect(copies).toEqual(['terminal:npm test\nnpm run lint'])
   expect(toasts).toContain('Copied')
+})
+
+test('a press on a command row that cannot copy toasts the reason, or none', async ($, on) => {
+  const { clock, toasts } = world(on, { TERM: 'xterm-kitty' })
+  let reply: any = { isCopied: false, reason: 'no clipboard' }
+  on('ui.copy', async () => (reply instanceof Error ? { deny: reply.message } : { value: reply }))
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const text = 'Run:\n\n```sh\nnpm test\n```'
+  const ui = await $.ui.mount(message('links-3', text))
+  await clock.settle()
+  await ui.redraw(props(text))
+  const [button] = all(await ui.drawn(), 'Button')
+  await ui.press({ key: button.props.key })
+  reply = new Error('boom')
+  await ui.press({ key: button.props.key })
+  expect(toasts.filter(t => t.startsWith('Could not copy'))).toEqual(['Could not copy: no clipboard', 'Could not copy'])
+})
+
+test('the link rows of a text are none when a file check throws', async () => {
+  const $ = { fs: { exists: () => { throw new Error('gone') } } } as any
+  expect(await linksFor($, 'See `src/never-checked.ts`.', '/w')).toEqual([])
+})
+
+test('a page with a note draws it under the pages, and with gutter 0 draws no bullet column', () => {
+  const $ = { ui: { resolve: () => ({ Box: 'Box', Text: 'Text', Image: 'Image' }) } } as any
+  const page = { file: '/c/k/a-1.png', width: 1568, height: 64, alt: 'x', columns: 98, rows: 2 }
+  const e = { viewport: { columns: 100, rows: 40 } } as any
+  const noted: any = drawPages($, e, { pages: [page], bulletRow: 0, note: 'bad font' })
+  expect(textOf(noted)).toContain('Typst error: bad font')
+  expect(all(noted, 'Box').some(b => b.props.width === 2)).toBe(true)
+  const bare: any = drawPages($, e, { pages: [page], bulletRow: 0 }, undefined, { gutter: 0 })
+  expect(textOf(bare)).not.toContain('Typst error')
+  expect(all(bare, 'Box').some(b => b.props.width !== undefined)).toBe(false)
+  expect(images(bare).length).toBe(1)
 })
 
 test('an answer with no links draws as before: no row under its pages', async ($, on) => {

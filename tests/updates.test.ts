@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import {
-  agoText, checkedOf, commandSuggestions, compareVersions, isDue, isNewer, parseCommand, parseVersion, shouldTell, toldOf, UPDATE_EVERY_MS,
+  agoText, checkedOf, commandSuggestions, compareVersions, isDue, isNewer, parseVersion, shouldTell, toldOf, UPDATE_EVERY_MS,
   UPDATE_FETCH_MS, UPDATE_STEPS, UPDATE_TOAST_MS, UPDATE_URL, updateLine, updateNotice, updateToast, versionOf,
 } from '../hooks/register'
 
@@ -33,6 +33,8 @@ test('the version of a plugin.json: only this mod, only a version that parses', 
   expect(versionOf('404: Not Found')).toBe(null)
   expect(versionOf('[]')).toBe(null)
   expect(versionOf('null')).toBe(null)
+  expect(versionOf('{"version":3}')).toBe(null)
+  expect(versionOf('{"version":" 1.2.3.4 "}')).toBe('1.2.3.4')
 })
 
 test('a check is due 24 h after the last one; a version is told once a day', () => {
@@ -45,12 +47,22 @@ test('a check is due 24 h after the last one; a version is told once a day', () 
   expect(checkedOf({ at: NOW, latest: 'junk' })).toEqual({ at: NOW, latest: '' })
   expect(checkedOf({ at: 'now' })).toBe(null)
   expect(checkedOf('x')).toBe(null)
+  expect(checkedOf(null)).toBe(null)
+  expect(checkedOf({ at: Number.NaN, latest: '0.3.0' })).toBe(null)
+  expect(checkedOf({ at: Infinity, latest: '0.3.0' })).toBe(null)
+  expect(checkedOf({ at: NOW, latest: 'v0.3.0' })).toEqual({ at: NOW, latest: '0.3.0' })
+  expect(checkedOf({ at: NOW })).toEqual({ at: NOW, latest: '' })
   expect(toldOf({ version: '0.3.0', at: NOW })).toEqual({ version: '0.3.0', at: NOW })
   expect(toldOf({ version: 3, at: NOW })).toBe(null)
+  expect(toldOf({ version: '0.3.0', at: Number.NaN })).toBe(null)
+  expect(toldOf({ version: '0.3.0' })).toBe(null)
+  expect(toldOf(undefined)).toBe(null)
   expect(shouldTell(null, '0.3.0', NOW)).toBe(true)
   expect(shouldTell({ version: '0.3.0', at: NOW - HOUR }, '0.3.0', NOW)).toBe(false)
   expect(shouldTell({ version: '0.3.0', at: NOW - UPDATE_EVERY_MS }, '0.3.0', NOW)).toBe(true)
   expect(shouldTell({ version: '0.3.0', at: NOW - HOUR }, '0.4.0', NOW)).toBe(true)
+  // The clock went back: told again.
+  expect(shouldTell({ version: '0.3.0', at: NOW + HOUR }, '0.3.0', NOW)).toBe(true)
 })
 
 test('the toast, the details line and the /iui notice', () => {
@@ -65,6 +77,11 @@ test('the toast, the details line and the /iui notice', () => {
   expect(updateLine({ ...o, on: false })).toBe('off')
   expect(updateLine({ ...o, off: 'DISABLE_UPDATES' })).toBe('off (DISABLE_UPDATES is set)')
   expect(updateLine({ ...o, own: '' })).toBe('on, the version installed is not known')
+  // A version older than the one installed is up to date too.
+  expect(updateLine({ ...o, own: '0.4.0' })).toBe('on, up to date (0.4.0, checked 3 hours ago)')
+  expect(updateLine({ ...o, on: false, off: 'DISABLE_UPDATES' })).toBe('off')
+  expect(updateNotice({ ...o, checked: null })).toBe('')
+  expect(updateNotice({ ...o, checked: { at: NOW, latest: '' } })).toBe('')
   expect(updateNotice(o)).toBe(`Intelligent UI 0.3.0 is available (you have 0.2.0). To update: ${UPDATE_STEPS}.`)
   expect(updateNotice({ ...o, on: false })).toBe('')
   expect(updateNotice({ ...o, off: 'DISABLE_AUTOUPDATER' })).toBe('')
@@ -72,14 +89,13 @@ test('the toast, the details line and the /iui notice', () => {
   expect(agoText(10 * 60 * 1000)).toBe('less than 1 hour ago')
   expect(agoText(HOUR)).toBe('1 hour ago')
   expect(agoText(72 * HOUR)).toBe('3 days ago')
+  expect(agoText(2 * HOUR)).toBe('2 hours ago')
+  expect(agoText(47 * HOUR + 59 * 60 * 1000)).toBe('47 hours ago')
+  expect(agoText(48 * HOUR)).toBe('2 days ago')
+  expect(agoText(-HOUR)).toBe('less than 1 hour ago')
 })
 
 test('/iui updates [on|off] is a command, with typeahead rows', () => {
-  expect(parseCommand('updates')).toEqual({ kind: 'updates' })
-  expect(parseCommand('Updates ON')).toEqual({ kind: 'updates', on: true })
-  expect(parseCommand('updates off')).toEqual({ kind: 'updates', on: false })
-  expect(parseCommand('updates maybe')).toEqual({ kind: 'bad' })
-  expect(parseCommand('updates on now')).toEqual({ kind: 'bad' })
   const o = { themes: [], active: 'claude-code', size: 100 }
   const at = (text: string, more = {}) => {
     const token = /\S+$/.exec(text)?.[0] ?? ''
@@ -184,6 +200,7 @@ for (const [name, answer] of [
   ['a 404', { status: 404, text: '404: Not Found' }],
   ['a text that is not JSON', { status: 200, text: '<html>' }],
   ['another plugin', { status: 200, text: '{"name":"other","version":"9.0.0"}' }],
+  ['a 500 with a good manifest', { status: 500, text: '{"name":"cc-intelligent-ui","version":"0.3.0"}' }],
   ['a version that does not parse', { status: 200, text: '{"name":"cc-intelligent-ui","version":"latest"}' }],
 ] as const) {
   test(`a failed fetch (${name}) shows nothing, and waits 24 h too`, async ($, on) => {
@@ -266,4 +283,65 @@ test('a background session does not check', async ($, on) => {
   const w = world(on, { env: { CLAUDE_CODE_SESSION_KIND: 'bg' } })
   await turn($, w)
   expect(w.fetched).toEqual([])
+})
+
+test('a version older than the one installed shows no toast, and the details say up to date', async ($, on) => {
+  const w = world(on, { answer: { status: 200, text: '{"version":"0.1.0"}' } })
+  await turn($, w)
+  expect(w.store.get('update-check')).toEqual({ at: NOW, latest: '0.1.0' })
+  expect(w.toasts).toEqual([])
+  expect(w.store.has('update-told')).toBe(false)
+  expect(await updatesReply($)).toContain('Update checks: on, up to date (0.2.0, checked less than 1 hour ago).')
+})
+
+test('a check stored in the future (the clock went back) is due again', async ($, on) => {
+  const w = world(on, { stored: { 'update-check': { at: NOW + 5 * HOUR, latest: '0.2.0' } } })
+  await turn($, w)
+  expect(w.fetched).toEqual([UPDATE_URL])
+  expect(w.store.get('update-check')).toEqual({ at: NOW, latest: '0.3.0' })
+})
+
+test('a toast told a day ago is shown again, with the time kept', async ($, on) => {
+  const w = world(on, { stored: { 'update-check': { at: NOW - 2 * HOUR, latest: '0.3.0' }, 'update-told': { version: '0.3.0', at: NOW - UPDATE_EVERY_MS } } })
+  await turn($, w)
+  expect(w.toasts.length).toBe(1)
+  expect(w.store.get('update-told')).toEqual({ version: '0.3.0', at: NOW })
+})
+
+test('a newer version than the one told is told at once', async ($, on) => {
+  const w = world(on, { stored: { 'update-check': { at: NOW - 2 * HOUR, latest: '0.4.0' }, 'update-told': { version: '0.3.0', at: NOW - HOUR } } })
+  await turn($, w)
+  expect(w.toasts.map(t => t.text)).toEqual([updateToast('0.4.0', '0.2.0')])
+})
+
+test('when the installed version is unknown, nothing is fetched and the details say so', async ($, on) => {
+  const w = world(on, { own: 'dev' })
+  await turn($, w)
+  expect(w.fetched).toEqual([])
+  expect(w.toasts).toEqual([])
+  expect(await updatesReply($)).toContain('Update checks: on, the version installed is not known.')
+})
+
+test('/iui updates on, with the last check over 24 h old, fetches at once', async ($, on) => {
+  const w = world(on, { stored: { updates: false, 'update-check': { at: NOW - 2 * UPDATE_EVERY_MS, latest: '0.2.0' } } })
+  await updatesReply($, 'updates on')
+  await w.clock.settle()
+  expect(w.fetched).toEqual([UPDATE_URL])
+  expect(w.store.get('update-check')).toEqual({ at: NOW, latest: '0.3.0' })
+  expect(w.toasts.length).toBe(1)
+})
+
+test('a variable set to an off word (false, no, off) or to nothing does not stop the check', async ($, on) => {
+  const w = world(on, { env: { DISABLE_UPDATES: 'false', DISABLE_AUTOUPDATER: ' Off ', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '' } })
+  await turn($, w)
+  expect(w.fetched).toEqual([UPDATE_URL])
+})
+
+test('an answer that comes in time is used, and nothing waits for the timeout after it', async ($, on) => {
+  const w = world(on)
+  await turn($, w)
+  const before = w.store.get('update-check')
+  await w.clock.advance(UPDATE_FETCH_MS * 2)
+  expect(w.store.get('update-check')).toEqual(before)
+  expect(w.toasts.length).toBe(1)
 })

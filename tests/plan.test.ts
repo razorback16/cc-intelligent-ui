@@ -2,9 +2,12 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import {
   choiceOf, decisionOf, editorArgv, feedbackOf, isPlanQuestion, normalPath, PLAN_ASK_LINE, PLAN_AUTO, PLAN_CLEAR, PLAN_DRAWING, PLAN_EDIT,
-  PLAN_HEADER, PLAN_MANUAL, PLAN_QUESTION, PLAN_QUESTION_EDITED, PLAN_REJECTED, planFileOf, planInputOf, planOf, planOptions,
+  PLAN_FEEDBACK, PLAN_HEADER, PLAN_MANUAL, PLAN_QUESTION, PLAN_QUESTION_EDITED, PLAN_REJECTED, planFileOf, planInputOf, planOf, planOptions,
   planShownOf, shortPath, TYPST_PROMPT, verdictOf,
 } from '../hooks/register'
+// This file's own copy of the flow, driven with a fake `$`: the plugin's module is another one.
+import { currentPlan, decidePlan, scheduleClear } from '../hooks/lib/plan'
+import { S } from '../hooks/lib/state'
 
 // ---- Pure helpers -----------------------------------------------------------
 
@@ -46,6 +49,18 @@ test('a short path', () => {
   expect(shortPath('/h/.claude/plans/p.md', '/h')).toBe('~/.claude/plans/p.md')
   expect(shortPath('/other/p.md', '/h')).toBe('/other/p.md')
   expect(shortPath('/h/p.md', '')).toBe('/h/p.md')
+  expect(shortPath('/h/p.md', '/h/')).toBe('~/p.md')
+  expect(shortPath('/h', '/h')).toBe('/h')
+  expect(shortPath('/hx/p.md', '/h')).toBe('/hx/p.md')
+  expect(shortPath('/h/p.md', '/')).toBe('/h/p.md')
+})
+
+test('a path with a trailing slash, a root, an empty path and dots', () => {
+  expect(normalPath('/')).toBe('/')
+  expect(normalPath('')).toBe('')
+  expect(normalPath('/a/')).toBe('/a')
+  expect(normalPath('../../a')).toBe('../../a')
+  expect(normalPath('a/..')).toBe('')
 })
 
 test('the question: four options, the edit option only with an editor; any other answer is feedback', () => {
@@ -81,6 +96,15 @@ test('the editor: VS Code when found, else TextEdit on a local Mac, else none', 
   expect(editorArgv({ code: '', isMac: true, isRemote: false }, '/h/p.md')).toEqual(['open', '-W', '-t', '/h/p.md'])
   expect(editorArgv({ code: '', isMac: true, isRemote: true }, '/h/p.md')).toBe(null)
   expect(editorArgv({ code: '', isMac: false, isRemote: false }, '/h/p.md')).toBe(null)
+})
+
+test('the editor on Linux: a GUI editor that waits, never over ssh, VS Code first', () => {
+  const gui = ['/usr/bin/gedit', '--wait']
+  expect(editorArgv({ code: '', isMac: false, isRemote: false, gui }, '/h/p.md')).toEqual(['/usr/bin/gedit', '--wait', '/h/p.md'])
+  expect(editorArgv({ code: '', isMac: false, isRemote: true, gui }, '/h/p.md')).toBe(null)
+  expect(editorArgv({ code: '', isMac: false, isRemote: false, gui: [] }, '/h/p.md')).toBe(null)
+  expect(editorArgv({ code: '/usr/bin/code', isMac: false, isRemote: false, gui }, '/h/p.md')).toEqual(['/usr/bin/code', '--wait', '/h/p.md'])
+  expect(editorArgv({ code: '', isMac: true, isRemote: false, gui }, '/h/p.md')).toEqual(['open', '-W', '-t', '/h/p.md'])
 })
 
 test('only the question Intelligent UI asks now is the plan question', () => {
@@ -122,6 +146,7 @@ function world($: any, on: any, o: {
   failCompile?: boolean
   raise?: boolean
   onAsk?: () => Promise<void>
+  hold?: Promise<void>
 } = {}) {
   mock.store(on)
   const clock = mock.clock(on)
@@ -148,6 +173,7 @@ function world($: any, on: any, o: {
         return { value: { code: 1, signal: null } }
       }
       const doc = argv.find(a => a.startsWith('doc='))!.slice(4)
+      await o.hold
       compiled.push(JSON.parse(files.get(doc)!).segments.join('\n\n'))
       return { value: { code: 0, signal: null } }
     }
@@ -528,4 +554,245 @@ test('the line above the dialog is for the Intelligent UI question alone', async
   expect(other).toMatchObject({ type: 'engine' })
   // Once answered, the same question draws as the engine's.
   expect(await (await $.ui.mount(dialog(PLAN_QUESTION, PLAN_HEADER, 'tu-ask-3'))).drawn()).toMatchObject({ type: 'engine' })
+})
+
+test('while the plan compiles the row shows the drawing line, then the pictures', async ($, on) => {
+  let release!: () => void
+  const hold = new Promise<void>(r => (release = r))
+  const { clock } = world($, on, { hold })
+  await ready($)
+  const ui = await $.ui.mount(use())
+  await clock.settle()
+  await ui.redraw(use().props)
+  const waiting: any = await ui.drawn()
+  expect(waiting.children[0]).toMatchObject(ENGINE)
+  expect(texts(waiting)).toContain(PLAN_DRAWING)
+  expect(images(waiting)).toEqual([])
+  release()
+  await clock.settle()
+  await ui.redraw(use().props)
+  const done: any = await ui.drawn()
+  expect(texts(done)).not.toContain(PLAN_DRAWING)
+  expect(images(done).length).toBe(1)
+})
+
+test('an approved result with no plan file shows the header alone', async ($, on) => {
+  const { clock } = world($, on)
+  await ready($)
+  await $.ui.mount(use())
+  await clock.settle()
+  const shown = texts(await (await $.ui.mount(result({ plan: PLAN, isAgent: false }))).drawn()).join('\n')
+  expect(shown).toContain("User approved Claude's plan")
+  expect(shown).not.toContain('Plan saved to')
+})
+
+// ---- The flow with a fake `$` ------------------------------------------------------
+
+// `answers`: the replies to the question in order (an Error rejects). `run` answers a process
+// by its argv (default: it fails); `files` is the file system, which `run` may change.
+function fake(o: {
+  answers?: (string | Error)[]
+  run?: (argv: string[], files: Record<string, string>) => { exitCode: number; stdout: string } | Error | undefined
+  files?: Record<string, string>
+  env?: Record<string, string>
+} = {}) {
+  const asked: string[] = []
+  const options: string[][] = []
+  const during: string[] = []
+  const runs: string[][] = []
+  const files = { ...o.files }
+  const answers = [...(o.answers ?? [])]
+  const $ = {
+    ui: {
+      ask: async (question: string, opts: { options: string[] }) => {
+        asked.push(question)
+        options.push(opts.options)
+        during.push(S.planAsking)
+        const answer = answers.shift()
+        if (answer === undefined || answer instanceof Error) throw answer ?? new Error('dismissed')
+        return answer
+      },
+    },
+    process: {
+      run: async (argv: string[]) => {
+        runs.push(argv)
+        const got = o.run?.(argv, files) ?? { exitCode: 1, stdout: '' }
+        if (got instanceof Error) throw got
+        return { stderr: '', isStdoutTruncated: false, isStderrTruncated: false, ...got }
+      },
+    },
+    fs: {
+      read: async (path: string) => {
+        if (!(path in files)) throw new Error('ENOENT')
+        return files[path]!
+      },
+    },
+    env: { get: async (name: string) => o.env?.[name] },
+  } as any
+  S.planCode = null
+  S.planGui = null
+  S.planAsking = ''
+  return { $, asked, options, during, runs, files }
+}
+const CODE = '/usr/bin/code'
+const hasCode = (argv: string[]) => (argv.join(' ').includes('command -v code') ? { exitCode: 0, stdout: `${CODE}\n` } : undefined)
+const plain = (file = FILE) => ({ plan: PLAN, callPlan: PLAN, file, isMac: false, isRemote: false, onEdited: () => undefined })
+
+test('with no plan file there is no editor: the edit answer is feedback', async () => {
+  const w = fake({ answers: [PLAN_EDIT] })
+  const got = await decidePlan(w.$, plain(''))
+  expect(got).toEqual({ kind: 'feedback', message: `${PLAN_FEEDBACK} ${PLAN_EDIT}` })
+  expect(w.options[0]).toEqual([PLAN_AUTO, PLAN_MANUAL, PLAN_CLEAR])
+  expect(w.runs).toEqual([])
+})
+
+test('a rejected ask denies the plan and clears the question', async () => {
+  const w = fake({ answers: [new Error('dismissed')] })
+  const got = await decidePlan(w.$, plain(''))
+  expect(got).toEqual({ kind: 'verdict', verdict: { kind: 'deny', message: PLAN_REJECTED } })
+  expect(w.during).toEqual([PLAN_QUESTION])
+  expect(S.planAsking).toBe('')
+})
+
+test('an empty or blank file after an edit is ignored, and the question repeats', async () => {
+  const edited: string[] = []
+  const w = fake({
+    answers: [PLAN_EDIT, PLAN_EDIT, PLAN_AUTO],
+    files: { [FILE]: PLAN },
+    run: (argv, files) => {
+      if (argv[0] === CODE && argv[1] === '--wait') {
+        files[FILE] = files[FILE] === PLAN ? '' : '  \n'
+        return { exitCode: 0, stdout: '' }
+      }
+      return hasCode(argv)
+    },
+  })
+  const got = await decidePlan(w.$, { ...plain(), onEdited: p => edited.push(p) })
+  expect(w.asked).toEqual([PLAN_QUESTION, PLAN_QUESTION, PLAN_QUESTION])
+  expect(edited).toEqual([])
+  expect(got).toMatchObject({ kind: 'verdict', verdict: { kind: 'allow', plan: PLAN, isEdited: false } })
+})
+
+test('an editor process that rejects leaves the plan as it was', async () => {
+  const w = fake({
+    answers: [PLAN_EDIT, PLAN_MANUAL],
+    files: { [FILE]: PLAN },
+    run: argv => (argv[0] === CODE && argv[1] === '--wait' ? new Error('spawn failed') : hasCode(argv)),
+  })
+  const got = await decidePlan(w.$, plain())
+  expect(w.asked).toEqual([PLAN_QUESTION, PLAN_QUESTION])
+  expect(got).toMatchObject({ kind: 'verdict', verdict: { kind: 'allow', mode: 'default', plan: PLAN, isEdited: false } })
+})
+
+test('editing back to the original text is not an edit', async () => {
+  const edited: string[] = []
+  const w = fake({
+    answers: [PLAN_EDIT, PLAN_EDIT, PLAN_AUTO],
+    files: { [FILE]: PLAN },
+    run: (argv, files) => {
+      if (argv[0] === CODE && argv[1] === '--wait') {
+        files[FILE] = files[FILE] === PLAN ? EDITED : PLAN
+        return { exitCode: 0, stdout: '' }
+      }
+      return hasCode(argv)
+    },
+  })
+  const got = await decidePlan(w.$, { ...plain(), onEdited: p => edited.push(p) })
+  expect(w.asked).toEqual([PLAN_QUESTION, PLAN_QUESTION_EDITED, PLAN_QUESTION])
+  expect(edited).toEqual([EDITED, PLAN])
+  expect(got).toMatchObject({ kind: 'verdict', verdict: { kind: 'allow', plan: PLAN, isEdited: false } })
+})
+
+test('a plan that differs from the call plan gives an edited verdict', async () => {
+  const w = fake({ answers: [PLAN_AUTO] })
+  const got = await decidePlan(w.$, { ...plain(''), plan: EDITED })
+  expect(got).toMatchObject({ kind: 'verdict', verdict: { kind: 'allow', mode: 'acceptEdits', plan: EDITED, isEdited: true } })
+})
+
+test('the code command: -lc fails, -c finds it, and the path is cached', async () => {
+  const w = fake({
+    answers: [PLAN_AUTO, PLAN_AUTO],
+    run: argv => (argv[1] === '-c' ? hasCode(argv) : { exitCode: 1, stdout: '' }),
+  })
+  await decidePlan(w.$, plain())
+  expect(w.options[0]).toContain(PLAN_EDIT)
+  expect(w.runs.map(a => a[1])).toEqual(['-lc', '-c'])
+  expect(S.planCode).toBe(CODE)
+  await decidePlan(w.$, plain())
+  expect(w.runs.length).toBe(2)
+})
+
+test('a code path that is not absolute is refused, and the refusal is cached', async () => {
+  const w = fake({ answers: [PLAN_AUTO, PLAN_AUTO], run: () => ({ exitCode: 0, stdout: 'code\n' }) })
+  await decidePlan(w.$, plain())
+  expect(w.options[0]).not.toContain(PLAN_EDIT)
+  expect(S.planCode).toBe('')
+  const looked = w.runs.length
+  await decidePlan(w.$, plain())
+  expect(w.runs.length).toBe(looked)
+})
+
+test('on Linux a GUI editor is looked for only with a display, and the result is cached', async () => {
+  const gedit = (argv: string[]) => (argv[2]?.includes('command -v "$c"') ? { exitCode: 0, stdout: 'gedit /usr/bin/gedit\n' } : undefined)
+  const none = fake({ answers: [PLAN_AUTO], run: gedit })
+  await decidePlan(none.$, plain())
+  expect(none.options[0]).not.toContain(PLAN_EDIT)
+  expect(none.runs.some(a => a[2]?.includes('command -v "$c"'))).toBe(false)
+  expect(S.planGui).toEqual([])
+  for (const name of ['DISPLAY', 'WAYLAND_DISPLAY']) {
+    const w = fake({ answers: [PLAN_AUTO, PLAN_AUTO], run: gedit, env: { [name]: ':0' } })
+    await decidePlan(w.$, plain())
+    expect(w.options[0]).toContain(PLAN_EDIT)
+    expect(S.planGui).toEqual(['/usr/bin/gedit', '--wait'])
+    const looked = w.runs.length
+    await decidePlan(w.$, plain())
+    expect(w.runs.length).toBe(looked)
+  }
+})
+
+test('the GUI editor is not looked for on a Mac, over ssh or when VS Code is found', async () => {
+  const mac = fake({ answers: [PLAN_AUTO], env: { DISPLAY: ':0' } })
+  await decidePlan(mac.$, { ...plain(), isMac: true })
+  expect(S.planGui).toBe(null)
+  const remote = fake({ answers: [PLAN_AUTO], env: { DISPLAY: ':0' } })
+  await decidePlan(remote.$, { ...plain(), isRemote: true })
+  expect(S.planGui).toBe(null)
+  const code = fake({ answers: [PLAN_AUTO], env: { DISPLAY: ':0' }, run: hasCode })
+  await decidePlan(code.$, plain())
+  expect(S.planGui).toBe(null)
+})
+
+test('the current plan: the file, else the fallback when it is missing, unreadable or blank', async () => {
+  const read = (files: Record<string, string>) => ({ fs: { read: async (p: string) => (p in files ? files[p]! : Promise.reject(new Error('EACCES'))) } }) as any
+  expect(await currentPlan(read({ [FILE]: EDITED }), FILE, PLAN)).toBe(EDITED)
+  expect(await currentPlan(read({ [FILE]: EDITED }), '', PLAN)).toBe(PLAN)
+  expect(await currentPlan(read({}), FILE, PLAN)).toBe(PLAN)
+  expect(await currentPlan(read({ [FILE]: ' \n' }), FILE, PLAN)).toBe(PLAN)
+})
+
+test('clear context: no abort without a turn id, and no step failure stops the next', async () => {
+  const run = (o: { abort?: boolean; command?: boolean; submit?: boolean } = {}) => {
+    const calls: string[] = []
+    let later!: () => Promise<void>
+    const fail = (name: string, is?: boolean) => async () => {
+      calls.push(name)
+      if (is) throw new Error(name)
+      return undefined
+    }
+    const $ = {
+      clock: { after: (_: number, fn: () => Promise<void>) => ((later = fn), { cancel: () => undefined }) },
+      turn: { abort: fail('abort', o.abort) },
+      command: { run: fail('clear', o.command) },
+      prompt: { submit: fail('submit', o.submit) },
+    } as any
+    return { $, calls, fire: () => later() }
+  }
+  const empty = run()
+  scheduleClear(empty.$, PLAN, '')
+  await empty.fire()
+  expect(empty.calls).toEqual(['clear', 'submit'])
+  const broken = run({ abort: true, command: true, submit: true })
+  scheduleClear(broken.$, PLAN, 'turn-1')
+  await broken.fire()
+  expect(broken.calls).toEqual(['abort', 'clear', 'submit'])
 })

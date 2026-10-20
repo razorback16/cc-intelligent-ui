@@ -102,3 +102,26 @@ test('each item once, the first, in the order of the text', () => {
   ].join('\n')
   expect(linksOf(md)).toEqual([file('README.md'), web('the site', 'https://x.io'), command('npm test')])
 })
+
+test('a file:// link is a local file; a query or fragment is cut; an empty label shows the URL', () => {
+  expect(linksOf('[x](file:///abs/a.md#top) [y](docs/b.ts?raw=1)')).toEqual([file('/abs/a.md'), file('docs/b.ts')])
+  expect(linksOf('[](https://x.io/e)')).toEqual([web('https://x.io/e')])
+})
+
+test('an image written as a reference is not a link', () => {
+  expect(linksOf('![logo][g] and ![logo]\n\n[g]: https://x.io/logo.png\n[logo]: https://x.io/l.png')).toEqual([])
+})
+
+test('a ~ path and a ../ path are files; a URL with a path is not', () => {
+  expect(linksOf('See ~/notes/a.md and ../up/b.json.')).toEqual([file('~/notes/a.md'), file('../up/b.json')])
+  expect(linksOf('https://x.io/docs/a.md')).toEqual([web('https://x.io/docs/a.md')])
+})
+
+test('a fence that never closes still gives its command; a ~~~ shell fence works', () => {
+  expect(linksOf('```bash\nnpm i')).toEqual([command('npm i')])
+  expect(linksOf('~~~sh\nls\n~~~')).toEqual([command('ls')])
+})
+
+test('a console block: output lines between prompts are dropped', () => {
+  expect(linksOf('```console\n$ a\nout\n$ b\n```')).toEqual([command('a (+1 line)', 'a\nb')])
+})

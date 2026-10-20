@@ -1,8 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+import { onScreenOf } from '../hooks/lib/images'
 import {
   claudeTmpOf, convertBox, convertCall, convertedPath, DEFAULT_CELL, factsAfter, folderOf, imageKindOf, isMarkdownPath, isNoPageError, isPdfPath, lastKnownPage,
-  NO_FACTS, pageControls, pageCountOf, pageOf, parsePage, pasteDirOf, pastedImagePath, pastedNumbers, COMMIT_MIN_MS, DEFAULT_HEIGHT, parseCommand, RESIZE_QUIET_MS, PICTURE_MAX_ROWS, PICTURE_ROOM_ROWS, pictureCells,
+  NO_FACTS, pageControls, pageCountOf, pageOf, parsePage, pasteDirOf, pastedImagePath, pastedNumbers, COMMIT_MIN_MS, DEFAULT_HEIGHT, RESIZE_QUIET_MS, PICTURE_MAX_ROWS, PICTURE_ROOM_ROWS, pictureCells,
   pictureRowsFor, projectSlug, renderKey, rowsAfter, sentFiles, sentImages, shortError, type Under,
 } from '../hooks/register'
 
@@ -18,6 +19,17 @@ test('a picture keeps its aspect, is never made larger, and fits the box', () =>
   expect(pictureCells({ width: 1000, height: 1600 }, 98, 24, DEFAULT_CELL)).toEqual({ columns: 30, rows: 24 })
   // A tiny icon is at least one cell.
   expect(pictureCells({ width: 4, height: 4 }, 98, 24, DEFAULT_CELL)).toEqual({ columns: 1, rows: 1 })
+})
+
+test('a row\'s onScreen: null is off screen, a range is on screen, none is not known', () => {
+  expect(onScreenOf(null)).toBe(false)
+  expect(onScreenOf({ first: 1, last: 4 })).toBe(true)
+  expect(onScreenOf(undefined)).toBe(undefined)
+  expect(onScreenOf(0)).toBe(undefined)
+})
+
+test('a picture is never more than 255 cells, even for a huge box', () => {
+  expect(pictureCells({ width: 100000, height: 100000 }, 1000, 1000, { width: 1, height: 1 })).toEqual({ columns: 255, rows: 255 })
 })
 
 test('a picture takes at most half the viewport, within 6 and 24 rows', () => {
@@ -39,18 +51,6 @@ test('height full: the viewport less 16 rows; a number: at most that, never unde
   expect(pictureRowsFor(10, 12)).toBe(6)
   expect(pictureRowsFor(400, 200)).toBe(200)
   expect(pictureRowsFor(400, 'full')).toBe(255)
-})
-
-test('the height command: half, full, 6 to 200 rows, or nothing to show it', () => {
-  expect(parseCommand('height')).toEqual({ kind: 'height' })
-  expect(parseCommand('height half')).toEqual({ kind: 'height', height: 'half' })
-  expect(parseCommand('HEIGHT Full')).toEqual({ kind: 'height', height: 'full' })
-  expect(parseCommand('height 6')).toEqual({ kind: 'height', height: 6 })
-  expect(parseCommand('height 200')).toEqual({ kind: 'height', height: 200 })
-  expect(parseCommand('height 5')).toEqual({ kind: 'bad' })
-  expect(parseCommand('height 201')).toEqual({ kind: 'bad' })
-  expect(parseCommand('height tall')).toEqual({ kind: 'bad' })
-  expect(parseCommand('height 12 rows')).toEqual({ kind: 'bad' })
 })
 
 test('only PNG, JPEG, WebP, SVG and PDF attachments are drawn', () => {
@@ -289,6 +289,23 @@ test('the [Image #N] marks of a prompt, each once', () => {
   expect(pastedNumbers('[Image #5] what is this')).toEqual([5])
   expect(pastedNumbers('[Image #2] and [Image #3], again [Image #2]')).toEqual([2, 3])
   expect(pastedNumbers('no image, [Image #x], [image #4]')).toEqual([])
+})
+
+test('a hint count that is not under the page keeps the missing page as it is', () => {
+  const made = factsAfter(NO_FACTS, 3, null)
+  expect(factsAfter(made, 3, NO_PAGE(3, 3)).missing).toBe(3)
+  expect(factsAfter(made, 4, NO_PAGE(4, 3))).toEqual({ made: 3, missing: 4, pages: 3, errors: {} })
+})
+
+test('a Typst error with no error line gives its first line; sentFiles skips an empty path', () => {
+  expect(shortError('\n  \nsomething broke\nmore')).toBe('something broke')
+  expect(sentFiles({ attachments: [{ path: '', size: 1, isImage: true }, { path: '/t/a.png', size: 1, isImage: true }] })).toEqual([{ path: '/t/a.png', kind: 'png' }])
+})
+
+test('an [Image #0] mark and a uid that is not a number give nothing', () => {
+  expect(pastedNumbers('[Image #0] [Image #01]')).toEqual([1])
+  expect(claudeTmpOf({ uid: 'me', isMac: true })).toBe('')
+  expect(claudeTmpOf({ tmpdir: '  ', uid: '7', isMac: false })).toBe('/tmp/claude-7')
 })
 
 test('the pasted-image path follows Claude Code folder names', () => {

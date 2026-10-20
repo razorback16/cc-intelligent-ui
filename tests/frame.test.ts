@@ -5,7 +5,7 @@ import {
   WATCH_RESTART_MS, WATCH_RESTARTS, watchFrame, watchLineOf, watchState, type Frame, type WatchLine,
 } from '../hooks/lib/frame'
 import { COMMIT_MIN_MS, DEFAULT_CELL, IMAGE_MAX_COLUMNS, RESIZE_QUIET_MS } from '../hooks/lib/settings'
-import { INLINE_MAX_SIDE } from '../hooks/lib/terminal'
+import { INLINE_MAX_SIDE, isGhosttyHere } from '../hooks/lib/terminal'
 import { perlFor, WATCH_PL } from '../hooks/lib/host'
 // The module state the Frame reads and sets (this file's copy of the
 // modules is the one imported above).
@@ -517,4 +517,25 @@ test('a clip child that ends on its own starts again after WATCH_RESTART_MS, WAT
   watchFrame($)
   expect(children.length).toBe(before + WATCH_RESTARTS)
   expect(watchState()).toEqual({ clip: true, ended: true })
+})
+
+test('Ghostty is told by TERM_PROGRAM or TERM, and cmux (its engine) counts too', () => {
+  const was = { program: S.termProgram, name: S.termName, cmux: S.isCmux }
+  try {
+    S.isCmux = false
+    S.termProgram = 'ghostty'
+    S.termName = 'xterm-256color'
+    expect(isGhosttyHere()).toBe(true)
+    S.termProgram = ''
+    S.termName = 'xterm-ghostty'
+    expect(isGhosttyHere()).toBe(true)
+    S.termName = 'xterm-kitty'
+    expect(isGhosttyHere()).toBe(false)
+    S.isCmux = true
+    expect(isGhosttyHere()).toBe(true)
+  } finally {
+    S.termProgram = was.program
+    S.termName = was.name
+    S.isCmux = was.cmux
+  }
 })

@@ -289,3 +289,42 @@ test('with the theme on auto, iTerm2 with no TERM_PROGRAM is found by ITERM_PROF
   const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(ran.text).toContain('mode dark (auto, from iTerm2: profile Default background)')
 })
+
+// A fixed theme (or none) never asks the OS or the terminal.
+for (const [theme, mode, shown] of [
+  [undefined, 'dark', 'dark'], ['dark', 'dark', 'dark'], ['light', 'light', 'light'], ['dark-daltonized', 'dark', 'dark-daltonized'],
+  ['light-ansi', 'light', 'light-ansi'], ['', 'dark', 'dark'],
+] as const) {
+  test(`with the theme ${theme === undefined ? 'not set' : JSON.stringify(theme)}, the mode is ${mode} and no OS read is made`, async ($, on) => {
+    mock.store(on)
+    mock.clock(on)
+    mock.env(on, { HOME: '/fake-home' })
+    on('config.list', async () => ({ value: (theme === undefined ? [] : [{ key: 'theme', value: theme }]) as any }))
+    const asked: string[] = []
+    on('process.run', async ($: any, e: any, next: any) => {
+      const argv: string[] = e.argv
+      if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(argv.join(' '))) return { value: { exitCode: 0, stdout: '/tmp/mdp\nDarwin\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      if (argv[0] === 'defaults') asked.push('macOS')
+      return next(e)
+    })
+    const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
+    expect(ran.text).toContain(`mode ${mode} (Claude Code theme ${shown})`)
+    expect(asked).toEqual([])
+  })
+}
+
+test('a theme setting that names no mode (a custom theme) follows the OS like auto', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  mock.env(on, { HOME: '/fake-home' })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: 'custom:night-owl' }] as any }))
+  on('process.run', async ($: any, e: any, next: any) => {
+    const argv: string[] = e.argv
+    const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('Dark\n')
+    return next(e)
+  })
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(ran.text).toContain('mode dark (auto, from macOS)')
+})

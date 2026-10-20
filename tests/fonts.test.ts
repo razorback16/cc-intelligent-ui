@@ -111,6 +111,17 @@ test('no lean set when it could draw differently', () => {
   expect(leanFiles(list, '', { ...FONTS, code: ['DejaVu Sans Mono'] })).not.toBeNull()
 })
 
+test('a terminal font that is a skipped name is kept when it is the first installed font', () => {
+  const list = fontListOf(LISTING)
+  expect(leanFiles(list, 'PingFang SC', FONTS)).toContain('/System/Library/AssetsV2/PingFang.ttc')
+  expect(leanFiles(list, '', { body: ['PingFang SC'], code: ['Menlo'], plain: true })).toBeNull()
+})
+
+test('a font list with no files gives no lean set', () => {
+  expect(leanFiles(fontListOf(''), '', FONTS)).toBeNull()
+  expect(leanFiles(fontListOf('DejaVu Sans Mono\n  └ (Embedded)\n      Style: Normal\n'), '', { body: ['DejaVu Sans Mono'], code: ['DejaVu Sans Mono'], plain: true })).toBeNull()
+})
+
 test('the lean folder is named by its files', () => {
   expect(leanDirOf('/c', ['/a.ttf'])).toBe(leanDirOf('/c', ['/a.ttf']))
   expect(leanDirOf('/c', ['/a.ttf'])).not.toBe(leanDirOf('/c', ['/b.ttf']))

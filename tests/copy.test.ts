@@ -1,13 +1,15 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import {
-  codePointsOf, commandSuggestions, decodeSelection, DIACRITICS, hasPlaceholders, isDrawnIn, joinSegments, pageTopsOf, parseCommand, pickPages,
+  codePointsOf, commandSuggestions, decodeSelection, DIACRITICS, hasPlaceholders, isDrawnIn, joinSegments, pageTopsOf, pickPages,
   placeholderCell, isSafePage, positionsOf, screenOf, textOfRun, WATCH_PL, type Drawn, type TextBlock, type Item, type Mark, type OnScreen,
   type Place,
 } from '../hooks/register'
 import { joinItems } from '../hooks/lib/copy'
 import { WATCH_RESTART_MS } from '../hooks/lib/frame'
 import { rowsAfter, type Under } from '../hooks/lib/pictures'
+import { forgetProbed, noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf } from '../hooks/lib/probe'
+import { clip, drawnAnswers, lastKey, results, type Job, type Result } from '../hooks/lib/state'
 import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI } from './copy-fixture'
 
 // One screen row of a picture as Claude Code draws it: `lead` (the gutter),
@@ -364,12 +366,106 @@ test('the padding beside inline code is not a space; a space next to it is', () 
   expect(joinAll([par, noto(0, 'forbids', 36), noto(41.217, 'list', 26.49, true), noto(72.924, 'as', 11)])).toBe('forbids list as')
 })
 
+// ---- The drawings noted and their words -----------------------------------
+
+const noted = (name: string): Result => ({
+  bulletRow: 0, pages: [{ file: `/c/${name}/a-1.png`, width: 1000, height: 500, columns: 60, rows: 20 }, { file: `/c/${name}/a-2.png`, width: 1000, height: 500, columns: 60, rows: 20 }] as any,
+})
+
+// Runs `fn` with the drawings and keys of this module empty, then empties them.
+async function withDrawn(fn: () => Promise<void> | void) {
+  try {
+    drawnAnswers.clear()
+    lastKey.clear()
+    results.clear()
+    forgetProbed()
+    await fn()
+  } finally {
+    drawnAnswers.clear()
+    lastKey.clear()
+    results.clear()
+    forgetProbed()
+  }
+}
+
+test('a drawing is noted at the box it is drawn at, with the rows under its pages; the same drawing again keeps its seq and takes the new place', () =>
+  withDrawn(() => {
+    noteDrawn('ans-1', { ...noted('k1'), note: 'Typst error' }, 30, { top: 1, after: 2 })
+    const first = drawnAnswers.get('ans-1')!
+    expect(first.dir).toBe('/c/k1')
+    expect(first.pages.map(p => [p.columns, p.rows])).toEqual([[30, 10], [30, 10]])
+    expect(first.place).toEqual({ top: 1, below: 3 })
+    const seq = first.seq
+    // Same files and boxes: the place changes, the seq does not.
+    noteDrawn('ans-1', noted('k1'), 30, { after: 1 })
+    expect(drawnAnswers.get('ans-1')!.seq).toBe(seq)
+    expect(drawnAnswers.get('ans-1')!.place).toEqual({ below: 1 })
+    // Another room is a new drawing, drawn after.
+    noteDrawn('ans-1', noted('k1'), 40, {})
+    expect(drawnAnswers.get('ans-1')!.seq).toBe(seq + 1)
+    expect(clip.seq).toBe(seq + 1)
+  }))
+
+test('a drawing keeps the Job of the key it was drawn from, only when that key is its folder', () =>
+  withDrawn(() => {
+    const job = { env: { cache: '/c' } } as Job
+    lastKey.set('ans-1', { key: 'k1', textHash: 'h', job })
+    noteDrawn('ans-1', noted('k1'), 60)
+    expect(drawnAnswers.get('ans-1')!.job).toBe(job)
+    lastKey.set('ans-2', { key: 'other', textHash: 'h', job })
+    noteDrawn('ans-2', noted('k2'), 60)
+    expect(drawnAnswers.get('ans-2')!.job).toBeUndefined()
+  }))
+
+test('a memo hit notes a drawing again only when it was forgotten and the result of its key is a drawing', () =>
+  withDrawn(() => {
+    noteDrawnAgain('ans-1', 60)
+    expect(drawnAnswers.has('ans-1')).toBe(false)
+    lastKey.set('ans-1', { key: 'k1', textHash: 'h', job: { env: { cache: '/c' } } as Job })
+    results.set('k1', 'failed')
+    noteDrawnAgain('ans-1', 60)
+    expect(drawnAnswers.has('ans-1')).toBe(false)
+    results.set('k1', noted('k1'))
+    noteDrawnAgain('ans-1', 60, { top: 1 })
+    expect(drawnAnswers.get('ans-1')!.place).toEqual({ top: 1, below: 0 })
+    // Already noted: kept as it is.
+    const kept = drawnAnswers.get('ans-1')
+    noteDrawnAgain('ans-1', 60, { top: 5 })
+    expect(drawnAnswers.get('ans-1')).toBe(kept)
+  }))
+
+test('the rows on screen are kept on a drawing noted, null when outside the viewport, and dropped when the surface says none', () =>
+  withDrawn(() => {
+    noteOnScreen('none', { first: 0, last: 1, of: 2 })
+    expect(drawnAnswers.has('none')).toBe(false)
+    noteDrawn('ans-1', noted('k1'), 60)
+    noteOnScreen('ans-1', { first: 3, last: 9, of: 44 })
+    expect(drawnAnswers.get('ans-1')!.onScreen).toEqual({ first: 3, last: 9, of: 44 })
+    noteOnScreen('ans-1', null)
+    expect(drawnAnswers.get('ans-1')!.onScreen).toBeNull()
+    noteOnScreen('ans-1', 'junk')
+    expect(drawnAnswers.get('ans-1')!.onScreen).toBeUndefined()
+  }))
+
+test('the words of a page: none with no Job or no such page; a drawing with no probe file gives none and is not kept', () =>
+  withDrawn(async () => {
+    const fail$ = { fs: { read: async () => { throw new Error('ENOENT') } } } as any
+    noteDrawn('ans-1', noted('k1'), 60)
+    const d = drawnAnswers.get('ans-1')!
+    expect(await wordsOf(fail$, d, 0)).toBe(null)
+    const job = { env: { cache: '/c', typst: '/usr/bin/typst' } } as Job
+    expect(await wordsOf(fail$, { ...d, job }, 5)).toBe(null)
+    // A failure is not kept: the next copy runs the probe again.
+    let reads = 0
+    const reading$ = { fs: { read: async () => (reads++, { value: 'not json' }) } } as any
+    expect(await wordsOf(reading$, { ...d, job }, 0)).toBe(null)
+    expect(await wordsOf(reading$, { ...d, job }, 0)).toBe(null)
+    expect(reads).toBe(2)
+  }))
+
 // ---- The command ------------------------------------------------------------
 
 test('/iui grab and dump are commands with typeahead rows; dump with nothing seen says so', async $ => {
-  expect(parseCommand('grab')).toEqual({ kind: 'grab' })
-  expect(parseCommand('dump')).toEqual({ kind: 'dump' })
-  expect(parseCommand('grab now')).toEqual({ kind: 'bad' })
   const rows = commandSuggestions('/iui gra', 'gra', 5, { themes: [], active: 'claude-code', size: 100 })
   expect(rows).toEqual([{ text: 'grab', description: 'copy the text of the pictures you last selected (or copied, on the main screen)' }])
   expect(commandSuggestions('/iui du', 'du', 5, { themes: [], active: 'claude-code', size: 100 }).map(r => r.text)).toEqual(['dump'])
