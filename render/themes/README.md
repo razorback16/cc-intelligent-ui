@@ -38,7 +38,7 @@ Example: pink inline code, rounder boxes.
 |---|---|---|
 | `name`, `description`, `source` | | Shown by `/iui theme` |
 | `syntax.dark`, `syntax.light` | `dark.tmTheme`, `light.tmTheme` | Code colours: a TextMate theme file in this folder. If you leave this out, the vscode files are used. If you name a file, it must exist. |
-| `fonts.body` | SF Pro Text, Helvetica Neue, Helvetica, Arial, … | Body font list (first installed one wins, per character) |
+| `fonts.body` | SF Pro Text, Helvetica Neue, Helvetica, Arial, … | Body font list (first installed one wins, per character). The terminal's own font is always put first, so body text is exactly the terminal's size (at `/iui size 100`). This list is used when the terminal's font is not known. |
 | `fonts.code` | Menlo, SF Mono, DejaVu Sans Mono, … | Code font list |
 | `fonts.use-terminal-font` | `true` | Put the terminal's own font first for code |
 | `dark.*`, `light.*` | see `vscode/theme.json` | Colours: `fg`, `muted`, `link`, `accent` (checked boxes), `bg` (the page colour that live Typst blocks get as `theme.bg`), `border` (h1/h2 rules, hr, table rows), `th-border`, `inline-code-fg`, `inline-code-bg`, `code-fg`, `code-plain-fg` (code blocks with no language; if you leave it out, `code-fg` is used), `code-bg`, `code-border`, `quote-bg`, `quote-border`, `check` (tick in a checked box), `red`, `green`, `blue`, `yellow`, `orange`, `purple` (for drawings) |

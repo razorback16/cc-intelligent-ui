@@ -2,7 +2,7 @@
 
 ← Back to the [README](../README.md)
 
-A theme sets the colours, fonts and spacing of the picture. Three themes are in the mod:
+A theme sets the colours, fonts and spacing of the picture. Body text always uses the terminal's own font at the terminal's text size. Three themes are in the mod:
 
 | Name | Looks like |
 |---|---|
