@@ -104,6 +104,7 @@ All commands are in [Usage](docs/usage.md).
 - [Limitations](docs/limitations.md): copy, search, timing and other limits
 - [Development](docs/development.md): build, test and module layout
 - [Gallery](docs/gallery.md): all the sample answers
+- [Changelog](CHANGELOG.md): what changed in each release
 
 ## Disclaimer
 
