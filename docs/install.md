@@ -55,7 +55,7 @@ The mod finds Typst on the `PATH` of your login shell. It also looks in `/usr/lo
 The mod works on Linux with X11 and with Wayland. It uses these tools. Most Linux systems have the first three.
 
 - **perl** (perl 5): reads the terminal size and its cell size, and watches for a change of the size.
-- **fontconfig** (`fc-match`, `fc-list`): finds the terminal font when the terminal's config does not name one. kitty and most terminals use fontconfig's `monospace` font. Ghostty uses its own JetBrains Mono when its config names no font. The mod uses JetBrains Mono only when fontconfig has it, because Typst must find the font too.
+- **fontconfig** (`fc-match`, `fc-list`): finds the terminal font when the terminal's config does not name one. kitty and most terminals use fontconfig's `monospace` font. Ghostty uses its own JetBrains Mono when its config names no font. If fontconfig does not have JetBrains Mono, the mod copies the font from the Ghostty program (refer to [How it works](how-it-works.md)).
 - **The light or dark mode of the desktop** (for the `auto` theme): the freedesktop portal (`org.freedesktop.appearance color-scheme`, through `gdbus` or `busctl`). GNOME, KDE Plasma and most desktops have the portal. If the portal does not answer, the mod reads GNOME's `color-scheme` (`gsettings`).
 - **The clipboard** (for the automatic copy in fullscreen mode and for `/iui grab` on the main screen, refer to [Copy text from a picture](usage.md#copy-text-from-a-picture)). The mod uses the first of these that it finds:
   1. **Wayland, not GNOME:** `wl-paste` from `wl-clipboard`. `wl-paste --watch` tells the mod about each clipboard change. It needs the data-control protocol of the compositor (KDE Plasma, Sway, Hyprland and other wlroots compositors have it).

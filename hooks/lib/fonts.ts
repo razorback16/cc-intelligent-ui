@@ -18,7 +18,8 @@ import { fsExists, processRun } from './api'
 export const SKIPPED_FONTS = /emoji|cjk|pingfang|hiragino|gothic|han sans|han serif|yahei|jhenghei|meiryo|malgun|simsun|simhei|wenquanyi|droid sans fallback/i
 
 // One font face of `typst fonts --variants`: its file (null: in Typst
-// itself) and its variant (`Normal, Weight: 400, Stretch: 100%`).
+// itself; a variable font's ` (Variable)` mark is cut) and its variant
+// (`Normal, Weight: 400, Stretch: 100%`).
 export type Face = { file: string | null; variant: string }
 
 // `typst fonts --variants` as faces by family (lower case, as Typst
@@ -36,7 +37,7 @@ export function fontListOf(stdout: string): Map<string, Face[]> {
     }
     const at = /^\s+[├└]\S*\s+(.*)$/.exec(line)
     if (at) {
-      file = at[1] === '(Embedded)' ? null : at[1]!.trim()
+      file = at[1] === '(Embedded)' ? null : at[1]!.replace(/\s+\(Variable\)\s*$/, '').trim()
       continue
     }
     const style = /^\s+\S*\s+Style:\s*(.*)$/.exec(line)

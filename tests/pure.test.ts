@@ -13,7 +13,7 @@ import {
 } from '../hooks/register'
 import { DRAWING_ROWS } from '../hooks/lib/settings'
 import { wrapPid } from '../hooks/lib/typst'
-import type { Env, Job } from '../hooks/lib/state'
+import { S, type Env, type Job } from '../hooks/lib/state'
 import { placeFirstLine } from '../hooks/lib/draw'
 import { DEFAULT_GRID, gridFirstRow, gridOf, gridRowsOf } from '../hooks/lib/grid'
 
@@ -435,6 +435,15 @@ test('the cell comes from the tty in device pixels, with no scale step', () => {
   expect(sizeOf('50 20 1700 1700')?.cell).toBe(null)
 })
 
+test('Ghostty pixels include the window padding: the cell is rounded down to whole pixels', () => {
+  // 183 x 42 cells of 16 x 34 px, with 8 px and 14 px of padding.
+  expect(sizeOf('42 183 2936 1442', true)?.cell).toEqual({ width: 16, height: 34 })
+  // Without the flag the padding goes into the cell.
+  expect(sizeOf('42 183 2936 1442')?.cell?.width).toBe(2936 / 183)
+  // Exact pixels stay exact.
+  expect(sizeOf('40 200 3200 1360', true)?.cell).toEqual({ width: 16, height: 34 })
+})
+
 test('the terminal font is read from iTerm2 and Ghostty settings', () => {
   expect(parseFontSpec('MesloLGS-NF-Regular 14')).toEqual({ name: 'MesloLGS-NF-Regular', size: 14 })
   expect(parseFontSpec('Menlo-Regular 12.5')).toEqual({ name: 'Menlo-Regular', size: 12.5 })
@@ -449,6 +458,17 @@ test('the terminal font is read from iTerm2 and Ghostty settings', () => {
   expect(itermFontOf('not json', 'Work', 'G1')).toBe(null)
   expect(ghosttyFontOf('theme = x\nfont-family = \nfont-family = "JetBrains Mono"\nfont-family = Menlo')).toBe('JetBrains Mono')
   expect(ghosttyFontOf('font-size = 13')).toBe(null)
+})
+
+test('typst also reads the font folder of the font that Ghostty carries, when there is one', () => {
+  const call = () => typstCall({ typst: 't', root: '/mod', cache: '/tmp/c', ppi: 144, inputs: {}, out: '/tmp/o.png' })
+  expect(call().env.TYPST_FONT_PATHS).toBe(undefined)
+  S.fontPaths = '/home/u/.cache/cc-intelligent-ui/fonts/ghostty-1'
+  try {
+    expect(call().env.TYPST_FONT_PATHS).toBe('/home/u/.cache/cc-intelligent-ui/fonts/ghostty-1')
+  } finally {
+    S.fontPaths = ''
+  }
 })
 
 test('typst runs with the network off and its own package cache', () => {

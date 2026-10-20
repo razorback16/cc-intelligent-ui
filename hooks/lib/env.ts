@@ -102,7 +102,7 @@ export function setUp($: EngineInterface): Promise<Env> {
         uiToast($, noTypstOf(isMac), { timeoutMs: 8000 })
       } catch {}
     }
-    const termFont = await termFontOf($, program, isMac).catch(() => '')
+    const termFont = await termFontOf($, isMac).catch(() => '')
     const home = (await envGet($, 'HOME')) ?? ''
     const designs = made3.trim() || (home ? `${home}/.cache/cc-intelligent-ui/designs` : `${cache}/designs`)
     const stored = await storeGet($, 'theme-name').catch(() => undefined)

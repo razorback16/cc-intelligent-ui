@@ -3,7 +3,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { COMPILE_TIMEOUT_MS, MAX_IMAGE_ROWS, NO_NETWORK, SEGMENT_ROWS, TOUCH_FLUSH_MS, TYPST_FALLBACKS } from './settings'
-import { DEFAULT_METRICS, type Cell, type FontMetrics, type Job, type LeanFonts, type Metrics, type Page, type Result } from './state'
+import { DEFAULT_METRICS, S, type Cell, type FontMetrics, type Job, type LeanFonts, type Metrics, type Page, type Result } from './state'
 import { firstLine, imagePathOf, localImages, plainOf, splitInTwo, splitSegments } from './markdown'
 import { inlineBudget } from './terminal'
 import { fontFit, placeFirstLine, sizing } from './draw'
@@ -15,7 +15,8 @@ import { leanFontsFor } from './fonts'
 import { clockAfter, envGet, fsExists, fsList, fsRead, fsWrite, processRun, processSpawn } from './api'
 
 // The typst command and its environment. Network off (see NO_NETWORK) and a
-// package cache of our own, so only the vendored packages load. `fonts`:
+// package cache of our own, so only the vendored packages load, and the
+// fonts of S.fontPaths (Ghostty's own font). `fonts`:
 // the lean font folder (fonts.ts) in place of all system fonts.
 export function typstCall(o: {
   typst: string
@@ -85,6 +86,7 @@ export function noNetworkEnv(cache: string): Record<string, string> {
     NO_PROXY: '',
     no_proxy: '',
     TYPST_PACKAGE_CACHE_PATH: `${cache}/pkg-cache`,
+    ...(S.fontPaths ? { TYPST_FONT_PATHS: S.fontPaths } : {}),
   }
 }
 

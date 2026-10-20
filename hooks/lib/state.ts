@@ -167,6 +167,9 @@ export const S = {
   // iTerm2 (isItermIn) and cmux (Ghostty inside, with its CMUX_* variables), set in setUp.
   isIterm: false,
   isCmux: false,
+  // A font folder for Typst (TYPST_FONT_PATHS): the fonts Ghostty carries in
+  // its program, when it draws them (no font-family set). '' for none.
+  fontPaths: '',
   // Over ssh (set in setUp): the terminal's config and the OS appearance here
   // are the remote computer's, not those of the user's screen.
   isRemote: false,

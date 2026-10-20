@@ -12,7 +12,7 @@ import { BASE_THEME, DEFAULT_CELL, RESIZE_QUIET_MS } from './settings'
 import { DEFAULT_METRICS, S, type Frame, type Metrics } from './state'
 import { beginEpoch, holdJobs, releaseJobs } from './epoch'
 import { pump } from './stream'
-import { columnsFor, sizeOf } from './terminal'
+import { columnsFor, isGhosttyHere, sizeOf } from './terminal'
 import { CELL_SH, perlFor, termFontOf, WATCH_PL } from './host'
 import { clipWatchArgs } from './clipboard'
 import { measureFonts } from './typst'
@@ -28,7 +28,7 @@ export type View = { columns: number; rows: number }
 // (the rule of sizeOf: no pixels, or a cell under 4 or over 64 px wide).
 export function frameOfLine(line: string): Frame | null {
   if (!/^\d+ \d+ \d+ \d+$/.test(line.trim())) return null
-  const size = sizeOf(line)
+  const size = sizeOf(line, isGhosttyHere())
   return size?.cell ? { columns: size.columns, rows: size.rows, cell: size.cell } : null
 }
 
@@ -330,7 +330,7 @@ export function refont($: EngineInterface): Promise<boolean> {
       fontAgain = false
       const env = S.env
       if (!env) return changed
-      const termFont = (await termFontOf($, S.termProgram, env.isMac).catch(() => '')) || env.termFont
+      const termFont = (await termFontOf($, env.isMac).catch(() => '')) || env.termFont
       const themeDir = S.look?.dir ?? `${env.root}/render/themes/${BASE_THEME}`
       const read = env.typst ? await measureFonts($, env.typst, env.root, env.cache, termFont, themeDir).catch(() => DEFAULT_METRICS) : env.metrics
       const metrics = read === DEFAULT_METRICS ? env.metrics : read

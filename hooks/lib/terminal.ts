@@ -32,15 +32,22 @@ export function fitBox(box: { columns: number; rows: number }, room: number): { 
 // WezTerm report device pixels already, so there is no backing-scale step.
 // `cell` is null where the tty reports no pixels or a cell that can't be
 // right (under 4 or over 64 px wide); the whole is null with no rows or
-// columns.
-export function sizeOf(stdout: string): { rows: number; columns: number; cell: Cell | null } | null {
+// columns. `padded`: the pixels include the window padding (Ghostty, cmux),
+// so the cell is rounded down to whole pixels (a cell is whole device
+// pixels, and the padding is less than one pixel per column or row).
+export function sizeOf(stdout: string, padded = false): { rows: number; columns: number; cell: Cell | null } | null {
   const [rows, columns, x, y] = stdout.trim().split(/\s+/).map(Number)
   if (!rows || !columns || !Number.isInteger(rows) || !Number.isInteger(columns)) return null
   if (!x || !y) return { rows, columns, cell: null }
-  const width = x / columns
-  const height = y / rows
+  const width = padded ? Math.floor(x / columns) : x / columns
+  const height = padded ? Math.floor(y / rows) : y / rows
   return { rows, columns, cell: width >= 4 && width <= 64 && height >= 4 ? { width, height } : null }
 }
+
+// Ghostty, or cmux (Ghostty's engine): its tty pixels include the window
+// padding (iTerm2, kitty and WezTerm do not), and it draws its own font when
+// its config names none.
+export const isGhosttyHere = () => /ghostty/i.test(S.termProgram + S.termName) || S.isCmux
 
 // A set flag: anything but empty, 0, false, no or off.
 export const isSet = (value: string | undefined) => !!value && !/^(0|false|no|off)$/i.test(value.trim())

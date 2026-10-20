@@ -61,6 +61,28 @@ test('the font list reads each family with its files and variants', () => {
   expect([...list.keys()].length).toBe(7)
 })
 
+test('a variable font is read by its file, without the (Variable) mark', () => {
+  const list = fontListOf([
+    'JetBrains Mono',
+    '  ├ /c/fonts/ghostty-1/JetBrainsMono-1.ttf (Variable)',
+    '  │   Style: Normal',
+    '  │   Stretch: 100%',
+    '  │   Weight: 100-800 (Default: 400)',
+    '  └ /c/fonts/ghostty-1/JetBrainsMono-2.ttf (Variable)',
+    '      Style: Italic',
+    '      Stretch: 100%',
+    '      Weight: 100-800 (Default: 400)',
+    '',
+  ].join('\n'))
+  expect(list.get('jetbrains mono')).toEqual([
+    { file: '/c/fonts/ghostty-1/JetBrainsMono-1.ttf', variant: 'Normal' },
+    { file: '/c/fonts/ghostty-1/JetBrainsMono-2.ttf', variant: 'Italic' },
+  ])
+  // The lean set links the two files first, as the terminal font.
+  const both = new Map([...fontListOf(LISTING), ...list])
+  expect(leanFiles(both, 'JetBrains Mono', FONTS)?.slice(0, 2)).toEqual(['/c/fonts/ghostty-1/JetBrainsMono-1.ttf', '/c/fonts/ghostty-1/JetBrainsMono-2.ttf'])
+})
+
 test('the lean set has the terminal font and the Latin fonts, not the CJK and emoji fonts', () => {
   expect(leanFiles(fontListOf(LISTING), 'MesloLGS NF', FONTS)).toEqual([
     '/Users/me/Library/Fonts/MesloLGS NF Regular.ttf',
