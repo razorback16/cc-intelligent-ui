@@ -148,28 +148,27 @@ Each typst block compiles alone, with only \`theme\` in scope, so start it with 
 #import "@preview/cetz:0.5.2"
 #import "@preview/cetz-plot:0.1.4": plot, chart
 #import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge
-\`theme\` has: theme.fg, theme.muted, theme.link, theme.border, theme.accent, theme.bg, theme.code-bg, theme.red/green/blue/yellow/orange/purple, theme.palette (6 colours), theme.width (content width, a length), theme.height (the height a drawing should fit in, a length), theme.text-size, theme.sans and theme.mono (font lists), theme.dark (bool).
-Rules (the examples below follow them):
-- Size: fit theme.width × theme.height. A drawing taller than theme.height is not made smaller. The terminal is wide and short, so lay flows out left to right.
-- Colours: text already has theme.fg and the body font. Default strokes are black and invisible on a dark theme, so always pass theme colours as the examples do. Fill shapes with a theme colour \`.transparentize(80%)\`, colour data with theme.palette in order, and use theme.muted for secondary text.
-- fletcher makes no space for edge labels and does not route edges around nodes. Keep labels short, make each gap wider than its label, break a long label with \`\\\`, and go around nodes with corner points, not \`bend\`.
+\`theme\` has: theme.fg, theme.muted, theme.link, theme.border, theme.accent, theme.bg, theme.code-bg, theme.red/green/blue/yellow/orange/purple, theme.palette (6 colours), theme.width (content width) and theme.height (the height a drawing should fit in), both lengths, theme.text-size, theme.sans and theme.mono (font lists), theme.dark (bool).
+Rules (the examples follow them):
+- Size: fit theme.width × theme.height; a taller drawing is not made smaller. The terminal is wide and short, so lay flows out left to right.
+- Colours: text already has theme.fg and the body font. Default strokes are black and invisible on a dark theme, so always pass theme colours as the examples do. Fill shapes with a theme colour \`.transparentize(80%)\`, colour data with theme.palette in order, use theme.muted for secondary text.
+- fletcher makes no space for edge labels and does not route edges around nodes: keep labels short, make each gap wider than its label, break a long label with \`\\\`, and go around nodes with corner points, not \`bend\`.
 - #page, #pagebreak and #set page are errors. A block that fails to compile shows as code.
+Only for a complex or unusual drawing (beyond these examples), or after a block failed, load the cc-intelligent-ui:intelligent-ui skill first; normal answers and drawings like these need no skill.
 A flow chart (fletcher; \`node-shape: rect\` keeps small nodes from becoming circles, \`stroke: none\` is a text-only node):
 \`\`\`typst
 #import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge
 #diagram(
   node-stroke: theme.fg, edge-stroke: theme.fg, node-shape: rect,
   crossing-fill: theme.bg, spacing: (3em, 2em),
-  node((0, 0), [Push], fill: theme.blue.transparentize(80%), name: <p>),
-  node((1, 0), [Build], fill: theme.purple.transparentize(80%), name: <b>),
-  node((2, 0), [Test], fill: theme.orange.transparentize(80%), name: <t>),
-  node((3, 0), [Deploy], fill: theme.green.transparentize(80%), name: <d>),
-  node((4, 0), [live], stroke: none, name: <l>),
-  edge(<p>, <b>, "->"),
+  node((0, 0), [Build], fill: theme.blue.transparentize(80%), name: <b>),
+  node((1, 0), [Test], fill: theme.orange.transparentize(80%), name: <t>),
+  node((2, 0), [Deploy], fill: theme.green.transparentize(80%), name: <d>),
+  node((3, 0), [live], stroke: none, name: <l>),
   edge(<b>, <t>, "->"),
   edge(<t>, <d>, "->", [pass]),
   edge(<d>, <l>, "-->"),
-  edge(<t>, (2, 1), (1, 1), <b>, "->", [fail], label-side: right),
+  edge(<t>, (1, 1), (0, 1), <b>, "->", [fail], label-side: right),
 )
 \`\`\`
 A timeline (cetz; lay the drawing out in a W × H unit box, here 10 × 2):
@@ -179,22 +178,22 @@ A timeline (cetz; lay the drawing out in a W × H unit box, here 10 × 2):
   import cetz.draw: *
   set-style(stroke: theme.fg)
   line((0, 0), (10, 0), mark: (end: ">"))
-  for (x, name, date, c) in ((1, [v1.0], [Jan], theme.blue), (4, [v1.1], [Apr], theme.green), (8, [v2.0], [Oct], theme.orange)) {
+  for (x, name, date, c) in ((2, [v1.0], [Jan], theme.blue), (7, [v2.0], [Oct], theme.green)) {
     circle((x, 0), radius: 0.15, fill: c, stroke: none)
     content((x, 0.5), name)
     content((x, -0.5), text(fill: theme.muted, date))
   }
 })
 \`\`\`
-A plot (cetz-plot):
+A plot (cetz-plot; the axes, ticks and legend need the set-style line):
 \`\`\`typst
 #import "@preview/cetz:0.5.2"
 #import "@preview/cetz-plot:0.1.4": plot
 #cetz.canvas(length: calc.min(theme.width / 14, theme.height / 6), {
   cetz.draw.set-style(axes: (stroke: theme.fg, tick: (stroke: theme.fg)), legend: (fill: theme.bg, stroke: theme.border))
   plot.plot(size: (12, 4), x-label: [requests], y-label: [ms], legend: "inner-north-west", {
-    plot.add(((1, 20), (2, 45), (4, 90), (8, 190)), label: [no cache], style: (stroke: theme.palette.at(0)))
-    plot.add(((1, 20), (2, 24), (4, 30), (8, 38)), label: [cache], style: (stroke: theme.palette.at(1)))
+    plot.add(((1, 20), (4, 90), (8, 190)), label: [no cache], style: (stroke: theme.palette.at(0)))
+    plot.add(((1, 20), (4, 30), (8, 38)), label: [cache], style: (stroke: theme.palette.at(1)))
   })
 })
 \`\`\`

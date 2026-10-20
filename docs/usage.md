@@ -34,6 +34,14 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
   These pictures are not larger than the image. They are not wider than the transcript. The height setting (`/iui height`) sets the most rows that they can use (Typst drawings use it too): by default, half the screen and not more than 24 rows. The mod draws PNG, JPEG, WebP and SVG images only. Other image types (for example GIF) stay as the normal row. The size of an SVG image is its width and height in CSS px.
 - The plan in plan mode (the ExitPlanMode tool). The mod draws the plan as a picture in the transcript, the same as an answer. Then the mod asks you to approve the plan. Refer to [Plan approval](#plan-approval).
 
+## The intelligent-ui skill
+
+The mod has a skill for Claude: `intelligent-ui`. It has the full API of Typst, fletcher, CeTZ and cetz-plot, recipes for many diagram and chart types, and a compile check. Claude loads it by itself before it writes a complex drawing, or after a drawing did not compile. For normal answers and simple drawings, Claude does not load it.
+
+The compile check (`scripts/check.sh` in the skill) compiles a drawing with the mod's template and your theme, in dark and light mode. It shows the errors and writes PNG images. Claude looks at the images and corrects the drawing before it answers.
+
+You can also start the skill yourself: type `/cc-intelligent-ui:intelligent-ui` (or `/intelligent-ui` when no other command has that name), and then ask for the drawing.
+
 ## Commands
 
 | Command | What it does |

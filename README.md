@@ -48,7 +48,7 @@ In other terminals, the mod shows the normal text. Refer to [Install](docs/insta
 
 - **Rendered Markdown.** Headings, tables, task lists, block quotes and code with syntax colours, in your terminal's own font.
 - **LaTeX math.** Inline `$…$` and display `$$…$$` math, typeset.
-- **Live diagrams, charts and plots.** Claude writes Typst with CeTZ, cetz-plot and fletcher. The drawings use your theme's colours and work offline.
+- **Live diagrams, charts and plots.** Claude writes Typst with CeTZ, cetz-plot and fletcher. The drawings use your theme's colours and work offline. For a complex drawing, Claude loads the bundled `intelligent-ui` skill, with the full API and a compile check.
 - **Images and files.** Images in an answer, images that Claude sends, Markdown files that Claude sends, and images that you paste show in the transcript.
 - **Copy text from pictures.** In fullscreen mode, select and copy text with the mouse, as you do with normal text. On Linux, this needs a clipboard tool (refer to [Install](docs/install.md#linux)).
 - **Links you can click.** The links, file paths and commands of an answer show in rows under its picture. A cmd+click on a link opens it. A click on a command copies it.
@@ -98,7 +98,7 @@ All commands are in [Usage](docs/usage.md).
 ## Docs
 
 - [Install](docs/install.md): requirements, terminal support and updates
-- [Usage](docs/usage.md): what it draws, commands, copy, plan approval
+- [Usage](docs/usage.md): what it draws, the skill, commands, copy, plan approval
 - [Themes](docs/themes.md): built-in themes and your own
 - [How it works](docs/how-it-works.md): the render steps and light or dark mode
 - [Limitations](docs/limitations.md): copy, search, timing and other limits

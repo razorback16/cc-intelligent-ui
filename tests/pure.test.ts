@@ -544,6 +544,8 @@ test('Claude is told about typst blocks', () => {
   expect(TYPST_PROMPT.includes('Each typst block compiles alone')).toBe(true)
   expect(TYPST_PROMPT.includes('theme.code-bg')).toBe(true)
   expect(TYPST_PROMPT.includes('break a long label with `\\`')).toBe(true)
+  expect(TYPST_PROMPT.includes('load the cc-intelligent-ui:intelligent-ui skill first')).toBe(true)
+  expect(TYPST_PROMPT.includes('normal answers and drawings like these need no skill')).toBe(true)
   expect(TYPST_PROMPT.endsWith('keep replies readable as plain text too.')).toBe(true)
 })
 
