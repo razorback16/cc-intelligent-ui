@@ -33,8 +33,8 @@ import { runSetup } from './lib/setup'
 import { pollHost, PROBE_RUNS, probeOsc11, showMode, USE_OSC11, watchHost } from './lib/host'
 import { measureFonts } from './lib/typst'
 import { drawPages, linksFor, type ShownLink } from './lib/draw'
-import { picked, postOf, redrawSelection, runsOf, selectedRows, selectionAfter, selectTrace, selStamp, stripPlan, textOfRuns, topsOf, type SelectPost, type Selection } from './lib/select'
-import { cutStrips } from './lib/strips'
+import { picked, postOf, redrawSelection, runsOf, selectedRows, selectionAfter, selectTrace, textOfRuns, topsOf, type SelectPost, type Selection } from './lib/select'
+import { blits, warmPage } from './lib/blit'
 import { traceDebug } from './lib/log'
 import { finalizeAll } from './lib/stream'
 import { noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf, type PageWords } from './lib/probe'
@@ -161,9 +161,8 @@ const stampOf = (ready: { env: Env; done: number }, view?: RenderViewport) =>
 // one pointer), `extra` its other inputs.
 type Memo<T> = { text: string; extra: string; stamp: string; onScreen: boolean | undefined; value: T }
 // An answer's tree is kept with its link rows (the copy counts them under
-// its pages), its pages and its selection's stamp (selStamp: a new one
-// draws the tree again from the pages), a plan's drawing with its link rows.
-type AnswerMemo = { tree: RenderElement; links: readonly ShownLink[]; pages: { result: Result; bytes?: readonly string[] }; sel: string }
+// its pages) and its pages, a plan's drawing with its link rows.
+type AnswerMemo = { tree: RenderElement; links: readonly ShownLink[]; pages: { result: Result; bytes?: readonly string[] } }
 const answers = new Map<string, Memo<AnswerMemo>>()
 const plans = new Map<string, Memo<{ drawing: Drawing; links: ShownLink[] }>>()
 const unders = new Map<string, Memo<Under[]>>()
@@ -493,13 +492,14 @@ async function dump($: EngineInterface, on: boolean): Promise<string> {
 }
 
 // ---- Picture select -------------------------------------------------------
-// The Client over each page (hooks/sel.tsx) posts the selection; it is drawn
-// over the pages (lib/draw.tsx) and its text copied on the button's up, read
-// as a shim's copy is (wordsOf, textOfRun). See lib/select.ts.
+// The Client over each page (hooks/sel.tsx) posts the selection; the pages
+// show it (a blit of each page's picture, lib/blit.ts) and its text is
+// copied on the button's up, read as a shim's copy is (wordsOf, textOfRun).
+// See lib/select.ts.
 
-// A Client's post: the selection after it, drawn again (the redraw takes
-// the newest selection, so posts that come faster than redraws merge). A
-// down cuts its page's strips now, so they are there for the drag.
+// A Client's post: the selection after it, shown (once a frame at most, the
+// newest selection). A down decodes its page now, for the drag's frames,
+// and lets a page whose blit was refused try again.
 function onSelect($: EngineInterface, post: SelectPost, surface: RenderSurface) {
   if (post.seq <= picked.seq) return
   picked.seq = post.seq
@@ -507,13 +507,11 @@ function onSelect($: EngineInterface, post: SelectPost, surface: RenderSurface) 
   const was = picked.now
   picked.now = d ? selectionAfter(post, topsOf(d.pages)) : null
   if (S.debug) traceDebug($, selectTrace(post, d, picked.now))
-  if (was || picked.now) redrawSelection($)
-  const page = d?.pages[post.page]
-  const cell = S.tty?.cell
-  if (post.phase === 'down' && page && cell && S.env) {
-    const plan = stripPlan(page, page, cell)
-    if (plan) cutStrips($, S.env, page, plan, () => redrawSelection($))
+  if (post.phase === 'down') {
+    blits.refused.clear()
+    warmPage($, d?.pages[post.page])
   }
+  if (was || picked.now) redrawSelection($)
   // The copy waits for the page's words (a probe): the next posts do not.
   if (post.phase === 'up' && d && picked.now) void copySelection($, d, picked.now, surface).catch(() => undefined)
 }
@@ -848,11 +846,6 @@ export const register: Register = on => {
         noteDrawnAgain(e.requestId, roomColumns(e.viewport), { top: MARGIN_TOP, after: kept.links.length })
         noteOnScreen(e.requestId, e.props.onScreen)
       })
-      const sel = selStamp(e.requestId)
-      if (kept.sel !== sel) {
-        kept.tree = drawPages($, e, kept.pages.result, kept.pages.bytes, { bullet, links: kept.links, id: e.requestId })
-        kept.sel = sel
-      }
       return kept.tree
     }
     const drawing = await pagesOf($, { id: e.requestId, text: e.props.text, frame: frameFor(e.viewport), env: ready.env, canStream: true, onScreen })
@@ -864,7 +857,7 @@ export const register: Register = on => {
         noteDrawn(e.requestId, result, roomColumns(e.viewport), { top: MARGIN_TOP, after: links.length })
         noteOnScreen(e.requestId, e.props.onScreen)
       })
-      memoSet(answers, e.requestId, k, { tree, links, pages: { result, ...(drawing.bytes ? { bytes: drawing.bytes } : {}) }, sel: selStamp(e.requestId) })
+      memoSet(answers, e.requestId, k, { tree, links, pages: { result, ...(drawing.bytes ? { bytes: drawing.bytes } : {}) } })
       return tree
     }
     answers.delete(e.requestId)

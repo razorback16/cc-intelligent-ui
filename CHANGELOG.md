@@ -6,7 +6,7 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 ### New
 
-- **Picture select.** Since Claude Code 2.1.305, the mouse selection of Claude Code skips pictures: no highlight and no text. In fullscreen mode, the mod now selects the text of a picture itself. Drag over the picture: the selected rows show on a blue background, and when you release the button, the mod copies their text and shows the toast "copied N chars of text". A click with no drag removes the selection. This needs Claude Code 2.1.305 or newer. `/iui select off` turns it off. Refer to [Copy text from a picture](docs/usage.md#copy-text-from-a-picture).
+- **Picture select.** Since Claude Code 2.1.305, the mouse selection of Claude Code skips pictures: no highlight and no text. In fullscreen mode, the mod now selects the text of a picture itself. Drag over the picture: the selected cells show on a blue background, and when you release the button, the mod copies their text and shows the toast "copied N chars of text". A click with no drag removes the selection. The highlight swaps the page's picture with `$.ui.blit` (a frame with the selected cells tinted), so the layout never changes and a clear leaves no old cells. This needs Claude Code 2.1.305 or newer. `/iui select off` turns it off. Refer to [Copy text from a picture](docs/usage.md#copy-text-from-a-picture).
 
 ### Changed
 

@@ -4,7 +4,7 @@
 // declaration that spells the call `$.noun.method(...)` (the validator
 // follows `$` into a declaration only), with the types of EngineInterface.
 import type {
-  AskOptions, CommandSpec, EngineInterface, FsBytes, FsReadBytesOptions, FsReadOptions, FsStatOptions, HttpInit, InvalidatableEventName,
+  AskOptions, CommandSpec, EngineInterface, FsBytes, FsReadBytesOptions, FsReadOptions, FsStatOptions, HttpInit, ImageBlitArgs, InvalidatableEventName,
   OpEventOf, PaneCloseArgs, PaneOpenArgs, ProcessRunInit, ProcessSpawnRequest, ResolveInput, ToastOptions, UiCopyArgs, UiLogOptions,
 } from 'claude-code'
 
@@ -169,6 +169,10 @@ export function turnAbort($: EngineInterface, input: OpEventOf['turn.abort']) {
 
 export function uiAsk($: EngineInterface, question: string, options?: readonly string[] | AskOptions) {
   return $.ui.ask(question, options)
+}
+
+export function uiBlit($: EngineInterface, args: ImageBlitArgs) {
+  return $.ui.blit(args)
 }
 
 export function uiClose($: EngineInterface, pane: PaneCloseArgs) {

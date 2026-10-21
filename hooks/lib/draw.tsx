@@ -11,8 +11,8 @@ import { DEFAULT_GRID, gridFirstRow, type GridMetrics } from './grid'
 import { FENCE, imagePathOf } from './markdown'
 import { linksOf, type LinkItem } from './links'
 import { fitBox, fitsInline, roomColumns } from './terminal'
-import { overlayRows, picked, redrawSelection, selectColor, selectedRows, selectOn, stripFile, stripPlan, type SelRow } from './select'
-import { cutStrips, hasStrips } from './strips'
+import { selectOn } from './select'
+import { noteSite } from './blit'
 import { fsExists, fsRead, uiCopy, uiResolve, uiToast } from './api'
 
 // FNV-1a over the parts, twice with different offsets: 16 hex digits.
@@ -181,7 +181,8 @@ export async function inlineOf($: EngineInterface, result: Result): Promise<stri
 // first line's row), `gutter` its width (0: none), `marginTop` the rows above,
 // `keys` a prefix for its Images' and Buttons' keys (several sets in one
 // tree), `links` the link rows under the pages (one row each), `id` the
-// drawing's id in drawnAnswers (its pages take picture select).
+// drawing's id in drawnAnswers (its pages take picture select, its Images
+// swapped by key under the render's requestId: blit.ts).
 export type PagesLayout = { bullet?: boolean; gutter?: number; marginTop?: number; keys?: string; links?: readonly ShownLink[]; id?: string }
 
 // The bullet's row when the page is drawn `factor` as wide.
@@ -195,7 +196,7 @@ export function scaledBulletRow(bulletRow: number, factor: number): number {
 // the room now (an old one in an open epoch) draws smaller to fit, the
 // bullet scaled too: the engine shifts a wider Image, it does not clip it.
 export function drawPages(
-  $: EngineInterface, e: ResolveInput<RenderComponent, 'terminal'> & { viewport?: RenderViewport }, result: Result, inline?: readonly string[], layout: PagesLayout = {},
+  $: EngineInterface, e: ResolveInput<RenderComponent, 'terminal'> & { viewport?: RenderViewport; requestId?: string }, result: Result, inline?: readonly string[], layout: PagesLayout = {},
 ) {
   const table = uiResolve($, e)
   const { Box, Text, Image } = table
@@ -207,12 +208,14 @@ export function drawPages(
   const factor = first && first.columns > room ? room / first.columns : 1
   const keys = layout.keys ?? ''
   const boxes = result.pages.map(page => fitBox(page, room))
-  // Picture select: each page in a Box of its size, the selected rows over
-  // it, and last the Client that takes the pointer (select.ts). Both in the
-  // flow, pulled up over the page (marginTop), never absolute (overlayRows).
+  // Picture select: each page in a Box of its size with the Client that
+  // takes the pointer over it, in the flow, pulled up over the page
+  // (marginTop): never absolute (the engine moves an absolute Box whose top
+  // is above the screen down to row 0, its pointer too). The highlight
+  // swaps the Image's picture (blit.ts); the layout stays.
   const id = layout.id
-  const cell = id && !inline ? selectOn({ hasClient: !!Client, isFullscreen: e.viewport?.isFullscreen }) : null
-  const sel = id && cell && picked.now?.id === id ? selectedRows(picked.now, boxes) : null
+  const isSelect = !!id && !inline && !!Client && selectOn({ hasClient: true, isFullscreen: e.viewport?.isFullscreen })
+  if (isSelect && e.requestId) noteSite(id, e.requestId, keys)
   return (
     <Box flexDirection="row" marginTop={layout.marginTop ?? MARGIN_TOP}>
       {gutter > 0 ? (
@@ -233,14 +236,10 @@ export function drawPages(
               alt={page.alt}
             />
           )
-          const plan = cell ? stripPlan(page, box, cell) : null
-          if (!plan || !Client || !id) return image
+          if (!isSelect || !Client || !id) return image
           return (
             <Box key={`${keys}w${i}`} flexDirection="column" width={box.columns} height={box.rows} flexShrink={0}>
               {image}
-              <Box key={`${keys}o${i}`} flexDirection="column" marginTop={-box.rows} width={box.columns} height={box.rows} flexShrink={0}>
-                {drawSelected($, e, page, { ...plan, columns: box.columns }, sel?.[i] ?? [], `${keys}${i}`)}
-              </Box>
               <Box key={`${keys}c${i}`} marginTop={-box.rows} width={box.columns} height={box.rows} flexShrink={0}>
                 <Client key={`${keys}sel${i}`} module="../sel.tsx" width={box.columns} height={box.rows} props={{ id, page: i }} />
               </Box>
@@ -252,31 +251,6 @@ export function drawPages(
       </Box>
     </Box>
   )
-}
-
-// The selected rows of a page ("clip, do not crop"): each row's strip (the
-// page's own row) in a Box of the selected columns on the selection colour,
-// shifted left so its cells stay over the page's. The page is transparent,
-// so the colour shows under its text. Each row in the flow (overlayRows).
-// Nothing while the strips are cut: they draw once there.
-function drawSelected(
-  $: EngineInterface, e: ResolveInput<RenderComponent, 'terminal'>, page: { file: string; width: number; height: number },
-  plan: { rowPx: number; rows: number; columns: number }, rows: readonly SelRow[], keys: string,
-) {
-  if (!rows.length || !S.env) return null
-  if (!hasStrips(page.file, plan.rowPx)) {
-    cutStrips($, S.env, page, plan, () => redrawSelection($))
-    return null
-  }
-  const { Box, Image } = uiResolve($, e)
-  const bg = selectColor(S.theme, picked.gen)
-  return overlayRows(rows).map(r => (
-    <Box key={`${keys}r${r.row}`} marginTop={r.top} marginLeft={r.x0} width={r.x1 - r.x0 + 1} height={1} flexShrink={0} overflow="hidden" backgroundColor={bg}>
-      <Box marginLeft={-r.x0} width={plan.columns} flexShrink={0}>
-        <Image key={`${keys}s${r.row}`} source={{ file: stripFile(page.file, plan.rows, r.row), format: 'png' }} columns={plan.columns} rows={1} alt=" " />
-      </Box>
-    </Box>
-  ))
 }
 
 // ---- Links ------------------------------------------------------------------

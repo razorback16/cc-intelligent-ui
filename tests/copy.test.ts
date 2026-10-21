@@ -12,6 +12,9 @@ import { HINT_WAIT_MS } from '../hooks/lib/settings'
 import { rowsAfter, type Under } from '../hooks/lib/pictures'
 import { forgetProbed, noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf } from '../hooks/lib/probe'
 import { clip, drawnAnswers, lastKey, results, type Job, type Result } from '../hooks/lib/state'
+import { forgetBlits, over, rgbOf, WRITE_PL } from '../hooks/lib/blit'
+import { forgetRedraws } from '../hooks/lib/select'
+import { chunk, concat, decodePng, deflatePiece, fromBase64, headOf, tailOf, toBase64 } from '../hooks/lib/png'
 import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI } from './copy-fixture'
 
 // One screen row of a picture as Claude Code draws it: `lead` (the gutter),
@@ -501,8 +504,12 @@ const inputsOf = (argv: readonly string[]) => Object.fromEntries(argv.flatMap((a
 // with no ask (another session's, the terminal's own on the main screen,
 // another app's); `change` is one more change with the same text.
 // `tty`: the tty size line its read gives (none: no read), `version`
-// Claude Code's (picture select); `strips` the strip cuts run.
-function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Record<string, string>; tty?: string; version?: string } = {}) {
+// Claude Code's (picture select); `frames` the highlight's frame files
+// written, `blits` the blits asked (`deny`: each refused with it), `logs`
+// the debug log lines.
+function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Record<string, string>; tty?: string; version?: string; deny?: string } = {}) {
+  forgetBlits()
+  forgetRedraws()
   mock.store(on)
   const clock = mock.clock(on)
   const vars: Record<string, string | undefined> = { PATH: '/usr/bin:/bin', ...(o.env ?? { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' }) }
@@ -525,7 +532,8 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
   const w = {
     clock, files, compiles, queries, kills, watchers, readers, vars, envSets,
     ended: [] as string[][], answers: [] as string[], late: [] as string[], cleaned: [] as string[], asks: 0, reads: [] as string[],
-    clipboard: 'nothing yet', count: 40, pastes: 0, copies: [] as string[], toasts: [] as string[], strips: [] as string[][], traces: [] as string[],
+    clipboard: 'nothing yet', count: 40, pastes: 0, copies: [] as string[], toasts: [] as string[], traces: [] as string[], logs: [] as string[],
+    frames: [] as { path: string; old: string[]; png: Uint8Array }[], blits: [] as any[],
     selection: undefined as { text: string; requestId?: string } | undefined,
     selects: true,
     gate: null as Promise<void> | null, release: () => {},
@@ -646,8 +654,8 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
     }
     if (/cc-intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (o.tty && argv[0] === 'sh' && cmd.includes('ioctl(T')) return ok(o.tty)
-    if (argv[0] === 'sh' && argv.some(a => a.endsWith('/render/strips.typ'))) {
-      w.strips.push(argv)
+    if (argv[0] === '/usr/bin/perl' && argv[2] === WRITE_PL) {
+      w.frames.push({ path: argv[3]!, old: argv.slice(4), png: fromBase64(e.init?.stdin ?? '') })
       return ok('')
     }
     if (argv[0] === 'sh' && cmd.includes('debug.log')) {
@@ -679,6 +687,7 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
     e.path.startsWith(`${ASK_DIR}/`) && files.has(e.path) ? { value: { kind: 'file', size: files.get(e.path)!.length, mtimeMs: 1, isLink: false } } : next(e))
   on('fs.read', async ($: any, e: any, next: any) => {
     w.reads.push(e.path)
+    if (e.as === 'bytes' && /^\/c\/.*\.png$/.test(e.path)) return { value: { base64: PAGE_PNG } }
     return e.path.endsWith('/hooks/clip-shim.sh') ? { value: SHIM_STUB } : files.has(e.path) ? { value: files.get(e.path) } : e.path.startsWith('/c/') ? { deny: 'ENOENT' } : next(e)
   })
   // One page per segment of the folder's doc.json.
@@ -694,6 +703,14 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
     return { value: { isCopied: true } }
   })
   on('ui.selection', async () => ({ value: w.selection }))
+  on('ui.blit', async ($: any, e: any) => {
+    w.blits.push(e)
+    return { value: o.deny ? { deny: o.deny } : {} }
+  })
+  on('ui.log', async ($: any, e: any) => {
+    w.logs.push(String(e.text))
+    return { value: undefined }
+  })
   on('session.version', async () => ({ value: { version: o.version ?? '2.1.306', base: o.version ?? '2.1.306' } }))
   on('ui.toast', async ($: any, e: any) => {
     w.toasts.push(String(e.text))
@@ -1401,64 +1418,135 @@ test('the fullscreen advice is not shown with Intelligent UI off', async ($, on)
 // The tty of the fixture's page: 100 columns (98 for the picture) of 16 x 32 px.
 const TTY = '40 100 1600 1280'
 const tree = (node: any): any[] => (node && typeof node === 'object' ? [node, ...(node.children ?? []).flatMap(tree)] : [])
-const stripImages = (drawn: any) => tree(drawn).filter(n => n.type === 'Image' && /\.strips\//.test(n.props.source?.file ?? ''))
-// The selected rows drawn: each strip's row (its Box in the flow, its
-// marginTop the rows after the row before), and its Box's columns.
-const selectedOf = (drawn: any) => {
-  let next = 0
-  return tree(drawn)
-    .filter(n => n.type === 'Box' && n.props.overflow === 'hidden' && n.props.height === 1 && n.props.backgroundColor)
-    .map(n => {
-      const row = next + n.props.marginTop
-      next = row + 1
-      return { row, x0: n.props.marginLeft, x1: n.props.marginLeft + n.props.width - 1 }
-    })
+// The fixture's page, 1568 x 512 px (98 x 16 cells of 16 x 32): ink (opaque)
+// on every third pixel, the rest transparent.
+const pagePixel = (x: number, y: number) => ((x + y) % 3 ? [0, 0, 0, 0] : [200, 210, 220, 255])
+const PAGE_PNG = (() => {
+  const line = 1568 * 4 + 1
+  const raw = new Uint8Array(512 * line)
+  for (let y = 0; y < 512; y++) for (let x = 0; x < 1568; x++) raw.set(pagePixel(x, y), y * line + 1 + x * 4)
+  const piece = deflatePiece(raw, 4, line)
+  return toBase64(concat([headOf(1568, 512), chunk('IDAT', piece.bytes), tailOf([piece])]))
+})()
+// Whether a frame's cell (row, column) is the selection's: a transparent
+// pixel of it is the colour (an opaque one is the same either way).
+const cellOf = (png: Uint8Array, row: number, col: number) => {
+  const img = decodePng(png)
+  const y = row * 32 + 2
+  const x = col * 16 + ((col * 16 + y) % 3 ? 0 : 1)
+  const p = [...img.data.subarray((y * 1568 + x) * 4, (y * 1568 + x) * 4 + 4)]
+  const was = pagePixel(x, y)
+  const c = rgbOf('#264f78')
+  if (p.join() === was.join()) return 'page'
+  return p.join() === [over(was[0]!, was[3]!, c[0]), over(was[1]!, was[3]!, c[1]), over(was[2]!, was[3]!, c[2]), 255].join() ? 'selected' : 'other'
+}
+// The page Box of the drawing: the Image, then the Client pulled up over it.
+const pageBox = (drawn: any) => tree(drawn).find(n => n.type === 'Box' && n.props.flexDirection === 'column' && n.props.width === 98 && n.props.height === 16)
+const settle = async (w: ReturnType<typeof world>) => {
+  for (let i = 0; i < 4; i++) {
+    await w.clock.settle()
+    await w.clock.advance(20)
+  }
+  await w.clock.settle()
 }
 
-test('picture select: a drag over a page draws its rows over it and copies their text on the up', async ($, on) => {
+test('picture select: a drag swaps the page\'s picture for a frame of its selected cells, copies their text on the up; a click puts the page back', async ($, on) => {
   const w = world(on, { tty: TTY })
   await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await drawAnswer($, w)
-  const client = tree(await ui.drawn()).find(n => n.type === 'Client')
+  const before = await ui.drawn()
+  const client = tree(before).find(n => n.type === 'Client')
   expect(client?.props).toMatchObject({ key: 'sel0', width: 98, height: 16, props: { id: 'ans-1', page: 0 } })
+  // The Image and the Client over it, in the flow: no absolute Box (the
+  // engine moves one scrolled above the screen to row 0), no overlay.
+  const page = pageBox(before)
+  expect(page.children.map((c: any) => c.type)).toEqual(['Image', 'Box'])
+  expect(page.children.map((c: any) => c.props.marginTop)).toEqual([undefined, -16])
+  expect(page.children[0].props.key).toBe('p0')
+  expect(tree(page).some(n => n.props?.position === 'absolute' || n.props?.backgroundColor)).toBe(false)
   await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'sel0' })
-  await w.clock.settle()
-  // The page's strips are cut at the down: rows of 32 px.
-  expect(w.strips.length).toBe(1)
-  expect(w.strips[0]).toContain('row=32')
+  await settle(w)
+  // A down selects nothing yet: no frame.
+  expect(w.frames).toEqual([])
   await ui.pointer({ type: 'move', x: 10, y: 2, button: 'left', in: 'sel0' })
   await ui.pointer({ type: 'up', x: 21, y: 3, button: 'left', in: 'sel0' })
-  await w.clock.settle()
+  await settle(w)
   expect(w.copies).toEqual([COPIED])
   expect(w.toasts).toContain(`Intelligent UI: copied ${COPIED.length} chars of text`)
-  const drawn = await ui.drawn()
-  expect(selectedOf(drawn)).toEqual([{ row: 1, x0: 0, x1: 97 }, { row: 2, x0: 0, x1: 97 }, { row: 3, x0: 0, x1: 21 }])
-  expect(stripImages(drawn).map(n => n.props.source.file.replace(/^.*\//, ''))).toEqual(['s-02.png', 's-03.png', 's-04.png'])
-  expect(stripImages(drawn).every(n => n.props.columns === 98 && n.props.rows === 1)).toBe(true)
-  // The rows, then the Client, pulled up over the page in the flow: no
-  // absolute Box (the engine moves one scrolled above the screen to row 0).
-  const page = tree(drawn).find(n => n.type === 'Box' && n.props.flexDirection === 'column' && n.props.width === 98 && n.props.height === 16)
-  expect(page.children.map((c: any) => c.props.marginTop)).toEqual([undefined, -16, -16])
-  expect(page.children[2].children[0].type).toBe('Client')
-  expect(tree(page).some(n => n.props?.position === 'absolute')).toBe(false)
-  // A click with no drag clears it, and copies nothing.
+  // The last blit: the Image p0 under the message's requestId, its newest frame file.
+  const last = w.blits.at(-1)
+  expect(last).toMatchObject({ requestId: 'ans-1', key: 'p0', source: { format: 'png' } })
+  const frame = w.frames.at(-1)!
+  expect(last.source.file).toBe(frame.path)
+  expect(frame.path).toMatch(/^\/c\/select-[0-9a-z]+\/f-\d+\.png$/)
+  // Rows 1 and 2 whole, row 3 to column 21; the rest of the page as it is.
+  expect([cellOf(frame.png, 1, 0), cellOf(frame.png, 1, 97), cellOf(frame.png, 2, 50), cellOf(frame.png, 3, 21)]).toEqual(['selected', 'selected', 'selected', 'selected'])
+  expect([cellOf(frame.png, 0, 5), cellOf(frame.png, 3, 22), cellOf(frame.png, 4, 0), cellOf(frame.png, 15, 97)]).toEqual(['page', 'page', 'page', 'page'])
+  // The layout never changes with the selection.
+  expect(JSON.stringify(pageBox(await ui.drawn()))).toBe(JSON.stringify(page))
+  // A click with no drag clears it: the page's own PNG back, nothing copied.
+  const frames = w.frames.length
   await ui.pointer({ type: 'down', x: 5, y: 5, button: 'left', in: 'sel0' })
   await ui.pointer({ type: 'up', x: 5, y: 5, button: 'left', in: 'sel0' })
-  await w.clock.settle()
-  expect(selectedOf(await ui.drawn())).toEqual([])
+  await settle(w)
+  expect(w.blits.at(-1)).toMatchObject({ requestId: 'ans-1', key: 'p0', source: { file: drawnAnswers.get('ans-1')?.pages[0]?.file ?? w.blits.at(-1).source.file, format: 'png' } })
+  expect(w.blits.at(-1).source.file).toMatch(/^\/c\/[0-9a-f]+\/a-1\.png$/)
+  expect(w.frames.length).toBe(frames)
   expect(w.copies).toEqual([COPIED])
-  // The strips are cut once.
-  expect(w.strips.length).toBe(1)
+  // The page is read (decoded) once.
+  expect(w.reads.filter(r => r.endsWith('/a-1.png')).length).toBe(1)
 })
 
-test('picture select: with IUI_DEBUG, each post writes a trace line (the post, its region, the rows selected)', async ($, on) => {
+test('picture select: a fast drag folds into few frames, the last one the newest selection', async ($, on) => {
+  const w = world(on, { tty: TTY })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await drawAnswer($, w)
+  await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'sel0' })
+  await settle(w)
+  for (let i = 1; i <= 15; i++) await ui.pointer({ type: 'move', x: 5 * i, y: i, button: 'left', in: 'sel0' })
+  await settle(w)
+  // Fifteen moves, far fewer frames; the last shows rows 0 to 15 (to column 75).
+  expect(w.frames.length).toBeGreaterThan(0)
+  expect(w.frames.length).toBeLessThan(15)
+  const png = w.frames.at(-1)!.png
+  expect([cellOf(png, 14, 97), cellOf(png, 15, 75), cellOf(png, 15, 76)]).toEqual(['selected', 'selected', 'page'])
+  expect(w.blits.at(-1).source.file).toBe(w.frames.at(-1)!.path)
+  // Old frame files go once four newer ones are there and 2 s have passed.
+  for (let i = 0; i < 6; i++) {
+    await ui.pointer({ type: 'move', x: 3 + i, y: 2, button: 'left', in: 'sel0' })
+    await settle(w)
+  }
+  expect(w.frames.flatMap(f => f.old)).toEqual([])
+  await w.clock.advance(3000)
+  await ui.pointer({ type: 'move', x: 30, y: 2, button: 'left', in: 'sel0' })
+  await settle(w)
+  expect(w.frames.at(-1)!.old.length).toBeGreaterThan(0)
+})
+
+test('picture select: a blit the engine refuses is logged once and shows no highlight; the copy still works', async ($, on) => {
+  const w = world(on, { tty: TTY, deny: 'no Image of its own is mounted under key "p0"' })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await drawAnswer($, w)
+  await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'move', x: 10, y: 2, button: 'left', in: 'sel0' })
+  await settle(w)
+  await ui.pointer({ type: 'move', x: 15, y: 2, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'up', x: 21, y: 3, button: 'left', in: 'sel0' })
+  await settle(w)
+  // One refused blit: the page is not tried again until the next down.
+  expect(w.blits.length).toBe(1)
+  expect(w.logs.filter(l => l.includes('refused')).length).toBe(1)
+  expect(w.copies).toEqual([COPIED])
+})
+
+test('picture select: with IUI_DEBUG, each post writes a trace line (the post, its region, the rows selected), each blit its times', async ($, on) => {
   const w = world(on, { tty: TTY, env: { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1', IUI_DEBUG: '1' } })
   await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await drawAnswer($, w)
   await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'sel0' })
   await ui.pointer({ type: 'move', x: 10, y: 2, button: 'left', in: 'sel0' })
-  await w.clock.settle()
-  const lines = w.traces.filter(t => t.includes('select: '))
+  await settle(w)
+  const lines = w.traces.filter(t => /select: (down|move|up|clear) /.test(t))
   expect(lines.length).toBe(2)
   expect(lines[0]).toContain('select: down #')
   // The kit gives a Client the terminal's size, the engine its region's.
@@ -1466,6 +1554,8 @@ test('picture select: with IUI_DEBUG, each post writes a trace line (the post, i
   expect(lines[0]).toContain('rows none')
   expect(lines[1]).toContain('anchor 0,1 head 10,2 size ')
   expect(lines[1]).toContain('rows p0 1..2 (2)')
+  const blit = w.traces.find(t => t.includes('select: blit '))
+  expect(blit).toMatch(/select: blit ans-1 page 0 rows 1\.\.2 \(2\) decode \d+ms frame \d+ms write \d+ms \d+ bytes blit \d+ms/)
 })
 
 test('picture select: with no IUI_DEBUG, a post writes no trace line', async ($, on) => {

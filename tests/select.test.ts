@@ -1,11 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { decodeSelection, placeholderCell, positionsOf, textOfRun, type Mark } from '../hooks/register'
-import {
-  needsSelect, overlayRows, postOf, rowsAbove, runsOf, selectColor, selectedRows, selectionAfter, selectTrace, stripDir, stripFile, stripPlan, textOfRuns, topsOf,
-  type SelectPost,
-} from '../hooks/lib/select'
-import { stripsCall } from '../hooks/lib/strips'
+import { needsSelect, postOf, rowsAbove, runsOf, selectedRows, selectionAfter, selectTrace, textOfRuns, topsOf, type SelectPost } from '../hooks/lib/select'
 import { SMALL_MARKS, SMALL_PAGE, SMALL_PPI } from './copy-fixture'
 
 // ---- The posts --------------------------------------------------------------
@@ -45,20 +41,6 @@ test('a post keeps its region\'s size when it is whole cells; a bad one is dropp
 })
 
 // ---- Scrolled pages -------------------------------------------------------------
-
-test('the overlay rows are in the flow: each row\'s marginTop is the rows after the one before', () => {
-  expect(overlayRows([])).toEqual([])
-  expect(overlayRows([{ row: 0, x0: 3, x1: 9 }])).toEqual([{ row: 0, x0: 3, x1: 9, top: 0 }])
-  // Rows 5, 6 and 7: 5 rows down, then each under the one before.
-  expect(overlayRows([{ row: 5, x0: 4, x1: 97 }, { row: 6, x0: 0, x1: 97 }, { row: 7, x0: 0, x1: 20 }]).map(r => r.top)).toEqual([5, 0, 0])
-  // A gap (rows that are not selected) is the margin; out of order still lands on its row.
-  expect(overlayRows([{ row: 2, x0: 0, x1: 1 }, { row: 9, x0: 0, x1: 1 }]).map(r => r.top)).toEqual([2, 6])
-  expect(overlayRows([{ row: 9, x0: 0, x1: 1 }, { row: 2, x0: 0, x1: 1 }]).map(r => r.top)).toEqual([9, -8])
-  // Each row's top: the sum of the margins and rows before it.
-  let at = 0
-  const rows = [3, 4, 10, 15].map(row => ({ row, x0: 0, x1: 1 }))
-  expect(overlayRows(rows).map(r => (at += r.top + 1) - 1)).toEqual([3, 4, 10, 15])
-})
 
 test('the rows of a page above the viewport: the message\'s first row on screen less the page\'s top, 0 to its rows', () => {
   // Page at row 1 of the message (the top margin), 16 rows.
@@ -155,41 +137,7 @@ test('a selection over two pages is the text of each, one line apart; a page wit
   expect(textOfRuns([], words, pages)).toBe('')
 })
 
-// ---- The strips ------------------------------------------------------------------
-
-test('strips: the page must be exactly rows x rowPx (a whole number) at the cell\'s aspect', () => {
-  // Ghostty, 16 x 36 px cells: 212 columns of 16 px, 53 rows of 36 px.
-  expect(stripPlan({ width: 3392, height: 1908 }, { columns: 212, rows: 53 }, { width: 16, height: 36 })).toEqual({ rowPx: 36, rows: 53 })
-  expect(stripPlan({ width: 1568, height: 512 }, { columns: 98, rows: 16 }, { width: 16, height: 32 })).toEqual({ rowPx: 32, rows: 16 })
-  // A page not a whole number of rows (a page cut at the most rows an Image takes).
-  expect(stripPlan({ width: 3392, height: 1909 }, { columns: 212, rows: 53 }, { width: 16, height: 36 })).toBe(null)
-  // A page wider than its box at that scale: the terminal would fit it by
-  // its width, with space above and below (strips would not line up).
-  expect(stripPlan({ width: 3408, height: 1908 }, { columns: 212, rows: 53 }, { width: 16, height: 36 })).toBe(null)
-  // A cell of a fraction of a pixel (16.062 px a column): the page rounded up is wider than its box.
-  expect(stripPlan({ width: 3406, height: 1855 }, { columns: 212, rows: 53 }, { width: 16.062, height: 35 })).toBe(null)
-  // A page drawn smaller (an old one in an open epoch): its rows are not whole.
-  expect(stripPlan({ width: 3392, height: 1908 }, { columns: 150, rows: 38 }, { width: 16, height: 36 })).toBe(null)
-  // A page narrower than its box at that scale: space at the side only, the same for the strips.
-  expect(stripPlan({ width: 3380, height: 1908 }, { columns: 212, rows: 53 }, { width: 16, height: 36 })).toEqual({ rowPx: 36, rows: 53 })
-})
-
-test('strips: each row is a page of its own, named as Typst numbers pages (1-based, padded to the count)', () => {
-  expect(stripDir('/c/k/a-1.png')).toBe('/c/k/a-1.strips')
-  expect(stripFile('/c/k/a-1.png', 53, 0)).toBe('/c/k/a-1.strips/s-01.png')
-  expect(stripFile('/c/k/a-1.png', 53, 52)).toBe('/c/k/a-1.strips/s-53.png')
-  expect(stripFile('/c/k/b-2.png', 120, 7)).toBe('/c/k/b-2.strips/s-008.png')
-  expect(stripFile('/c/k/a-1.png', 9, 3)).toBe('/c/k/a-1.strips/s-4.png')
-  const { argv, env } = stripsCall({ typst: '/usr/bin/typst', root: '/p', cache: '/c', file: '/c/k/a-1.png', width: 3392, height: 1908, rowPx: 36 })
-  expect(argv.slice(0, 5)).toEqual(['sh', '-c', 'mkdir -p "$1" && shift && exec "$@"', 'sh', '/c/k/a-1.strips'])
-  expect(argv.slice(5)).toEqual([
-    '/usr/bin/typst', 'compile', '--root', '/', '--format', 'png', '--diagnostic-format', 'short', '--ppi', '72',
-    '--input', 'src=/c/k/a-1.png', '--input', 'w=3392', '--input', 'h=1908', '--input', 'row=36', '/p/render/strips.typ', '/c/k/a-1.strips/s-{0p}.png',
-  ])
-  expect(env.TYPST_PACKAGE_CACHE_PATH).toBe('/c/pkg-cache')
-})
-
-// ---- The gate and the colour ---------------------------------------------------
+// ---- The gate --------------------------------------------------------------------
 
 test('picture select is for Claude Code 2.1.305 and newer (a dev build by its release)', () => {
   expect(needsSelect('2.1.305')).toBe(true)
@@ -200,11 +148,4 @@ test('picture select is for Claude Code 2.1.305 and newer (a dev build by its re
   expect(needsSelect('2.0.999')).toBe(false)
   expect(needsSelect('')).toBe(false)
   expect(needsSelect('dev')).toBe(false)
-})
-
-test('the selection colour is one step off on every other redraw, in both modes', () => {
-  expect(selectColor('dark', 1)).toBe('#264f78')
-  expect(selectColor('dark', 2)).toBe('#264f79')
-  expect(selectColor('light', 1)).toBe('#add6ff')
-  expect(selectColor('light', 2)).toBe('#add6fe')
 })
