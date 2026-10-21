@@ -10,7 +10,7 @@ import type { PlanVerdict } from './plan'
 import type { Drawn } from './copy'
 import type { GridMetrics } from './grid'
 import type { Checked } from './updates'
-import type { ClipWay, ShimState } from './clipboard'
+import type { ClipWay } from './clipboard'
 import type { PdfFacts, PixelBox } from './images'
 import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } from './settings'
 import { invalidate } from './api'
@@ -191,11 +191,6 @@ export const S = {
   // Linux: how the clipboard is read and watched (clipboard.ts; null: not
   // looked up, as on macOS and over ssh).
   clipWay: null as ClipWay | null,
-  // The clipboard shims (clipboard.ts; null: not set up), this process's
-  // FIFO for their asks and its shims folder ('' when the shims are off).
-  shims: null as ShimState | null,
-  askFifo: '',
-  shimDir: '',
   // Streaming: model requests of the main loop in flight.
   stepsLive: 0,
   // The plan (plan.tsx): the main loop's running turn (`turn.start`), the
@@ -292,10 +287,9 @@ export const DRAWN_KEPT = 64
 // yet; the first of each watcher child is only noted), whether the watcher
 // found no PerlObjCBridge (`none`), a read that runs (`busy`) and a change
 // that came during it (`again`), the clipboard text last seen and last
-// written (so a write is never read back as new), the cells of the last
-// shim asks with their times (`asked`: such a copy gets no hint), the last
-// text with placeholders with its row (`rawRow`, when known) and how it was
-// read (for dump), and the order of the drawings (`seq`).
+// written (so a write is never read back as new), the last text with
+// placeholders with its row (`rawRow`, when known) and how it was read (for
+// dump), and the order of the drawings (`seq`).
 export const clip = {
   count: null as number | null,
   none: false,
@@ -303,7 +297,6 @@ export const clip = {
   again: false,
   seen: '',
   wrote: '',
-  asked: [] as { text: string; at: number }[],
   raw: '',
   rawRow: undefined as string | undefined,
   seq: 0,

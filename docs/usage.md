@@ -47,7 +47,7 @@ You can also start the skill yourself: type `/cc-intelligent-ui:intelligent-ui` 
 | Command | What it does |
 |---|---|
 | `/iui` | Shows the state, the theme, the text size, the width, the image height and the row grid, a problem that keeps pictures away, and a new version when there is one |
-| `/iui details` | Shows all that the mod found: where the mode comes from, the terminal font, the Typst path, why the terminal can or cannot show pictures, if the automatic copy is on (`Auto copy:`), and the state of the update check (`Update checks:`) |
+| `/iui details` | Shows all that the mod found: where the mode comes from, the terminal font, the Typst path, why the terminal can or cannot show pictures, if picture select is on (`Picture select:`), if the `/iui grab` toast is on (`/iui grab hint:`), and the state of the update check (`Update checks:`) |
 | `/iui on` / `off` | Turns the pictures on or off (kept for later sessions) |
 | `/iui setup` / `setup remove` | iTerm2 (macOS only): adds or removes the shell line that turns pictures on (then close the tab and open a new one). On Linux, it changes no file. |
 | `/iui size <80–200>` | Text size in percent. 100 is the same visual size as your terminal text. |
@@ -62,8 +62,8 @@ You can also start the skill yourself: type `/cc-intelligent-ui:intelligent-ui` 
 | `/iui grid on` | Puts each line of text in a picture on the terminal rows (kept for later sessions). This is the default. Refer to [Selection and the row grid](#selection-and-the-row-grid). |
 | `/iui grid off` | Lines of text in a picture have the usual spacing (kept for later sessions). |
 | `/iui select` | Shows the picture select setting: on or off |
-| `/iui select on` | With Claude Code 2.1.305 or newer, in fullscreen mode, a drag over a picture selects its text and copies it (kept for later sessions). This is the default. Refer to [Copy text from a picture](#copy-text-from-a-picture). |
-| `/iui select off` | Stops picture select (kept for later sessions). Then the selection of Claude Code skips pictures (2.1.305 or newer). |
+| `/iui select on` | With Claude Code 2.1.298 or newer, in fullscreen mode, a drag over a picture selects its text and copies it (kept for later sessions). This is the default. Refer to [Picture select](#picture-select-claude-code-21298-or-newer). |
+| `/iui select off` | Stops picture select (kept for later sessions). Then a drag over a picture is the selection of Claude Code. From Claude Code 2.1.305, that selection skips pictures. |
 | `/iui updates` | Shows the update check: on or off, and the newest version that it found |
 | `/iui updates on` | Looks for a new version one time each day at most, and shows a toast when there is one (kept for later sessions). This is the default. Refer to [Update](install.md#update). |
 | `/iui updates off` | Stops the check for a new version and its toast (kept for later sessions) |
@@ -92,23 +92,29 @@ The mod does not take web links from code blocks, inline code or math. It takes 
 
 ## Copy text from a picture
 
-Select the text in a picture (an answer, a plan or a Markdown file that Claude sent) with the mouse, as you do with normal text. The selection gives picture cells. The automatic copy works in fullscreen mode only. We recommend fullscreen mode: run `/tui fullscreen` (`/tui default` goes back to the main screen). Claude Code writes the copy with a clipboard tool (`pbcopy` on macOS). A small shim of this tool asks the mod of this session for the text under the picture cells (refer to [How it works](how-it-works.md)). The clipboard then gets this text in place of the cells, and a toast shows the number of characters. Wait for this toast, then paste. If the text is not ready in 1.5 s (for example, the first copy from a large Typst drawing), the clipboard keeps the cells, and a toast tells you to use `/iui grab`. A copy from a different Claude Code session goes to the mod of that session, so this session does not change it. The mod does not change a clipboard that has no picture cells.
+We recommend fullscreen mode: run `/tui fullscreen` (`/tui default` goes back to the main screen). In fullscreen mode, picture select copies the text of a picture (an answer, a plan or a Markdown file that Claude sent). Refer to [Picture select](#picture-select-claude-code-21298-or-newer).
 
-On the main screen (not fullscreen mode), the terminal copies the selection itself, not Claude Code. Thus the mod cannot know which session a copy is from, and it does not change the clipboard. While the mod is on and has drawn a picture in this session, it sees each change of the clipboard (on macOS in 0.3 s or less; on Linux at once, with the tools in [Linux](install.md#linux)). When the clipboard has picture cells of a picture in this session, a toast tells you to use `/iui grab`. Select and copy, then run `/iui grab` in the same session. `/iui grab` puts the text of these picture cells on the clipboard. When the mod draws its first picture on the main screen, a toast recommends fullscreen mode (one time in each session).
+### Picture select (Claude Code 2.1.298 or newer)
 
-The mod finds the position of each word on a page when you copy from that page for the first time. This takes approximately 0.05 s for plain text (only ASCII characters, no math, no Typst block and no image), 0.15–0.5 s for other text, and more (2–3 s) for a page with a large Typst drawing. No toast shows while it does this. Only the toast of the copy shows. The mod keeps the positions in memory, so the next copy from the same page is fast.
+Picture select works in fullscreen mode only. It is on by default. `/iui select off` turns it off, and `/iui select on` turns it on again.
 
-If the clipboard did not change, use `/iui grab`. In fullscreen mode, it reads the last mouse selection of Claude Code and copies its text. With no selection (the main screen), it reads the picture cells on the clipboard and copies their text. If the clipboard has the text already, it tells you. If the copied text is not correct, `/iui dump` shows the cells that the mod found and the page that it used. It also writes all of this to `copy-debug.json` in the cache folder.
-
-### Picture select (Claude Code 2.1.305 or newer)
-
-From Claude Code 2.1.305, the mouse selection of Claude Code skips pictures. It shows no highlight on a picture and copies no picture cells. Thus in fullscreen mode the mod selects the text of a picture itself:
-
-1. Drag over a picture with the left button. The selected rows show on a blue background, in the order of the text: the first row from where you started, the rows between, and the last row to the pointer.
-2. Release the button. The mod copies the text of the selected cells (the same words that a copy of these cells gives) and shows the toast "copied N chars of text".
+1. Drag over a picture with the left button. Start the drag on the picture. The selected cells show on a blue background (VS Code's selection colour), in the order of the text: the first row from where you started, the rows between, and the last row to the pointer. The layout does not change.
+2. Release the button. The mod copies the text of the selected cells (the same words that a copy of these cells gives) and shows the toast "copied N chars of text". Then paste.
 3. A click with no drag, a new selection in a different picture, or your next prompt removes the selection.
 
-A selection can go on into the next page of the same answer. The first selection on a page takes approximately 0.2 s more: the mod cuts the page into rows (one PNG for each row, kept with the page). `/iui select off` turns picture select off. Before Claude Code 2.1.305, and on the main screen, the selection is the one of Claude Code or of the terminal, as before.
+A selection can go on into the next page of the same answer.
+
+When a page is drawn or comes on the screen, the mod gets the page ready for the highlight in the background. It also finds the position of each word on the page. Thus the first highlight and the copy are fast. If you push the button on a page that is not ready, the mod gets that page ready first, and the first highlight shows a short time later. If the words of the page are not ready when you release the button, the copy waits for them: approximately 0.05 s for plain text (only ASCII characters, no math, no Typst block and no image), 0.15–0.5 s for other text, and more (2–3 s) for a page with a large Typst drawing. No toast shows while the mod does this. Only the toast of the copy shows. The mod keeps the positions in memory, so the next copy from the same page is fast.
+
+### Picture cells on the clipboard
+
+On the main screen (not fullscreen mode), there is no picture select. The terminal copies the selection itself, not Claude Code. The copy gives picture cells (kitty placeholder characters), not text. A selection of Claude Code that starts outside a picture can also copy picture cells (refer to [Limitations](limitations.md)). The mod never changes the clipboard for such a copy, because it cannot know which session the copy is from.
+
+While the mod is on and has drawn a picture in this session, it sees each change of the clipboard (on macOS in 0.3 s or less; on Linux at once, with the tools in [Linux](install.md#linux)). When the clipboard has picture cells of a picture in this session, a toast tells you to use `/iui grab`. Run `/iui grab` in the same session. When the mod draws its first picture on the main screen, a toast recommends fullscreen mode (one time in each session).
+
+`/iui grab` puts the text on the clipboard. In fullscreen mode, it reads the last mouse selection of Claude Code and copies its text. With no selection (the main screen), it reads the picture cells on the clipboard and copies their text. If the clipboard has the text already, it tells you. If the copied text is not correct, `/iui dump` shows the cells that the mod found and the page that it used. It also writes all of this to `copy-debug.json` in the cache folder.
+
+A copy of picture cells through Claude Code's `/copy` or `$.ui.copy` gets the text in place of the cells.
 
 For the limits, refer to [Limitations](limitations.md).
 

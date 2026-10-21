@@ -2,13 +2,14 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import {
   codePointsOf, commandSuggestions, decodeSelection, DIACRITICS, hasPlaceholders, isDrawnIn, joinSegments, pageTopsOf, pickPages,
-  placeholderCell, isSafePage, positionsOf, screenOf, SHIM_SETUP, textOfRun, WATCH_PL, type Drawn, type TextBlock, type Item, type Mark, type OnScreen,
+  placeholderCell, isSafePage, positionsOf, screenOf, textOfRun, WATCH_PL, type Drawn, type TextBlock, type Item, type Mark, type OnScreen,
   type Place,
 } from '../hooks/register'
+import * as registerModule from '../hooks/register'
+import * as clipboardModule from '../hooks/lib/clipboard'
+import * as settingsModule from '../hooks/lib/settings'
 import { joinItems } from '../hooks/lib/copy'
 import { WATCH_RESTART_MS } from '../hooks/lib/frame'
-import { ANSWER_SH, ASK_CLEAN_SH, ASK_END_SH, ASK_MAX, ASK_PL, ASK_RESTART_MS, ASK_RESTARTS } from '../hooks/lib/clipboard'
-import { HINT_WAIT_MS } from '../hooks/lib/settings'
 import { rowsAfter, type Under } from '../hooks/lib/pictures'
 import { forgetProbed, noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf } from '../hooks/lib/probe'
 import { clip, drawnAnswers, lastKey, results, type Job, type Result } from '../hooks/lib/state'
@@ -491,18 +492,14 @@ const inputsOf = (argv: readonly string[]) => Object.fromEntries(argv.flatMap((a
 // marks on page n (`hold` holds the next query until `release`; a kill ends
 // it), the watcher (WATCH_PL: its PID, then with `clip` the change count at
 // its start and at each change of the clipboard; `clip none` with
-// `noBridge`), pbpaste reading `clipboard`, the shims (pbcopy found, perl,
-// the FIFO ASK: IUI_COPY_ASK and PATH set, `envSets`), the ask reader
-// (ASK_PL: its PID, then `ask <id>` lines) and the copies, toasts and
-// selection the test sees. `copy` is Claude Code's own copy (copy on select
-// in fullscreen, /copy, $.ui.copy): the terminal's OSC 52 write of the text
-// (a clipboard change), then pbcopy through its shim: picture cells go to
-// ask/<id> and the id to the reader; the answer (ANSWER_SH), or the cells
-// when the shim gives up after 1.5 s (it leaves its mark), go on the
-// clipboard. `copies` are the texts the mod put there. While `selects`, a
-// copy of picture cells is this session's selection too. `foreign` is a copy
-// with no ask (another session's, the terminal's own on the main screen,
-// another app's); `change` is one more change with the same text.
+// `noBridge`), pbpaste reading `clipboard`, and the copies, toasts and
+// selection the test sees. `copy` is a native copy (a drag over text and
+// pictures, the main screen's terminal copy): while `selects`, picture cells
+// are this session's selection too; the text goes on the clipboard, one
+// change. `foreign` is a copy of another session or app (no selection);
+// `change` is one more change with the same text. `copies` are the texts
+// the mod put on the clipboard ($.ui.copy). `ran` and `spawned` are the
+// processes run and spawned, `envSets` the env vars set.
 // `tty`: the tty size line its read gives (none: no read), `version`
 // Claude Code's (picture select); `frames` the highlight's frame files
 // written, `blits` the blits asked (`deny`: each refused with it), `logs`
@@ -512,12 +509,11 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
   forgetRedraws()
   mock.store(on)
   const clock = mock.clock(on)
-  const vars: Record<string, string | undefined> = { PATH: '/usr/bin:/bin', IUI_COPY_SHIM: '1', ...(o.env ?? { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' }) }
+  const vars: Record<string, string | undefined> = { PATH: '/usr/bin:/bin', ...(o.env ?? { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' }) }
   const envSets: [string, string | undefined][] = []
   on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
   on('env.set', async ($: any, e: any) => {
     envSets.push([e.name, e.value])
-    vars[e.name] = e.value
     return { value: {} }
   })
   const files = new Map<string, string>()
@@ -525,13 +521,11 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
   const queries: Record<string, string>[] = []
   const kills: string[] = []
   const killers = new Map<string, () => void>()
-  type Child = { argv: string[]; pid: string; say: (line: string) => void; dead: boolean; end: (code: number) => void }
+  type Child = { argv: string[]; pid: string; say: (line: string) => void; dead: boolean }
   const watchers: Child[] = []
-  const readers: Child[] = []
-  const waits = new Map<string, (text: string) => void>()
   const w = {
-    clock, files, compiles, queries, kills, watchers, readers, vars, envSets,
-    ended: [] as string[][], answers: [] as string[], late: [] as string[], cleaned: [] as string[], asks: 0, reads: [] as string[],
+    clock, files, compiles, queries, kills, watchers, vars, envSets,
+    ran: [] as string[][], spawned: [] as string[][], reads: [] as string[],
     clipboard: 'nothing yet', count: 40, pastes: 0, copies: [] as string[], toasts: [] as string[], traces: [] as string[], logs: [] as string[],
     frames: [] as { path: string; old: string[]; png: Uint8Array }[], blits: [] as any[],
     selection: undefined as { text: string; requestId?: string } | undefined,
@@ -543,27 +537,6 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
     copy(text: string) {
       if (w.selects && hasPlaceholders(text)) w.selection = { text }
       w.foreign(text)
-      void w.shim(text)
-    },
-    // pbcopy through its shim: an ask for picture cells while a reader runs.
-    async shim(text: string) {
-      let out = text
-      const reader = readers.find(c => !c.dead)
-      if (hasPlaceholders(text) && reader) {
-        const id = `4242-${++w.asks}-7`
-        const request = `${ASK_DIR}/${id}`
-        files.set(request, text)
-        const answered = new Promise<string | null>(r => waits.set(id, r))
-        reader.say(`ask ${id}`)
-        const got = await Promise.race([answered, clock.sleep(1500).then(() => null)])
-        waits.delete(id)
-        files.delete(request)
-        if (got === null) files.set(`${request}.answer`, '')
-        // An empty answer: the shim keeps its own bytes.
-        else if (got) out = got
-      }
-      if (out !== text) w.copies.push(out)
-      w.foreign(out)
     },
     foreign(text: string) {
       w.clipboard = text
@@ -580,24 +553,20 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
     const pid = String(pids++)
     const lines = [`pid ${pid}`, ...first]
     let wake = () => {}
-    let code: number | null = null
-    const me: Child = { argv, pid, dead: false, say: line => (lines.push(line), wake()), end: c => ((code = c), (me.dead = true), wake()) }
+    const me: Child = { argv, pid, dead: false, say: line => (lines.push(line), wake()) }
     list.push(me)
     killers.set(pid, () => ((me.dead = true), wake()))
     for (;;) {
       while (lines.length && !me.dead) yield { stream: 'stdout', text: `${lines.shift()}\n` }
-      if (me.dead) return { value: { code, signal: code === null ? 'SIGTERM' : null } }
+      if (me.dead) return { value: { code: null, signal: 'SIGTERM' } }
       await new Promise<void>(r => (wake = r))
     }
   }
   on('process.spawn', async function* ($: any, e: any) {
     const argv: string[] = e.argv
+    w.spawned.push(argv)
     if (argv[0] === '/usr/bin/perl' && argv[1] === '-e' && argv[2] === WATCH_PL) {
       return yield* child(watchers, argv, argv[3] === 'clip' ? [o.noBridge ? 'clip none' : `clip ${w.count}`] : [])
-    }
-    if (argv[0] === '/usr/bin/perl' && argv[1] === '-e' && argv[2] === ASK_PL) {
-      expect(argv.slice(3)).toEqual([ASK])
-      return yield* child(readers, argv, [])
     }
     if (argv[0] !== 'sh' || argv[2] !== WRAP || argv[4] !== '/usr/bin/typst') return { value: { code: 2, signal: null } }
     const pid = String(pids++)
@@ -623,33 +592,10 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
   on('process.run', async ($: any, e: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
+    w.ran.push(argv)
     if (argv[0] === 'kill') {
       kills.push(argv[1]!)
       killers.get(argv[1]!)?.()
-      return ok('')
-    }
-    // The answer: to the shim that waits, else refused (its mark).
-    if (argv[0] === 'sh' && argv[2] === ANSWER_SH) {
-      const request = argv[4]!
-      const text: string = e.init?.stdin ?? ''
-      const to = waits.get(request.slice(ASK_DIR.length + 1))
-      if (!to || files.has(`${request}.answer`)) {
-        w.late.push(text)
-        return ok('', 1)
-      }
-      w.answers.push(text)
-      to(text)
-      return ok('')
-    }
-    // After a refused answer: the request and the mark go.
-    if (argv[0] === 'sh' && argv[2] === ASK_CLEAN_SH) {
-      files.delete(argv[4]!)
-      files.delete(`${argv[4]}.answer`)
-      w.cleaned.push(argv[4]!)
-      return ok('')
-    }
-    if (argv[0] === 'sh' && argv[2] === ASK_END_SH) {
-      w.ended.push(argv.slice(4))
       return ok('')
     }
     if (/cc-intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
@@ -660,14 +606,6 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
     }
     if (argv[0] === 'sh' && cmd.includes('debug.log')) {
       w.traces.push(e.init?.stdin ?? '')
-      return ok('')
-    }
-    if (argv[1]?.endsWith(SHIM_SETUP) && argv[2] === 'find') return ok(`pid 4242\npbcopy /usr/bin/pbcopy\nperl /usr/bin/perl\nask ${ASK}\n`)
-    if (argv[1]?.endsWith(SHIM_SETUP) && argv[2] === 'install') {
-      for (const f of argv.slice(5)) {
-        files.set(f, files.get(`${f}${argv[4]}`) ?? '')
-        files.delete(`${f}${argv[4]}`)
-      }
       return ok('')
     }
     if (cmd.includes('command -v typst')) return ok('/usr/bin/typst\n')
@@ -683,12 +621,10 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
     files.set(e.path, e.text)
     return { value: undefined }
   })
-  on('fs.stat', async ($: any, e: any, next: any) =>
-    e.path.startsWith(`${ASK_DIR}/`) && files.has(e.path) ? { value: { kind: 'file', size: files.get(e.path)!.length, mtimeMs: 1, isLink: false } } : next(e))
   on('fs.read', async ($: any, e: any, next: any) => {
     w.reads.push(e.path)
     if (e.as === 'bytes' && /^\/c\/.*\.png$/.test(e.path)) return { value: { base64: PAGE_PNG } }
-    return e.path.endsWith('/hooks/clip-shim.sh') ? { value: SHIM_STUB } : files.has(e.path) ? { value: files.get(e.path) } : e.path.startsWith('/c/') ? { deny: 'ENOENT' } : next(e)
+    return files.has(e.path) ? { value: files.get(e.path) } : e.path.startsWith('/c/') ? { deny: 'ENOENT' } : next(e)
   })
   // One page per segment of the folder's doc.json.
   on('fs.list', async ($: any, e: any, next: any) => {
@@ -697,9 +633,10 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
     const segments = (JSON.parse(files.get(`${e.path}/doc.json`) ?? '{"segments":[""]}') as { segments: string[] }).segments
     return { value: segments.map((_, i) => ({ name: `${tag}-${i + 1}.png`, kind: 'file', size: 1, mtimeMs: 1, isLink: false })) }
   })
+  // The mod's write: its text on the clipboard, one change.
   on('ui.copy', async ($: any, e: any) => {
     w.copies.push(e.text)
-    w.copy(e.text)
+    w.foreign(e.text)
     return { value: { isCopied: true } }
   })
   on('ui.selection', async () => ({ value: w.selection }))
@@ -720,19 +657,13 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
   return w
 }
 
-// The shim template, as setUp reads it (the real one: tests/shim-test.sh).
-const SHIM_STUB = 'tool=@TOOL@ real=@REAL@ dir=@DIR@ perl=@PERL@'
-// The FIFO of this process (Claude Code's pid from the shim find: 4242) and the ask folder.
-const ASK = '/c/ask-4242'
-const ASK_DIR = '/c/ask'
-
 const message = (requestId: string, text: string, isFullscreen: boolean | null = true) =>
   ({
     plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'AssistantMessage', requestId,
     props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40, ...(isFullscreen === null ? {} : { isFullscreen }) },
   }) as any
 const props = (text: string) => ({ text, isFirstOfReply: true }) as any
-const names = (files: Map<string, string>) => [...new Set([...files.keys()].filter(k => k.startsWith('/c/') && !k.startsWith('/c/shims-') && !k.startsWith(`${ASK_DIR}/`)).map(k => k.replace(/^.*\//, '')))].sort()
+const names = (files: Map<string, string>) => [...new Set([...files.keys()].filter(k => k.startsWith('/c/')).map(k => k.replace(/^.*\//, '')))].sort()
 
 // Draws `text` (SMALL_MD) as answer `id` (98 columns: the fixture's),
 // compiled; the watcher has its clipboard part (its first count noted).
@@ -746,19 +677,35 @@ async function drawAnswer($: any, w: ReturnType<typeof world>, id = 'ans-1', tex
   return ui
 }
 
+// Picture select off: its prefetch of a page's words and PNG is not in the probes counted.
+const selectOff = ($: any) => $.command.run({ command: 'iui', args: 'select off' } as any)
+const grab = async ($: any): Promise<string | undefined> => (await $.command.run({ command: 'iui', args: 'grab' } as any)).text
+const detailLines = async ($: any) =>
+  ((await $.command.run({ command: 'iui', args: 'details' } as any)).text ?? '').split('\n').filter((l: string) => l.startsWith('Picture select:') || l.startsWith('/iui grab hint:'))
+
 // The heading row and the start of the paragraph, as a mouse copy takes them.
 const COPY = [cells(1, 0, 97, '⏺ '), cells(2, 0, 97), cells(3, 0, 21)].join('\n')
 const COPIED = 'Copy test\nThe quick brown fox jumps'
+const GRABBED = 'Intelligent UI: copied 35 chars (1 of 1 picture runs read).'
+const GRAB_HINT = 'Intelligent UI: picture cells copied; /iui grab puts their text on the clipboard'
+const hints = (w: ReturnType<typeof world>) => w.toasts.filter(t => t === GRAB_HINT).length
+const long = Array.from({ length: 240 }, (_, i) => `Paragraph ${i} with a few words in it.`).join('\n\n')
+const pagesOf = (w: ReturnType<typeof world>) => (JSON.parse(w.files.get([...w.files.keys()].find(k => k.endsWith('/doc.json'))!)!) as { segments: string[] }).segments.length
 
-test('a compile writes no probe file and runs no probe; a copy probes only its page, with the PNG compile inputs', async ($, on) => {
+test('a compile writes no probe file and runs no probe, nor does the hint; /iui grab probes only its page, with the PNG compile inputs', async ($, on) => {
   const w = world(on)
+  await selectOff($)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
   expect(w.compiles.length).toBe(1)
   expect(names(w.files)).toEqual(['doc.json', 'pages.json'])
   expect(w.queries).toEqual([])
+  // A native copy: the hint picks the page with no probe.
   w.copy(COPY)
   await w.clock.settle()
+  expect(hints(w)).toBe(1)
+  expect(w.queries).toEqual([])
+  expect(await grab($)).toBe(GRABBED)
   expect(w.copies).toEqual([COPIED])
   // The PNG compile's inputs, probe=1 and page=1.
   expect(w.queries).toEqual([{ ...w.compiles[0], probe: '1', page: '1' }])
@@ -768,17 +715,17 @@ test('a compile writes no probe file and runs no probe; a copy probes only its p
 
 test("an answer's link rows are under its pages: the page on screen is found above them", async ($, on) => {
   const w = world(on)
+  await selectOff($)
   await $.command.run({ command: 'iui', args: '' } as any)
-  const long = Array.from({ length: 240 }, (_, i) => `Paragraph ${i} with a few words in it.`).join('\n\n')
   const text = `${long}\n\nSee https://typst.app/docs.\n\n\`\`\`sh\nbrew install typst\n\`\`\``
   const ui = await drawAnswer($, w, 'ans-1', text)
-  const pages = (JSON.parse(w.files.get([...w.files.keys()].find(k => k.endsWith('/doc.json'))!)!) as { segments: string[] }).segments.length
   // 16 rows a page under the top margin, then 2 link rows: page 2 is rows 17 to 32.
-  const of = 1 + 16 * pages + 2
+  const of = 1 + 16 * pagesOf(w) + 2
   await ui.redraw({ ...props(text), onScreen: { first: 17, last: 32, of } })
   await w.clock.settle()
   w.copy([cells(2, 0, 97), cells(3, 0, 97)].join('\n'))
   await w.clock.settle()
+  expect(await grab($)).toContain('Intelligent UI: copied')
   expect(w.queries.map(q => q.page)).toEqual(['2'])
   const dumped = await $.command.run({ command: 'iui', args: 'dump' } as any)
   expect(dumped.text).toContain(`-> answer ans-1 page 1 (rows 17-32 of ${of} on screen, page top 17)`)
@@ -786,11 +733,12 @@ test("an answer's link rows are under its pages: the page on screen is found abo
 
 test('a compile retried in safe mode gives the probe safe=1 (its page files say so)', async ($, on) => {
   const w = world(on, { failFirst: true })
+  await selectOff($)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
   expect(w.compiles.map(c => c.safe)).toEqual([undefined, '1'])
-  w.copy(COPY)
-  await w.clock.settle()
+  w.selection = { text: COPY }
+  expect(await grab($)).toBe(GRABBED)
   expect(w.queries).toEqual([{ ...w.compiles[1], probe: '1', page: '1' }])
   expect(w.copies).toEqual([COPIED])
   expect(isSafePage('/c/k/b-1.png')).toBe(true)
@@ -799,27 +747,26 @@ test('a compile retried in safe mode gives the probe safe=1 (its page files say 
   expect(isSafePage('/c/k/c-3.png')).toBe(false)
 })
 
-test('a copy over two pages of a long answer probes those two pages only', async ($, on) => {
+test('a grab over two pages of a long answer probes those two pages only', async ($, on) => {
   const w = world(on)
+  await selectOff($)
   await $.command.run({ command: 'iui', args: '' } as any)
-  const long = Array.from({ length: 240 }, (_, i) => `Paragraph ${i} with a few words in it.`).join('\n\n')
   await drawAnswer($, w, 'ans-1', long)
-  const pages = (JSON.parse(w.files.get([...w.files.keys()].find(k => k.endsWith('/doc.json'))!)!) as { segments: string[] }).segments.length
-  expect(pages).toBeGreaterThan(2)
+  expect(pagesOf(w)).toBeGreaterThan(2)
   // The last row of page 1, then the first two rows of page 2.
-  w.copy([cells(15, 0, 97, '⏺ '), cells(0, 0, 97), cells(1, 0, 97)].join('\n'))
-  await w.clock.settle()
+  w.selection = { text: [cells(15, 0, 97, '⏺ '), cells(0, 0, 97), cells(1, 0, 97)].join('\n') }
+  expect(await grab($)).toMatch(/^Intelligent UI: copied \d+ chars \([12] of 2 picture runs read\)\.$/)
   expect(w.queries.map(q => q.page)).toEqual(['1', '2'])
   expect(w.copies.length).toBe(1)
   expect(w.copies[0]).toContain('Copy test')
 })
 
-test('a copy goes to the page on screen: the rows on screen of the last draw (a memo hit) reach the pick and dump', async ($, on) => {
+test('a grab goes to the page on screen: the rows on screen of the last draw (a memo hit) reach the pick and dump', async ($, on) => {
   const w = world(on)
+  await selectOff($)
   await $.command.run({ command: 'iui', args: '' } as any)
-  const long = Array.from({ length: 240 }, (_, i) => `Paragraph ${i} with a few words in it.`).join('\n\n')
   const ui = await drawAnswer($, w, 'ans-1', long)
-  const pages = (JSON.parse(w.files.get([...w.files.keys()].find(k => k.endsWith('/doc.json'))!)!) as { segments: string[] }).segments.length
+  const pages = pagesOf(w)
   expect(pages).toBeGreaterThan(2)
   // 16 rows a page under the top margin: page 2 is rows 17 to 32.
   const of = 1 + 16 * pages
@@ -827,9 +774,8 @@ test('a copy goes to the page on screen: the rows on screen of the last draw (a 
   await ui.redraw({ ...props(long), onScreen: { first: 17, last: 32, of } })
   await w.clock.settle()
   expect(w.compiles.length).toBe(compiles)
-  const rows = [cells(2, 0, 97), cells(3, 0, 97)].join('\n')
-  w.copy(rows)
-  await w.clock.settle()
+  w.selection = { text: [cells(2, 0, 97), cells(3, 0, 97)].join('\n') }
+  expect(await grab($)).toContain('Intelligent UI: copied')
   expect(w.queries.map(q => q.page)).toEqual(['2'])
   expect(w.copies.length).toBe(1)
   const dumped = await $.command.run({ command: 'iui', args: 'dump' } as any)
@@ -837,107 +783,107 @@ test('a copy goes to the page on screen: the rows on screen of the last draw (a 
   // Scrolled up to page 1: the same rows are page 1's.
   await ui.redraw({ ...props(long), onScreen: { first: 0, last: 16, of } })
   await w.clock.settle()
-  w.copy(rows)
-  await w.clock.settle()
+  expect(await grab($)).toContain('Intelligent UI: copied')
   expect(w.queries.map(q => q.page)).toEqual(['2', '1'])
   expect(w.copies.length).toBe(2)
 })
 
-test('positions are kept in memory: copies of the same page share one probe run, and a later copy runs none', async ($, on) => {
+test('positions are kept in memory: grabs of the same page share one probe run, and a later grab runs none', async ($, on) => {
   const w = world(on)
+  await selectOff($)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
-  // A slow probe: no toast until the copy is done.
-  const before = w.toasts.length
+  // A slow probe: nothing is copied until it is done.
   w.hold()
-  w.copy(COPY)
-  await w.clock.settle()
-  expect(w.queries.length).toBe(1)
-  await w.clock.advance(1000)
-  expect(w.toasts.length).toBe(before)
-  // /iui grab of the same page meanwhile waits for the same run.
   w.selection = { text: COPY, requestId: 'ans-1' }
-  const grabbed = $.command.run({ command: 'iui', args: 'grab' } as any)
+  const first = grab($)
   await w.clock.settle()
   expect(w.queries.length).toBe(1)
+  // A second grab meanwhile waits for the same run.
+  const second = grab($)
+  await w.clock.settle()
+  await w.clock.advance(1000)
+  expect(w.queries.length).toBe(1)
+  expect(w.copies).toEqual([])
   w.release()
   await w.clock.settle()
-  expect((await grabbed).text).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read, row ans-1).')
+  expect(await first).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read, row ans-1).')
+  expect(await second).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read, row ans-1).')
   expect(w.copies).toEqual([COPIED, COPIED])
-  // Known now: no probe and no toast for the next copy.
-  const toasts = w.toasts.length
+  // Known now: no probe for the next grab.
   w.gate = null
-  w.selection = undefined
-  w.copy([cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n'))
-  await w.clock.settle()
-  await w.clock.advance(1000)
+  w.selection = { text: [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n') }
+  expect(await grab($)).toBe(GRABBED)
   expect(w.queries.length).toBe(1)
-  expect(w.copies.length).toBe(3)
-  expect(w.toasts.slice(toasts)).toEqual(['Intelligent UI: copied 35 chars of text'])
+  expect(w.copies).toEqual([COPIED, COPIED, COPIED])
 })
 
-test("a copy of picture cells gets its text through the shim's ask; the watcher reads each change once and never writes", async ($, on) => {
+test('the watcher: its first count is only noted, each change is read once, the clipboard is never written; off stops its clipboard part', async ($, on) => {
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
-  // No picture drawn: the watcher has no clipboard part, and no ask reader runs.
+  // No picture drawn: the watcher has no clipboard part.
   await w.clock.advance(900)
   expect(w.watchers.map(c => c.argv.slice(3))).toEqual([[]])
-  expect(w.readers.length).toBe(0)
   await drawAnswer($, w)
-  expect(w.readers.length).toBe(1)
   // The first picture: the watcher again with `clip`, the first one killed.
   expect(w.watchers.map(c => c.argv.slice(3))).toEqual([[], ['clip']])
   expect(w.kills).toEqual([w.watchers[0]!.pid])
   // Its first count is only noted; no change, no read.
   await w.clock.advance(900)
   expect(w.pastes).toBe(0)
-  // A copy with no placeholders: one read, never written.
+  // A copy with no placeholders: one read, no hint.
   w.foreign('copied in another app')
   await w.clock.settle()
   expect(w.pastes).toBe(1)
+  expect(hints(w)).toBe(0)
+  // Picture cells: one read, one hint.
   w.copy(COPY)
   await w.clock.settle()
-  // The shim got the text; the mod wrote nothing itself.
-  expect(w.answers).toEqual([COPIED])
-  expect(w.copies).toEqual([COPIED])
-  expect(w.clipboard).toBe(COPIED)
-  expect(w.toasts).toContain('Intelligent UI: copied 35 chars of text')
-  // The OSC 52 write of the cells and the shim's write: read, no hint.
+  expect(w.pastes).toBe(2)
+  expect(hints(w)).toBe(1)
+  // The same text again (the terminal's second write): read, no second hint.
+  w.change()
   await w.clock.advance(3000)
-  const pastes = w.pastes
-  expect(pastes).toBeGreaterThan(1)
-  expect(w.toasts.filter(t => t === GRAB_HINT)).toEqual([])
-  // The request and the answer are gone.
-  expect([...w.files.keys()].filter(k => k.startsWith(`${ASK_DIR}/`))).toEqual([])
+  expect(w.pastes).toBe(3)
+  expect(hints(w)).toBe(1)
+  expect(w.copies).toEqual([])
+  expect(w.clipboard).toBe(COPY)
   const dumped = await $.command.run({ command: 'iui', args: 'dump' } as any)
   expect(dumped.text).toContain('U+10EEEE[1,0]')
   expect(dumped.text).toContain('-> answer ans-1 page 0')
-  expect(dumped.text).toContain('auto copy on')
+  expect(dumped.text).toContain('code points; grab hint on):')
   expect(w.files.has('/c/copy-debug.json')).toBe(true)
   // Off: the watcher again with no clipboard part; no reads.
   await $.command.run({ command: 'iui', args: 'off' } as any)
   expect(w.watchers.map(c => c.argv.slice(3))).toEqual([[], ['clip'], []])
   await w.clock.settle()
   expect(w.kills).toEqual([w.watchers[0]!.pid, w.watchers[1]!.pid])
-  w.copy(COPY)
+  w.copy(COPY.replace(cells(3, 0, 21), cells(3, 0, 20)))
   await w.clock.settle()
-  expect(w.pastes).toBe(pastes)
+  expect(w.pastes).toBe(3)
+  expect(hints(w)).toBe(1)
 })
 
-test('/iui details says whether the automatic copy is on', async ($, on) => {
+test('/iui details says whether picture select is on, and whether the /iui grab hint is', async ($, on) => {
   const w = world(on)
-  const details = async () => ((await $.command.run({ command: 'iui', args: 'details' } as any)).text ?? '').split('\n').find(l => l.startsWith('Auto copy:'))
-  expect(await details()).toBe('Auto copy: off (no picture yet)')
+  expect((await detailLines($))[1]).toBe('/iui grab hint: off (no picture yet)')
+  await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
-  expect(await details()).toBe('Auto copy: on')
+  expect(await detailLines($)).toEqual(['Picture select: on', '/iui grab hint: on'])
+  await selectOff($)
+  expect(await detailLines($)).toEqual(['Picture select: off (/iui select off)', '/iui grab hint: on'])
   await $.command.run({ command: 'iui', args: 'off' } as any)
-  expect(await details()).toBe('Auto copy: off (Intelligent UI is off)')
-  // The shims were set up once: the FIFO, then PATH with the folder first.
-  expect(w.envSets).toEqual([['IUI_COPY_ASK', ASK], ['PATH', '/c/shims-4242:/usr/bin:/bin']])
-  expect(w.files.get('/c/shims-4242/pbcopy')).toBe(`tool='pbcopy' real='/usr/bin/pbcopy' dir='/c/shims-4242' perl='/usr/bin/perl'`)
+  expect((await detailLines($))[1]).toBe('/iui grab hint: off (Intelligent UI is off)')
 })
 
-test('with no PerlObjCBridge (clip none) the shim still gets the text; no read, no hint; details says so; grab still copies', async ($, on) => {
+test('/iui details: picture select off before Claude Code 2.1.298', async ($, on) => {
+  const w = world(on, { version: '2.1.297' })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  expect(await detailLines($)).toEqual(['Picture select: off (Claude Code 2.1.297; it needs 2.1.298 or newer)', '/iui grab hint: on'])
+})
+
+test('with no PerlObjCBridge (clip none): no read, no hint; details says so; no new watcher for it; /iui grab still copies', async ($, on) => {
   const w = world(on, { noBridge: true })
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
@@ -945,15 +891,15 @@ test('with no PerlObjCBridge (clip none) the shim still gets the text; no read, 
   await w.clock.advance(900)
   await w.clock.settle()
   expect(w.pastes).toBe(0)
-  expect(w.copies).toEqual([COPIED])
-  const details = await $.command.run({ command: 'iui', args: 'details' } as any)
-  expect(details.text).toContain('\nAuto copy: on (no /iui grab hint: no PerlObjCBridge in /usr/bin/perl)')
+  expect(hints(w)).toBe(0)
+  expect(w.copies).toEqual([])
+  expect((await detailLines($))[1]).toBe('/iui grab hint: off (no PerlObjCBridge in /usr/bin/perl)')
   // No new watcher for it: once is enough.
   await drawAnswer($, w, 'ans-2')
   expect(w.watchers.length).toBe(2)
   w.selection = { text: COPY, requestId: 'ans-1' }
-  const grabbed = await $.command.run({ command: 'iui', args: 'grab' } as any)
-  expect(grabbed.text).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read, row ans-1).')
+  expect(await grab($)).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read, row ans-1).')
+  expect(w.copies).toEqual([COPIED])
 })
 
 // Another plugin's `$.ui.copy`, from its command `cp` (args: the text).
@@ -972,13 +918,10 @@ test('a copy of picture cells through $.ui.copy is rewritten to their text; othe
   expect(JSON.parse(got.text!)).toEqual({ isCopied: true })
   expect(w.copies).toEqual([COPIED])
   await $.command.run({ command: 'cp', args: 'plain text' } as any)
-  expect(w.copies[1]).toBe('plain text')
-  // The text went through the shim: no ask.
-  await w.clock.settle()
-  expect(w.answers).toEqual([])
+  expect(w.copies).toEqual([COPIED, 'plain text'])
 })
 
-test('a $.ui.copy of picture cells is not copied again at its clipboard change', { plugins: [COPIER] }, async ($, on) => {
+test('a $.ui.copy of picture cells: its clipboard change is read once and gets no hint', { plugins: [COPIER] }, async ($, on) => {
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
@@ -986,83 +929,66 @@ test('a $.ui.copy of picture cells is not copied again at its clipboard change',
   await $.command.run({ command: 'cp', args: COPY } as any)
   await w.clock.advance(900)
   await w.clock.settle()
-  expect(w.pastes).toBe(2)
+  expect(w.pastes).toBe(1)
   expect(w.copies).toEqual([COPIED])
+  expect(w.clipboard).toBe(COPIED)
+  expect(hints(w)).toBe(0)
   expect(w.toasts.filter(t => t.startsWith('Intelligent UI: copied')).length).toBe(0)
 })
 
-const GRAB_HINT = 'Intelligent UI: picture cells copied; /iui grab puts their text on the clipboard'
-
-test("another session's copy of the same cells (no ask here) is never rewritten, even with this session's old selection of them; one hint", async ($, on) => {
+test('native copies in fullscreen: one hint for cells that fit a page drawn here, never a write; none for the same text again, our own write, plain text or cells that fit no page', async ($, on) => {
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
-  // This session copied these cells a while ago (answered then).
   w.copy(COPY)
   await w.clock.settle()
-  expect(w.copies).toEqual([COPIED])
-  await w.clock.advance(60000)
-  // The selection stays; another session copies the same cells.
+  expect(hints(w)).toBe(1)
+  expect(w.copies).toEqual([])
+  expect(w.clipboard).toBe(COPY)
+  // Another session's copy of the same cells, with this session's old selection of them: the same text, no write, no second hint.
   expect(w.selection?.text).toBe(COPY)
   w.foreign(COPY)
   await w.clock.settle()
-  // A shim of this session could still ask: no hint yet.
-  expect(w.toasts.filter(t => t === GRAB_HINT)).toEqual([])
-  await w.clock.advance(HINT_WAIT_MS)
-  expect(w.copies).toEqual([COPIED])
-  expect(w.clipboard).toBe(COPY)
-  expect(w.toasts.filter(t => t === GRAB_HINT)).toEqual([GRAB_HINT])
-  // Its OSC 52 write of the same text: no second hint.
-  w.change()
-  await w.clock.advance(HINT_WAIT_MS)
-  expect(w.toasts.filter(t => t === GRAB_HINT).length).toBe(1)
-  expect(w.copies).toEqual([COPIED])
-})
-
-test('cells the watcher sees before their ask comes (a slow shim start): the ask in the wait stops the hint', async ($, on) => {
-  const w = world(on)
-  await $.command.run({ command: 'iui', args: '' } as any)
-  await drawAnswer($, w)
-  // The OSC 52 write only, then pbcopy's shim 300 ms later.
-  w.foreign(COPY)
-  await w.clock.advance(300)
-  void w.shim(COPY)
+  expect(hints(w)).toBe(1)
+  expect(w.copies).toEqual([])
+  // /iui grab's own write: not hinted.
+  expect(await grab($)).toBe(GRABBED)
   await w.clock.settle()
   expect(w.copies).toEqual([COPIED])
-  await w.clock.advance(HINT_WAIT_MS)
-  expect(w.toasts.filter(t => t === GRAB_HINT)).toEqual([])
-  expect(w.clipboard).toBe(COPIED)
-  // A copy that changes in the wait: no hint for the old one.
-  w.foreign(COPY.replace(cells(3, 0, 21), cells(3, 0, 20)))
-  await w.clock.advance(500)
+  expect(hints(w)).toBe(1)
+  // Plain text, then cells that fit no page drawn here (column 150): no hint.
   w.foreign('copied in another app')
-  await w.clock.advance(HINT_WAIT_MS)
-  expect(w.toasts.filter(t => t === GRAB_HINT)).toEqual([])
+  await w.clock.settle()
+  w.copy([cells(1, 0, 150), cells(2, 0, 150)].join('\n'))
+  await w.clock.settle()
+  expect(hints(w)).toBe(1)
+  // Other cells that fit: one hint again.
+  w.copy(cells(5, 0, 40))
+  await w.clock.settle()
+  expect(hints(w)).toBe(2)
+  expect(w.copies).toEqual([COPIED])
 })
 
-test("the selection gives the row (its requestId) only when it is that copy", async ($, on) => {
+test('the selection gives a $.ui.copy its row (its requestId) only when it is that copy', { plugins: [COPIER] }, async ($, on) => {
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
   // Two answers that both fit the cells: with no row, the newer one.
   await drawAnswer($, w)
   await drawAnswer($, w, 'ans-2', `${SMALL_MD}\n\nEnd.`)
-  w.selects = false
   const picked = async () => ((await $.command.run({ command: 'iui', args: 'dump' } as any)).text ?? '').match(/-> answer (\S+) page/)?.[1]
   // A selection of other cells (and a row) does not name this copy's row.
   w.selection = { text: cells(9, 0, 9), requestId: 'ans-1' }
-  w.copy(COPY)
-  await w.clock.settle()
+  await $.command.run({ command: 'cp', args: COPY } as any)
   expect(w.copies).toEqual([COPIED])
   expect(await picked()).toBe('ans-2')
-  // The selection of this copy (a last line break less): its row.
+  // The selection of this copy: its row.
   w.selection = { text: COPY, requestId: 'ans-1' }
-  w.copy(`${COPY}\n`)
-  await w.clock.settle()
+  await $.command.run({ command: 'cp', args: COPY } as any)
   expect(w.copies).toEqual([COPIED, COPIED])
   expect(await picked()).toBe('ans-1')
 })
 
-test('cells that can not be read: an empty answer at once (no wait; the shim keeps its cells), one toast for each copy', async ($, on) => {
+test('cells that fit no page: no hint; /iui grab says it could not read them; $.ui.copy passes them as they are', { plugins: [COPIER] }, async ($, on) => {
   const w = world(on)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w)
@@ -1070,128 +996,13 @@ test('cells that can not be read: an empty answer at once (no wait; the shim kee
   const text = [cells(1, 0, 150), cells(2, 0, 150)].join('\n')
   w.copy(text)
   await w.clock.settle()
-  expect(w.answers).toEqual([''])
-  expect(w.clipboard).toBe(text)
+  expect(hints(w)).toBe(0)
+  expect(await grab($)).toBe('Intelligent UI: found 1 picture run(s) but could not read them (see /iui dump).')
   expect(w.copies).toEqual([])
-  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: could not read')).length).toBe(1)
-  // No /iui grab hint for it: its own shim asked.
-  await w.clock.advance(HINT_WAIT_MS)
-  expect(w.toasts.filter(t => t === GRAB_HINT)).toEqual([])
-  w.copy(text)
+  await $.command.run({ command: 'cp', args: text } as any)
   await w.clock.settle()
-  expect(w.answers).toEqual(['', ''])
-  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: could not read')).length).toBe(2)
-})
-
-test('a request over ASK_MAX bytes is not read: an empty answer at once', async ($, on) => {
-  const w = world(on)
-  await $.command.run({ command: 'iui', args: '' } as any)
-  await drawAnswer($, w)
-  w.reads.length = 0
-  const big = `${COPY}${' '.repeat(ASK_MAX)}`
-  void w.shim(big)
-  await w.clock.settle()
-  expect(w.answers).toEqual([''])
-  expect(w.reads.filter(p => p.startsWith(`${ASK_DIR}/`))).toEqual([])
-  expect(w.clipboard).toBe(big)
-  expect(w.copies).toEqual([])
-})
-
-test('a throw while the text is read (a bad selection): an empty answer all the same', async ($, on) => {
-  const w = world(on)
-  await $.command.run({ command: 'iui', args: '' } as any)
-  await drawAnswer($, w)
-  w.selects = false
-  w.selection = { text: 5 } as any
-  void w.shim(COPY)
-  await w.clock.settle()
-  expect(w.answers).toEqual([''])
-  expect(w.clipboard).toBe(COPY)
-  expect(w.copies).toEqual([])
-})
-
-test('a bad id is never read or answered; an id with no request file gets an empty answer', async ($, on) => {
-  const w = world(on)
-  await $.command.run({ command: 'iui', args: '' } as any)
-  await drawAnswer($, w)
-  w.reads.length = 0
-  w.files.set('/c/secret', COPY)
-  w.files.set(`${ASK_DIR}/.hidden`, COPY)
-  for (const id of ['../secret', '.hidden', '..', 'a/b', 'x'.repeat(200), '4242-1-1']) w.readers[0]!.say(`ask ${id}`)
-  await w.clock.settle()
-  expect(w.reads.filter(p => p.startsWith('/c/'))).toEqual([])
-  expect(w.answers).toEqual([])
-  // Only 4242-1-1 (no shim waits for it): refused, its files go.
-  expect(w.late).toEqual([''])
-  expect(w.cleaned).toEqual([`${ASK_DIR}/4242-1-1`])
-  expect(w.copies).toEqual([])
-  expect(w.toasts.filter(t => t.includes('not ready'))).toEqual([])
-})
-
-const NOT_READY = 'Intelligent UI: the picture text was not ready in time; /iui grab copies it'
-
-test('a late answer (the shim gave up at 1.5 s) writes nothing: the cells stay, one toast names /iui grab', async ($, on) => {
-  const w = world(on)
-  await $.command.run({ command: 'iui', args: '' } as any)
-  await drawAnswer($, w)
-  // A slow probe: the shim gives up and writes the cells, with its mark.
-  w.hold()
-  w.copy(COPY)
-  await w.clock.settle()
-  await w.clock.advance(1500)
-  expect(w.clipboard).toBe(COPY)
-  expect([...w.files.keys()].filter(k => k.startsWith(`${ASK_DIR}/`))).toEqual([`${ASK_DIR}/4242-1-7.answer`])
-  w.release()
-  await w.clock.settle()
-  // The answer meets the mark: no write, the files go, one toast.
-  expect(w.late).toEqual([COPIED])
-  expect(w.copies).toEqual([])
-  expect(w.clipboard).toBe(COPY)
-  expect([...w.files.keys()].filter(k => k.startsWith(`${ASK_DIR}/`))).toEqual([])
-  expect(w.toasts.filter(t => t === NOT_READY)).toEqual([NOT_READY])
-  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: copied'))).toEqual([])
-  // Its own shim asked for these cells: no /iui grab hint as well.
-  await w.clock.advance(HINT_WAIT_MS)
-  expect(w.toasts.filter(t => t === GRAB_HINT)).toEqual([])
-  // /iui grab then copies the text.
-  expect((await $.command.run({ command: 'iui', args: 'grab' } as any)).text).toContain('copied')
-  expect(w.copies).toEqual([COPIED])
-})
-
-test('session A in fullscreen keeps an old selection equal to the cells; the same cells come on the clipboard not through its shim: no write by A, at most one hint', async ($, on) => {
-  const w = world(on)
-  await $.command.run({ command: 'iui', args: '' } as any)
-  await drawAnswer($, w)
-  // An old selection of A, with the text of these cells.
-  w.selection = { text: COPY }
-  await w.clock.advance(60000)
-  // Another session copies identical cells (no ask comes to A).
-  w.foreign(COPY)
-  await w.clock.settle()
-  await w.clock.advance(HINT_WAIT_MS)
-  w.change()
-  await w.clock.advance(HINT_WAIT_MS)
-  expect(w.copies).toEqual([])
-  expect(w.answers).toEqual([])
-  expect(w.clipboard).toBe(COPY)
-  expect(w.toasts.filter(t => t === GRAB_HINT).length).toBeLessThanOrEqual(1)
-})
-
-test('the same copy again while its picture is read: one probe, each copy gets the text', async ($, on) => {
-  const w = world(on)
-  await $.command.run({ command: 'iui', args: '' } as any)
-  await drawAnswer($, w)
-  w.hold()
-  w.copy(COPY)
-  await w.clock.settle()
-  w.copy(COPY)
-  await w.clock.settle()
-  w.release()
-  await w.clock.settle()
-  expect(w.queries.length).toBe(1)
-  expect(w.copies).toEqual([COPIED, COPIED])
-  expect(w.clipboard).toBe(COPIED)
-  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: copied')).length).toBe(2)
+  expect(w.copies).toEqual([text])
+  expect(hints(w)).toBe(0)
 })
 
 test('a watcher that starts again gives no hint for the clipboard that was there before (its first count is only noted)', async ($, on) => {
@@ -1202,51 +1013,15 @@ test('a watcher that starts again gives no hint for the clipboard that was there
   await drawAnswer($, w)
   await w.clock.advance(3000)
   expect(w.pastes).toBe(0)
-  expect(w.toasts.filter(t => t === GRAB_HINT)).toEqual([])
-  // A new copy is answered.
+  expect(hints(w)).toBe(0)
+  // A new copy gets the hint.
   w.copy(COPY)
   await w.clock.settle()
-  expect(w.copies).toEqual([COPIED])
+  expect(hints(w)).toBe(1)
+  expect(w.copies).toEqual([])
 })
 
-test('the ask reader that ends on its own is started again, ASK_RESTARTS times at most; a FIFO that is not safe (exit 3) is final', async ($, on) => {
-  const w = world(on)
-  await $.command.run({ command: 'iui', args: '' } as any)
-  await drawAnswer($, w)
-  const details = async () => ((await $.command.run({ command: 'iui', args: 'details' } as any)).text ?? '').split('\n').find(l => l.startsWith('Auto copy:'))
-  for (let i = 0; i < ASK_RESTARTS; i++) {
-    w.readers.at(-1)!.end(0)
-    await w.clock.settle()
-    expect(await details()).toBe('Auto copy: off (the ask reader does not run)')
-    await w.clock.advance(ASK_RESTART_MS)
-    expect(w.readers.length).toBe(i + 2)
-    expect(await details()).toBe('Auto copy: on')
-  }
-  // The new reader gets the asks.
-  w.copy(COPY)
-  await w.clock.settle()
-  expect(w.copies).toEqual([COPIED])
-  // The cap: no more.
-  w.readers.at(-1)!.end(0)
-  await w.clock.advance(ASK_RESTART_MS * 3)
-  expect(w.readers.length).toBe(ASK_RESTARTS + 1)
-  // No reader: the shim writes the cells at once (its FIFO open fails).
-  w.copy(COPY)
-  await w.clock.settle()
-  expect(w.clipboard).toBe(COPY)
-  expect(w.copies).toEqual([COPIED])
-})
-
-test('an unsafe FIFO (the reader exits 3) is not read again', async ($, on) => {
-  const w = world(on)
-  await $.command.run({ command: 'iui', args: '' } as any)
-  await drawAnswer($, w)
-  w.readers[0]!.end(3)
-  await w.clock.advance(ASK_RESTART_MS * 3)
-  expect(w.readers.length).toBe(1)
-})
-
-test('at an exit the watcher and the ask reader are killed, no child takes their place, the FIFO and the requests go; a /clear keeps the reader', async ($, on) => {
+test('at an exit the watcher is killed and no child takes its place; a /clear stops only its clipboard part', async ($, on) => {
   const w = world(on)
   on('session.end', async ($: any, e: any) => ({ sessionId: e.sessionId }))
   await $.command.run({ command: 'iui', args: '' } as any)
@@ -1254,22 +1029,18 @@ test('at an exit the watcher and the ask reader are killed, no child takes their
   expect(w.watchers.map(c => c.argv.slice(3))).toEqual([[], ['clip']])
   await $.session.end({ reason: 'clear', sessionId: 's1' } as any)
   await w.clock.settle()
+  // The process goes on: the watcher again with no clipboard part.
   expect(w.watchers.map(c => c.argv.slice(3))).toEqual([[], ['clip'], []])
-  // The process goes on: the reader and its FIFO stay.
-  expect(w.ended).toEqual([])
-  expect(w.readers.map(c => c.dead)).toEqual([false])
   expect(w.kills).toEqual([w.watchers[0]!.pid, w.watchers[1]!.pid])
   w.copy(COPY)
   await w.clock.settle()
   expect(w.pastes).toBe(0)
-  expect(w.copies).toEqual([COPIED])
+  expect(hints(w)).toBe(0)
   await $.session.end({ reason: 'prompt_input_exit', sessionId: 's2' } as any)
   await w.clock.settle()
   await w.clock.advance(5000)
   expect(w.watchers.length).toBe(3)
-  expect(w.readers.length).toBe(1)
-  expect(w.kills).toEqual([...w.watchers.map(c => c.pid), w.readers[0]!.pid])
-  expect(w.ended).toEqual([[ASK, ASK_DIR, '4242', '/c/shims-4242']])
+  expect(w.kills).toEqual(w.watchers.map(c => c.pid))
 })
 
 test('a clip child that ends on its own is started again; its old clipboard gets no hint', async ($, on) => {
@@ -1290,21 +1061,44 @@ test('a clip child that ends on its own is started again; its old clipboard gets
   expect(w.pastes).toBe(0)
   // The new child sees a later copy of another session.
   w.foreign([cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n'))
-  await w.clock.advance(HINT_WAIT_MS)
+  await w.clock.settle()
   expect(w.toasts.filter(t => t === GRAB_HINT)).toEqual([GRAB_HINT])
 })
 
-// ---- The main screen: the terminal copies, so no automatic copy ------------
+test('nothing of the shim is left: no env var set, no shim script run or read, no perl child but the watcher, none of its exports', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  w.copy(COPY)
+  await w.clock.settle()
+  expect(await grab($)).toBe(GRABBED)
+  // No PATH or IUI_COPY_ASK change.
+  expect(w.envSets).toEqual([])
+  expect(w.vars.PATH).toBe('/usr/bin:/bin')
+  expect([...w.ran, ...w.spawned].some(argv => argv.some(a => /clip-shim|IUI_COPY|ask-\d|shims-/.test(a)))).toBe(false)
+  expect(w.reads.some(p => p.includes('clip-shim'))).toBe(false)
+  expect([...w.files.keys()].filter(k => /\/(shims-|ask)/.test(k))).toEqual([])
+  // The perl children: the watcher only (a size one, then one with `clip`).
+  const perls = w.spawned.filter(argv => /perl$/.test(argv[0]!))
+  expect(perls.length).toBe(2)
+  expect(perls.every(argv => argv[1] === '-e' && argv[2] === WATCH_PL)).toBe(true)
+  const gone = ['SHIM_SETUP', 'shimText', 'shimFindOf', 'pathWith', 'setUpShims', 'autoCopyText', 'ASK_PL', 'ANSWER_SH', 'ASK_CLEAN_SH', 'ASK_END_SH', 'ASK_MAX', 'listenAsks']
+  expect(Object.keys(registerModule).filter(k => gone.includes(k))).toEqual([])
+  expect(Object.keys(clipboardModule).filter(k => gone.includes(k))).toEqual([])
+  expect(Object.keys(settingsModule).filter(k => ['HINT_WAIT_MS', 'ASKED_MS', 'USE_COPY_SHIM'].includes(k))).toEqual([])
+})
+
+// ---- The main screen: the terminal copies, so only the hint ----------------
 
 const FULLSCREEN_TOAST = 'Intelligent UI works best in fullscreen mode: run /tui fullscreen'
 
 test('main screen: picture cells on the clipboard are never rewritten (their session is not known); one toast names /iui grab', async ($, on) => {
   const w = world(on)
   w.selects = false
+  await selectOff($)
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w, 'ans-1', SMALL_MD, false)
-  // The terminal's own copy (or another session's): no ask, so no write,
-  // no probe, one toast at once.
+  // The terminal's own copy (or another session's): no write, no probe, one toast at once.
   w.foreign(COPY)
   await w.clock.settle()
   await w.clock.advance(1000)
@@ -1314,7 +1108,7 @@ test('main screen: picture cells on the clipboard are never rewritten (their ses
   expect(w.toasts.filter(t => t.includes('/iui grab'))).toEqual([GRAB_HINT])
   // dump shows them (its read probes the page).
   const dumped = await $.command.run({ command: 'iui', args: 'dump' } as any)
-  expect(dumped.text).toContain('auto copy off on the main screen (use /iui grab)')
+  expect(dumped.text).toContain('code points; grab hint on):')
   expect(dumped.text).toContain('-> answer ans-1 page 0')
   // The same cells again: no second toast.
   w.foreign(COPY)
@@ -1326,6 +1120,14 @@ test('main screen: picture cells on the clipboard are never rewritten (their ses
   expect(w.toasts.filter(t => t.includes('/iui grab')).length).toBe(1)
   expect(w.copies).toEqual([])
   expect(w.queries.length).toBe(1)
+  expect(await detailLines($)).toEqual(['Picture select: off (/iui select off)', '/iui grab hint: on'])
+})
+
+test('main screen: picture select says to use fullscreen or /iui grab', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w, 'ans-1', SMALL_MD, false)
+  expect(await detailLines($)).toEqual(['Picture select: off on the main screen (use /tui fullscreen, or /iui grab)', '/iui grab hint: on'])
 })
 
 test('main screen: /iui grab with no selection reads the clipboard and writes its text; a second grab says it is there', async ($, on) => {
@@ -1335,20 +1137,17 @@ test('main screen: /iui grab with no selection reads the clipboard and writes it
   await drawAnswer($, w, 'ans-1', SMALL_MD, false)
   w.foreign(COPY)
   await w.clock.settle()
-  const grabbed = await $.command.run({ command: 'iui', args: 'grab' } as any)
-  expect(grabbed.text).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read).')
+  expect(await grab($)).toBe(GRABBED)
   expect(w.copies).toEqual([COPIED])
   // Our own write is not read back as new: no toast, no copy.
   await w.clock.settle()
   expect(w.copies).toEqual([COPIED])
   expect(w.toasts.filter(t => t.includes('/iui grab')).length).toBe(1)
-  const again = await $.command.run({ command: 'iui', args: 'grab' } as any)
-  expect(again.text).toBe('Intelligent UI: the clipboard has the text already.')
+  expect(await grab($)).toBe('Intelligent UI: the clipboard has the text already.')
   expect(w.copies).toEqual([COPIED])
   w.foreign('plain text')
   await w.clock.settle()
-  const none = await $.command.run({ command: 'iui', args: 'grab' } as any)
-  expect(none.text).toBe('Intelligent UI: no mouse selection and no picture cells on the clipboard; select over a picture and copy first.')
+  expect(await grab($)).toBe('Intelligent UI: no mouse selection and no picture cells on the clipboard; select over a picture and copy first.')
   expect(w.copies).toEqual([COPIED])
 })
 
@@ -1358,27 +1157,26 @@ test('main screen: /copy or $.ui.copy of picture cells gets their text (the ui.c
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w, 'ans-1', SMALL_MD, false)
   await $.command.run({ command: 'cp', args: COPY } as any)
-  await w.clock.advance(HINT_WAIT_MS)
+  await w.clock.advance(1000)
   expect(w.copies).toEqual([COPIED])
   expect(w.clipboard).toBe(COPIED)
-  expect(w.toasts.filter(t => t === GRAB_HINT)).toEqual([])
+  expect(hints(w)).toBe(0)
 })
 
-// The ask says whose copy it is, so a write is safe before the layout is known.
-test('fullscreen or main screen not known yet: a copy through the shim gets its text, another one gets the hint', async ($, on) => {
+test('fullscreen or main screen not known yet: a native copy gets the hint, a $.ui.copy its text; no advice', { plugins: [COPIER] }, async ($, on) => {
   const w = world(on)
   w.selects = false
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w, 'ans-1', SMALL_MD, null)
   w.foreign(COPY)
-  await w.clock.advance(HINT_WAIT_MS)
+  await w.clock.settle()
   expect(w.copies).toEqual([])
-  expect(w.toasts.filter(t => t === GRAB_HINT)).toEqual([GRAB_HINT])
-  w.copy(COPY)
+  expect(hints(w)).toBe(1)
+  await $.command.run({ command: 'cp', args: COPY } as any)
   await w.clock.settle()
   expect(w.copies).toEqual([COPIED])
-  const details = await $.command.run({ command: 'iui', args: 'details' } as any)
-  expect(details.text).toContain('\nAuto copy: on')
+  expect(hints(w)).toBe(1)
+  expect(await detailLines($)).toEqual(['Picture select: on in fullscreen (the screen is not known yet)', '/iui grab hint: on'])
   // No advice: the layout is not known.
   expect(w.toasts).not.toContain(FULLSCREEN_TOAST)
 })
@@ -1398,12 +1196,13 @@ test('the fullscreen advice is not shown in fullscreen', async ($, on) => {
   expect(w.toasts).not.toContain(FULLSCREEN_TOAST)
 })
 
-test('the fullscreen advice is not shown where no picture draws (tmux)', async ($, on) => {
+test('the fullscreen advice is not shown where no picture draws (tmux); picture select is off there', async ($, on) => {
   const w = world(on, { env: { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1', TMUX: '/tmp/tmux-501/default,1,0' } })
   await $.command.run({ command: 'iui', args: '' } as any)
   await drawAnswer($, w, 'ans-1', SMALL_MD, false)
   expect(w.compiles).toEqual([])
   expect(w.toasts).not.toContain(FULLSCREEN_TOAST)
+  expect((await detailLines($))[0]).toBe('Picture select: off (no pictures drawn from files here)')
 })
 
 test('the fullscreen advice is not shown with Intelligent UI off', async ($, on) => {
@@ -1497,6 +1296,71 @@ test('picture select: a drag swaps the page\'s picture for a frame of its select
   expect(w.reads.filter(r => r.endsWith('/a-1.png')).length).toBe(1)
 })
 
+test('picture select: a page drawn is built and its words probed in the background, before any down; the copy at the up runs no probe', async ($, on) => {
+  const w = world(on, { tty: TTY })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await drawAnswer($, w)
+  expect(w.reads.filter(r => r.endsWith('/a-1.png')).length).toBe(1)
+  expect(w.queries.map(q => q.page)).toEqual(['1'])
+  // No frame or blit until a selection.
+  expect(w.frames).toEqual([])
+  await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'move', x: 10, y: 2, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'up', x: 21, y: 3, button: 'left', in: 'sel0' })
+  await settle(w)
+  expect(w.copies).toEqual([COPIED])
+  expect(w.queries.length).toBe(1)
+  expect(w.reads.filter(r => r.endsWith('/a-1.png')).length).toBe(1)
+})
+
+test('picture select: with the background probe still running, the copy at the up waits for it and gets the same text', async ($, on) => {
+  const w = world(on, { tty: TTY })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  w.hold()
+  const ui = await drawAnswer($, w)
+  expect(w.queries.length).toBe(1)
+  await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'move', x: 10, y: 2, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'up', x: 21, y: 3, button: 'left', in: 'sel0' })
+  await settle(w)
+  expect(w.copies).toEqual([])
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual([COPIED])
+  // One probe run for the background and the copy.
+  expect(w.queries.length).toBe(1)
+})
+
+test('picture select: only the pages on screen are built and probed; a page that comes on screen is, once', async ($, on) => {
+  const w = world(on, { tty: TTY })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const off = { ...props(long), onScreen: null }
+  const ui = await $.ui.mount({ ...message('ans-1', long), props: off })
+  await w.clock.settle()
+  await ui.redraw(off)
+  await settle(w)
+  await w.clock.advance(300)
+  await settle(w)
+  const pages = pagesOf(w)
+  expect(pages).toBeGreaterThan(2)
+  const pngReads = () => w.reads.filter(r => /\/a-\d+\.png$/.test(r)).map(r => r.replace(/^.*\//, ''))
+  expect(pngReads()).toEqual([])
+  expect(w.queries).toEqual([])
+  // 16 rows a page under the top margin: page 2 is rows 17 to 32.
+  const of = 1 + 16 * pages
+  await ui.redraw({ ...props(long), onScreen: { first: 17, last: 32, of } })
+  await settle(w)
+  expect(pngReads()).toEqual(['a-2.png'])
+  expect(w.queries.map(q => q.page)).toEqual(['2'])
+  // Scrolled up to page 1, then back: page 1 once, page 2 not again.
+  await ui.redraw({ ...props(long), onScreen: { first: 0, last: 16, of } })
+  await settle(w)
+  await ui.redraw({ ...props(long), onScreen: { first: 17, last: 32, of } })
+  await settle(w)
+  expect(pngReads()).toEqual(['a-2.png', 'a-1.png'])
+  expect(w.queries.map(q => q.page)).toEqual(['2', '1'])
+})
+
 test('picture select: a fast drag folds into few frames, the last one the newest selection', async ($, on) => {
   const w = world(on, { tty: TTY })
   await $.command.run({ command: 'iui', args: '' } as any)
@@ -1555,7 +1419,16 @@ test('picture select: with IUI_DEBUG, each post writes a trace line (the post, i
   expect(lines[1]).toContain('anchor 0,1 head 10,2 size ')
   expect(lines[1]).toContain('rows p0 1..2 (2)')
   const blit = w.traces.find(t => t.includes('select: blit '))
-  expect(blit).toMatch(/select: blit ans-1 page 0 rows 1\.\.2 \(2\) decode \d+ms frame \d+ms write \d+ms \d+ bytes blit \d+ms/)
+  expect(blit).toMatch(/select: blit ans-1 page 0 rows 1\.\.2 \(2\) wait \d+ms frame \d+ms write \d+ms \d+ bytes blit \d+ms/)
+  // The page's cache, built when it was drawn: its build and its words.
+  expect(w.traces.some(t => /select: cache start [0-9a-f]+\/a-1\.png \(read \d+ms, 0 queued\)/.test(t))).toBe(true)
+  const built = w.traces.find(t => t.includes('select: cache built '))
+  expect(built).toMatch(/select: cache built [0-9a-f]+\/a-1\.png 1568x512 ready in \d+ms, done in \d+ms \(read \d+ms, \d+ slices, max [\d.]+ms, p95 [\d.]+ms\); 1 pages kept, \d+ MB, 0 queued/)
+  expect(w.traces.some(t => /select: words ans-1 page 0 \d+ words in \d+ms \(background\)/.test(t))).toBe(true)
+  // The up: its copy, with the words there already.
+  await ui.pointer({ type: 'up', x: 21, y: 3, button: 'left', in: 'sel0' })
+  await settle(w)
+  expect(w.traces.find(t => t.includes('select: copy '))).toMatch(/select: copy 35 chars \d+ms after the up \(text \d+ms, words cached\); no native selection/)
 })
 
 test('picture select: with no IUI_DEBUG, a post writes no trace line', async ($, on) => {

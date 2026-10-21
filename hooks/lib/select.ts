@@ -1,9 +1,9 @@
 // Picture select: a mouse selection over the pictures of an answer, a plan
-// or a Markdown file Claude sent. Since Claude Code 2.1.305 its own
-// selection skips an Image's cells (no highlight, no text), so a Client
-// (hooks/sel.tsx) over each page takes the pointer and posts the selection;
-// the hooks module shows it on the page and copies its text on the
-// button's up. The highlight swaps the page's picture (blit.ts); the page's
+// or a Markdown file Claude sent. Claude Code's own selection copies an
+// Image's cells as kitty placeholders (2.1.305 and newer skip them), so a
+// Client (hooks/sel.tsx) over each page takes the pointer and posts the
+// selection; the hooks module shows it on the page and copies its text on
+// the button's up. The highlight swaps the page's picture (blit.ts); the page's
 // layout never changes. The pure parts are here, with the selection now.
 import type { EngineInterface } from 'claude-code'
 
@@ -169,9 +169,8 @@ export function textOfRuns(
   return joinSegments(runs.map(run => ({ kind: 'image', lines: run.lines })), texts)
 }
 
-// Whether Claude Code is a version whose selection skips pictures
-// (SELECT_SINCE or newer; a dev build by its release). Before it, its own
-// selection copies them, and a Client over a picture would take that away.
+// Whether Claude Code has what picture select uses (SELECT_SINCE or newer;
+// a dev build by its release): the Client, ui.message, ui.blit and ui.copy.
 export function needsSelect(version: string): boolean {
   const release = /^\d+\.\d+\.\d+/.exec(version.trim())?.[0]
   return !!release && (compareVersions(release, SELECT_SINCE) ?? -1) >= 0

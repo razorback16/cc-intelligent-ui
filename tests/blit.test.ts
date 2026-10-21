@@ -1,7 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
 import { bandOf, edgesOf, endFold, foldNew, frameOf, framesOf, over, pokeFold, rgbOf, selectColor, sigOf, startFold } from '../hooks/lib/blit'
-import { adler32, adlerJoin, concat, crc32, decodePng, deflatePiece, fromBase64, headOf, inflate, tailOf, type Rgba } from '../hooks/lib/png'
+import { framesSteps } from '../hooks/lib/frames'
+import {
+  adler32, adlerJoin, chunk, concat, crc32, DECODE_STEP, decodePng, decodeSteps, deflatePiece, fromBase64, headOf, inflate, Inflater, pngParts, tailOf, type Rgba,
+} from '../hooks/lib/png'
 
 // ---- PNG ---------------------------------------------------------------------------
 
@@ -26,6 +29,7 @@ const FIXTURE = [
   'rdpYwg/Q76KbLeEfQ/GorH+e/u6v/Yfxp39WO+/i/KnT1vncz3VAAAAABJRU5ErkJggg==',
 ].join('')
 const pixelOf = (x: number, y: number) => [(x * 7 + y * 13) & 255, (x * x + y) & 255, ((x ^ y) * 5) & 255, (x * 29 + y * 3) & 255]
+const toHex = (b: Uint8Array) => Array.from(b, v => v.toString(16).padStart(2, '0')).join('')
 const imageOf = (width: number, height: number, at: (x: number, y: number) => number[]): Rgba => {
   const data = new Uint8Array(width * height * 4)
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) data.set(at(x, y), (y * width + x) * 4)
@@ -66,6 +70,114 @@ test('deflate pieces join into one stream: each alone, ended on a byte, inflated
   const out = new Uint8Array(line * 9)
   expect(inflate(stream, out)).toBe(out.length)
   expect([...out]).toEqual([...concat(raws)])
+})
+
+// A PNG of `channels` (3: RGB, 4: RGBA) pixels, row y with filter y % 5,
+// in zlib stored blocks of `block` bytes, in two IDAT chunks.
+function storedPng(width: number, height: number, channels: number, at: (x: number, y: number) => number[], block: number): Uint8Array {
+  const stride = width * channels
+  const px = new Uint8Array(height * stride)
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) px.set(at(x, y).slice(0, channels), y * stride + x * channels)
+  const raw = new Uint8Array(height * (stride + 1))
+  for (let y = 0; y < height; y++) {
+    const f = y % 5
+    raw[y * (stride + 1)] = f
+    for (let i = 0; i < stride; i++) {
+      const o = y * stride + i
+      const [a, b, c] = [i >= channels ? px[o - channels]! : 0, y ? px[o - stride]! : 0, y && i >= channels ? px[o - stride - channels]! : 0]
+      const [pa, pb, pc] = [Math.abs(b - c), Math.abs(a - c), Math.abs(a + b - 2 * c)]
+      const pred = [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f]!
+      raw[y * (stride + 1) + 1 + i] = (px[o]! - pred) & 255
+    }
+  }
+  const parts = [Uint8Array.of(0x78, 0x01)]
+  for (let i = 0; i < raw.length; i += block) {
+    const n = Math.min(block, raw.length - i)
+    parts.push(Uint8Array.of(i + n >= raw.length ? 1 : 0, n & 255, n >> 8, ~n & 255, (~n >> 8) & 255), raw.subarray(i, i + n))
+  }
+  const a = adler32(raw)
+  parts.push(Uint8Array.of(a >>> 24, (a >>> 16) & 255, (a >>> 8) & 255, a & 255))
+  const z = concat(parts)
+  const ihdr = Uint8Array.of(0, 0, 0, width, 0, 0, 0, height, 8, channels === 4 ? 6 : 2, 0, 0, 0)
+  const sig = Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10)
+  return concat([sig, chunk('IHDR', ihdr), chunk('IDAT', z.subarray(0, 40)), chunk('IDAT', z.subarray(40)), chunk('IEND', new Uint8Array(0))])
+}
+
+// A 50 x 12 RGBA PNG of one piece (fixed Huffman blocks), as frames are.
+const FIXED_PNG = (() => {
+  const line = 50 * 4 + 1
+  const raw = new Uint8Array(12 * line)
+  for (let y = 0; y < 12; y++) for (let x = 0; x < 50; x++) raw.set(pixelOf(x >> 2, y), y * line + 1 + x * 4)
+  const piece = deflatePiece(raw, 4, line)
+  return concat([headOf(50, 12), chunk('IDAT', piece.bytes), tailOf([piece])])
+})()
+
+const drain = <T>(steps: Generator<undefined, T, void>): T => {
+  for (;;) {
+    const got = steps.next()
+    if (got.done) return got.value
+  }
+}
+
+test('a decode in steps gives the pixels of a decode at once, at any step (dynamic, fixed and stored blocks; RGBA and RGB)', () => {
+  const pngs = [fromBase64(FIXTURE), FIXED_PNG, storedPng(40, 12, 3, pixelOf, 100), storedPng(33, 9, 4, pixelOf, 7)]
+  expect([...decodePng(pngs[2]!).data]).toEqual([...imageOf(40, 12, (x, y) => [...pixelOf(x, y).slice(0, 3), 255]).data])
+  expect([...decodePng(pngs[3]!).data]).toEqual([...imageOf(33, 9, pixelOf).data])
+  for (const png of pngs) {
+    const one = decodePng(png)
+    for (const step of [1, 13, 256, 5000, DECODE_STEP]) {
+      const got = drain(decodeSteps(png, step))
+      expect([got.width, got.height]).toEqual([one.width, one.height])
+      expect(toHex(got.data)).toBe(toHex(one.data))
+    }
+  }
+  // The inflate goes on from where it stopped, whatever the limits.
+  for (const png of pngs) {
+    const { z, width, height, channels } = pngParts(png)
+    const once = new Uint8Array(height * (width * channels + 1))
+    expect(inflate(z, once)).toBe(once.length)
+    for (const limit of [1, 3, 97]) {
+      const z2 = new Inflater(z, new Uint8Array(once.length))
+      let runs = 0
+      while (!z2.run(z2.op + limit)) runs++
+      expect(runs).toBeGreaterThan(0)
+      expect(toHex(z2.out)).toBe(toHex(once))
+    }
+  }
+  // A stream cut short: the steps say so, as the decode at once does.
+  const cut = storedPng(40, 12, 3, pixelOf, 100)
+  const short = concat([cut.subarray(0, 33), chunk('IDAT', pngParts(cut).z.subarray(0, 300)), chunk('IEND', new Uint8Array(0))])
+  expect(() => decodePng(short)).toThrow()
+  expect(() => drain(decodeSteps(short, 64))).toThrow()
+})
+
+test("a page's frames in steps: ready with its plain rows, then its tinted rows; the same frames as made at once", () => {
+  const box = { columns: 10, rows: 4 }
+  for (const png of [fromBase64(FIXTURE), FIXED_PNG]) {
+    const one = framesOf(decodePng(png), box, COLOR)
+    const steps = framesSteps(png, box, COLOR)
+    let ready: ReturnType<typeof framesOf> | undefined
+    let got: ReturnType<typeof framesOf> | undefined
+    for (;;) {
+      const s = steps.next()
+      if (s.done) {
+        got = s.value
+        break
+      }
+      if (s.value && !ready) {
+        ready = s.value
+        // Ready: the plain rows made, no tinted row yet.
+        expect(ready.plain.length).toBe(4)
+        expect(ready.tint.filter(Boolean).length).toBe(0)
+      }
+    }
+    expect(got).toBe(ready)
+    expect(got!.plain.map(p => toHex(p.chunk))).toEqual(one.plain.map(p => toHex(p.chunk)))
+    // Done: each row's tinted piece, as a whole row selected makes it.
+    expect(got!.tint.filter(Boolean).length).toBe(4)
+    const rows = [{ row: 0, x0: 3, x1: 9 }, { row: 1, x0: 0, x1: 9 }, { row: 2, x0: 0, x1: 9 }, { row: 3, x0: 0, x1: 4 }]
+    expect(toHex(frameOf(got!, rows))).toBe(toHex(frameOf(one, rows)))
+  }
 })
 
 // ---- Cells to pixels -------------------------------------------------------------

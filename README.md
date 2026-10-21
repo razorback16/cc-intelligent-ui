@@ -51,7 +51,7 @@ In other terminals, the mod shows the normal text. Refer to [Install](docs/insta
 - **LaTeX math.** Inline `$…$` and display `$$…$$` math, typeset.
 - **Live diagrams, charts and plots.** Claude writes Typst with CeTZ, cetz-plot and fletcher. The drawings use your theme's colours and work offline. For a complex drawing, Claude loads the bundled `intelligent-ui` skill, with the full API and a compile check.
 - **Images and files.** Images in an answer, images that Claude sends, Markdown files that Claude sends, and images that you paste show in the transcript.
-- **Copy text from pictures.** In fullscreen mode, select and copy text with the mouse, as you do with normal text. On Linux, this needs a clipboard tool (refer to [Install](docs/install.md#linux)).
+- **Copy text from pictures.** In fullscreen mode, drag over a picture with the mouse, as you do over normal text. The mod highlights the selected text and copies it when you release the button. Refer to [Copy text from a picture](docs/usage.md#copy-text-from-a-picture).
 - **Links you can click.** The links, file paths and commands of an answer show in rows under its picture. A cmd+click on a link opens it. A click on a command copies it.
 - **Plans you can read.** In plan mode, the plan shows rendered, with an approve, edit or reject question under it.
 - **Themes that follow light and dark.** Claude Code's own colours by default, or VS Code's Markdown preview. You can make your own.
@@ -88,7 +88,7 @@ More in the [gallery](docs/gallery.md): plots, fractals and a tour of all the Ma
 | `/iui theme <name>` | Changes the theme: `claude-code`, `vscode-modern`, `vscode` or your own |
 | `/iui size <80–200>` | Text size in percent of your terminal text |
 | `/iui grid on` / `off` | Puts each line of text on the terminal rows, so that a mouse selection covers the text (on by default) |
-| `/iui select on` / `off` | Claude Code 2.1.305+, fullscreen: the mod selects and copies picture text with the mouse (on by default) |
+| `/iui select on` / `off` | Claude Code 2.1.298+, fullscreen: the mod selects and copies picture text with the mouse (on by default) |
 | `/iui updates on` / `off` | Turns the daily check for a new version on or off (on by default) |
 | `/iui details` | Shows the terminal, font, mode and Typst that the mod found |
 | `/iui setup` | iTerm2 (macOS): adds the shell line that turns pictures on |
@@ -96,10 +96,6 @@ More in the [gallery](docs/gallery.md): plots, fractals and a tour of all the Ma
 | `/iui dump` | Shows how the mod read the last clipboard with picture cells (for a bug report) |
 
 All commands are in [Usage](docs/usage.md).
-
-## Clipboard shims
-
-For the automatic copy, the clipboard must get the text of a copy in place of its picture cells. At the start (not over ssh, not in a background session, and only in a terminal that shows the pictures), the mod writes small `sh` scripts (shims) for the clipboard tools that Claude Code uses and that are installed: `pbcopy` on macOS, and `wl-copy`, `xclip` and `xsel` on Linux. It puts them in a folder of this Claude Code process, `shims-<pid>/`, in its cache folder (`${TMPDIR}/cc-intelligent-ui-<uid>/`), and puts this folder first on the `PATH` of the process. It also makes the folder `ask/` and a FIFO (a named pipe) `ask-<pid>` in the cache folder, and sets `IUI_COPY_ASK` to the FIFO. Before that, a setup script (`hooks/clip-shim-setup.sh`) makes sure that these folders are yours, are not links, and only you can write to them. If not, the mod makes no shims and does not change `PATH`. A shim runs the real tool with the same arguments and the same exit status. A shim asks only when Claude Code itself starts it (the shim is a direct child of the process of the FIFO) and Claude Code writes text (not an image) to the clipboard. Then `perl` keeps the text in memory. If the text has picture cells and is 4 MiB or less, the shim writes it to a request file in `ask/` (mode 600) and writes the name of the file to the FIFO. The mod of this session reads the name, finds the text under the cells, and writes it to an answer file. The shim gives this text to the real tool. If no answer comes in 1.5 s, or the mod does not run, the shim gives the cells as they are. Then it deletes the files. The shim writes no other text to disk. Nothing leaves the computer. Refer to [How it works](docs/how-it-works.md).
 
 ## Docs
 

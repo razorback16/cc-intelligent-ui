@@ -14,11 +14,9 @@ export type EnvName =
   | 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC' | 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES' | 'CLAUDE_CODE_SESSION_KIND' | 'CLAUDE_CODE_TMPDIR'
   | 'CMUX_SOCKET_PATH' | 'CMUX_SURFACE_ID' | 'CMUX_WORKSPACE_ID' | 'COLORFGBG' | 'DISABLE_AUTOUPDATER' | 'DISABLE_UPDATES' | 'DISPLAY'
   | 'GHOSTTY_RESOURCES_DIR' | 'HOME'
-  | 'ITERM_PROFILE' | 'ITERM_SESSION_ID' | 'IUI_COPY_ASK' | 'IUI_COPY_SHIM' | 'IUI_DEBUG' | 'IUI_FORCE' | 'KITTY_CONFIG_DIRECTORY' | 'KITTY_PID'
-  | 'KITTY_WINDOW_ID' | 'LC_TERMINAL' | 'PATH' | 'RIO_CONFIG_HOME' | 'SHELL' | 'SSH_CONNECTION' | 'SSH_TTY' | 'STY'
+  | 'ITERM_PROFILE' | 'ITERM_SESSION_ID' | 'IUI_DEBUG' | 'IUI_FORCE' | 'KITTY_CONFIG_DIRECTORY' | 'KITTY_PID'
+  | 'KITTY_WINDOW_ID' | 'LC_TERMINAL' | 'RIO_CONFIG_HOME' | 'SHELL' | 'SSH_CONNECTION' | 'SSH_TTY' | 'STY'
   | 'TERM' | 'TERM_PROGRAM' | 'TMUX' | 'WAYLAND_DISPLAY' | 'XDG_CONFIG_HOME' | 'XDG_CURRENT_DESKTOP' | 'ZDOTDIR'
-// The variables the mod sets (the clipboard shims).
-export type EnvSetName = 'IUI_COPY_ASK' | 'PATH'
 
 export function clockAfter($: EngineInterface, ms: number, fn: () => void) {
   return $.clock.after(ms, fn)
@@ -61,15 +59,12 @@ export function envGet($: EngineInterface, name: EnvName): Promise<string | unde
     case 'HOME': return $.env.get('HOME')
     case 'ITERM_PROFILE': return $.env.get('ITERM_PROFILE')
     case 'ITERM_SESSION_ID': return $.env.get('ITERM_SESSION_ID')
-    case 'IUI_COPY_ASK': return $.env.get('IUI_COPY_ASK')
-    case 'IUI_COPY_SHIM': return $.env.get('IUI_COPY_SHIM')
     case 'IUI_DEBUG': return $.env.get('IUI_DEBUG')
     case 'IUI_FORCE': return $.env.get('IUI_FORCE')
     case 'KITTY_CONFIG_DIRECTORY': return $.env.get('KITTY_CONFIG_DIRECTORY')
     case 'KITTY_PID': return $.env.get('KITTY_PID')
     case 'KITTY_WINDOW_ID': return $.env.get('KITTY_WINDOW_ID')
     case 'LC_TERMINAL': return $.env.get('LC_TERMINAL')
-    case 'PATH': return $.env.get('PATH')
     case 'RIO_CONFIG_HOME': return $.env.get('RIO_CONFIG_HOME')
     case 'SHELL': return $.env.get('SHELL')
     case 'SSH_CONNECTION': return $.env.get('SSH_CONNECTION')
@@ -82,13 +77,6 @@ export function envGet($: EngineInterface, name: EnvName): Promise<string | unde
     case 'XDG_CONFIG_HOME': return $.env.get('XDG_CONFIG_HOME')
     case 'XDG_CURRENT_DESKTOP': return $.env.get('XDG_CURRENT_DESKTOP')
     case 'ZDOTDIR': return $.env.get('ZDOTDIR')
-  }
-}
-
-export function envSet($: EngineInterface, name: EnvSetName, value: string): ReturnType<EngineInterface['env']['set']> {
-  switch (name) {
-    case 'IUI_COPY_ASK': return $.env.set('IUI_COPY_ASK', value)
-    case 'PATH': return $.env.set('PATH', value)
   }
 }
 

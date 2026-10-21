@@ -55,16 +55,15 @@ The mod finds Typst on the `PATH` of your login shell. It also looks in `/usr/lo
 
 The mod works on Linux with X11 and with Wayland. It uses these tools. Most Linux systems have the first three.
 
-- **perl** (perl 5): reads the terminal size and its cell size, and watches for a change of the size. The clipboard shims and their reader also use it (for the automatic copy).
+- **perl** (perl 5): reads the terminal size and its cell size, and watches for a change of the size. It also writes the frame files of the highlight for picture select (with `MIME::Base64`, a core module). On macOS, `/usr/bin/perl` also watches the clipboard for the `/iui grab` toast, with Apple's PerlObjCBridge (macOS has it).
 - **fontconfig** (`fc-match`, `fc-list`): finds the terminal font when the terminal's config does not name one. kitty and most terminals use fontconfig's `monospace` font. Ghostty uses its own JetBrains Mono when its config names no font. If fontconfig does not have JetBrains Mono, the mod copies the font from the Ghostty program (refer to [How it works](how-it-works.md)).
 - **The light or dark mode of the desktop** (for the `auto` theme): the freedesktop portal (`org.freedesktop.appearance color-scheme`, through `gdbus` or `busctl`). GNOME, KDE Plasma and most desktops have the portal. If the portal does not answer, the mod reads GNOME's `color-scheme` (`gsettings`).
-- **The clipboard** (for the `/iui grab` toast and for `/iui grab` on the main screen, refer to [Copy text from a picture](usage.md#copy-text-from-a-picture)). The mod uses the first of these that it finds:
+- **The clipboard** (only for the `/iui grab` toast and for `/iui grab` on the main screen, refer to [Picture cells on the clipboard](usage.md#picture-cells-on-the-clipboard)). The mod uses the first of these that it finds:
   1. **Wayland, not GNOME:** `wl-paste` from `wl-clipboard`. `wl-paste --watch` tells the mod about each clipboard change. It needs the data-control protocol of the compositor (KDE Plasma, Sway, Hyprland and other wlroots compositors have it).
   2. **X11, and GNOME on Wayland (through Xwayland):** `clipnotify` tells the mod about each clipboard change, and `xclip` or `xsel` reads the clipboard. If `clipnotify` is not installed, the mod uses GTK 3 from Python (`python3-gi`, which most GNOME desktops have) for both.
   3. **GNOME on Wayland with no X11 tool:** `wl-paste`. GNOME does not have the data-control protocol, so `wl-paste --watch` stops, and there is no `/iui grab` toast.
 
-  If none of these work, there is no `/iui grab` toast. The automatic copy, `/iui grab` (with a selection, in fullscreen mode), Claude Code's `/copy` and the `ui.copy` hook still work. `/iui details` shows the tool in use, or why there is no toast, on the line `Auto copy:`.
-- **The clipboard write tools** (for the automatic copy): `wl-copy` (from `wl-clipboard`), `xclip` or `xsel`. Claude Code copies with one of them. The mod puts a shim for each one that is installed first on the `PATH` (refer to [How it works](how-it-works.md)). The shims need `perl`. If none of these tools is installed, Claude Code copies with its own built-in code, and the automatic copy is off.
+  If none of these work, there is no `/iui grab` toast. Picture select, `/iui grab` (with a selection, in fullscreen mode), Claude Code's `/copy` and the `ui.copy` hook still work. `/iui details` shows the tool in use, or why there is no toast, on the line `/iui grab hint:`.
 - **"Edit the plan"** (refer to [Plan approval](usage.md#plan-approval)): VS Code (`code --wait`), else the first of VSCodium, Zed, Sublime Text, Kate, gedit and gvim that is on the `PATH`. These editors can wait until you close the file. If none is installed, the option does not show.
 - **The cache folder** is in `$TMPDIR`, else in `/tmp`.
 

@@ -6,13 +6,13 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 ### New
 
-- **Picture select.** Since Claude Code 2.1.305, the mouse selection of Claude Code skips pictures: no highlight and no text. In fullscreen mode, the mod now selects the text of a picture itself. Drag over the picture: the selected cells show on a blue background, and when you release the button, the mod copies their text and shows the toast "copied N chars of text". A click with no drag removes the selection. The highlight swaps the page's picture with `$.ui.blit` (a frame with the selected cells tinted), so the layout never changes and a clear leaves no old cells. This needs Claude Code 2.1.305 or newer. `/iui select off` turns it off. Refer to [Copy text from a picture](docs/usage.md#copy-text-from-a-picture).
+- **Picture select.** In fullscreen mode, with Claude Code 2.1.298 or newer, the mod selects the text of a picture itself. Drag over the picture: the selected cells show on a blue background (VS Code's selection colour), and when you release the button, the mod copies their text and shows the toast "copied N chars of text". A click with no drag removes the selection. A selection can go on into the next page of the same answer. The highlight swaps the page's picture with `$.ui.blit` (a frame with the selected cells tinted), so the layout never changes. `/iui select off` turns it off. Refer to [Picture select](docs/usage.md#picture-select-claude-code-21298-or-newer).
+- **Pages ready in the background.** When a page is drawn or comes on the screen, the mod decodes it and finds its words in the background, in short slices, so scrolling and drawing continue. Thus the first highlight and the copy at the button's up do not wait. Refer to [The page cache](docs/how-it-works.md#the-page-cache).
 
 ### Changed
 
-- **The automatic copy asks its own session.** The mod puts small shims of Claude Code's clipboard tools (`pbcopy`; `wl-copy`, `xclip`, `xsel`) first on the `PATH` of the Claude Code process, in a folder of that process only. When Claude Code copies picture cells, the shim asks the mod of its session for their text through a private FIFO, and the real tool gets that text. The shim waits 1.5 s at most; then it uses the cells, and a toast names `/iui grab`. The mod never writes the clipboard for a copy that it did not answer. Thus a copy of a different session is never changed, also when it has the same cells. Before, the mod read the clipboard after the copy and used the mouse selection: a session with an old selection of the same cells changed the copy of a different session. Refer to [Clipboard shims](README.md#clipboard-shims).
-- A copy of picture cells that is not from this session gets the `/iui grab` toast, also in fullscreen mode.
-- `/iui details` says why the automatic copy is off when the shims cannot work (ssh, a background session, a terminal with no pictures, no `perl`, or Linux with no `wl-copy`, `xclip` or `xsel`).
+- The automatic copy of 0.3.0 is gone: the mod does not write the clipboard after a copy of picture cells in fullscreen mode. Picture select copies the text of pictures. A copy that still gives picture cells (the main screen, a selection of Claude Code that starts outside a picture) gets a toast that names `/iui grab`, and the clipboard does not change.
+- `/iui details` shows the lines `Picture select:` and `/iui grab hint:` in place of `Auto copy:`.
 
 ## 0.3.0 (2026-10-20)
 

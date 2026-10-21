@@ -21,8 +21,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderSurface, RenderViewport } from 'claude-code'
 
 import {
-  ASKED_MS, DEFAULT_THEME, gridText, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
-  HINT_WAIT_MS, selectText, typstHintOf, widthText,
+  DEFAULT_THEME, gridText, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_WIDTH, MIN_HEIGHT, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
+  SELECT_SINCE, selectText, typstHintOf, widthText,
 } from './lib/settings'
 import { clip, drawnAnswers, editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env, type Job, type Result } from './lib/state'
 import { beginEpoch } from './lib/epoch'
@@ -33,21 +33,22 @@ import { runSetup } from './lib/setup'
 import { pollHost, PROBE_RUNS, probeOsc11, showMode, USE_OSC11, watchHost } from './lib/host'
 import { measureFonts } from './lib/typst'
 import { drawPages, linksFor, type ShownLink } from './lib/draw'
-import { picked, postOf, redrawSelection, runsOf, selectedRows, selectionAfter, selectTrace, textOfRuns, topsOf, type SelectPost, type Selection } from './lib/select'
-import { blits, warmPage } from './lib/blit'
+import { needsSelect, picked, postOf, redrawSelection, runsOf, selectedRows, selectionAfter, selectTrace, textOfRuns, topsOf, type SelectPost, type Selection } from './lib/select'
+import { blits, selectColor } from './lib/blit'
+import { needFrames, notePages } from './lib/pagecache'
 import { traceDebug } from './lib/log'
 import { finalizeAll } from './lib/stream'
-import { noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf, type PageWords } from './lib/probe'
+import { knownWords, noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf, type PageWords } from './lib/probe'
 import { codePointsOf, decodeSelection, hasPlaceholders, joinSegments, pageTopsOf, pickPages, textOfRun, type Drawn, type Pick, type Segment } from './lib/copy'
 import { pagesOf, type Drawing } from './lib/answer'
-import { answerAsk, askGaveUp, askRequest, asking, autoCopyText, clipboardNow, clipWatchArgs, clipWayReady, endAsks, listenAsks } from './lib/clipboard'
+import { clipboardNow, clipWatchArgs, clipWayReady, hintText } from './lib/clipboard'
 import { setUp } from './lib/env'
 import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/frame'
 import { roomColumns } from './lib/terminal'
 import { onScreenOf, pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
 import { drawPageField, pasteDir, pdfPagesOf, rowsAfter, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
 import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
-import { clockAfter, clockNow, fsWrite, sessionSurfaces, storeSet, uiCopy, uiLog, uiResolve, uiSelection, uiToast } from './lib/api'
+import { clockNow, fsWrite, sessionSurfaces, storeSet, uiCopy, uiLog, uiResolve, uiSelection, uiToast } from './lib/api'
 import {
   currentPlan, decidePlan, decisionOf, drawAskLine, drawPlanResult, drawPlanUse, isPlanQuestion, planFileOf, planInputOf, planOf,
   planShownOf, scheduleClear, type PlanVerdict,
@@ -88,10 +89,7 @@ export { nextJob } from './lib/stream'
 export * from './lib/images'
 export { rowsAfter, type Under } from './lib/pictures'
 export * from './lib/copy'
-export {
-  autoCopyText, CLIP_TOOLS, clipToolsOf, clipWayOf, FIND_SH, GTK_READ_PY, GTK_WATCH_PY, pathWith, SHIM_SETUP, SHIM_TOOLS, shimFindOf, shimText,
-  shQuote, WL_WATCH_SH, X11_WATCH_SH, type ClipTool, type ClipWay, type ShimState,
-} from './lib/clipboard'
+export { CLIP_TOOLS, clipToolsOf, clipWayOf, FIND_SH, GTK_READ_PY, GTK_WATCH_PY, hintText, WL_WATCH_SH, X11_WATCH_SH, type ClipTool, type ClipWay } from './lib/clipboard'
 export {
   agoText, checkedOf, compareVersions, isDue, isNewer, parseVersion, shouldTell, toldOf, UPDATE_EVERY_MS, UPDATE_FETCH_MS, UPDATE_STEPS, UPDATE_TOAST_MS,
   UPDATE_URL, updateLine, updateNotice, updateToast, versionOf,
@@ -128,7 +126,7 @@ async function pictureEnv($: EngineInterface, e: { viewport?: RenderViewport }):
 }
 
 // Once a session, where pictures draw on the main screen: fullscreen gives
-// the automatic copy (there Claude Code copies a selection itself).
+// picture select (a mouse drag over a picture copies its text).
 function tellFullscreen($: EngineInterface) {
   if (S.fullscreenTold) return
   S.fullscreenTold = true
@@ -222,25 +220,32 @@ async function planEnv($: EngineInterface): Promise<Env | null> {
 }
 
 // ---- Copy -----------------------------------------------------------------
-// A mouse copy over a picture puts kitty placeholder cells on the clipboard,
-// and no hook sees that copy. Claude Code writes it with pbcopy (wl-copy,
-// xclip or xsel), whose shim asks this process for the text of the cells
-// (answerCopy; lib/clipboard.ts) and writes that text in their place (see
-// lib/copy.ts; the drawn pages and the words of a page are in lib/probe.ts).
-// The watcher (lib/frame.ts) prints a line when the clipboard changes; at a
-// change the clipboard is read once (pbpaste, wl-paste, xclip, xsel or GTK),
-// and picture cells that no shim asked for (the terminal's own copy on the
-// main screen, another session's) get the /iui grab hint. No timer reads the
-// clipboard or the selection.
+// Picture select (below) copies the text of a drag over the pictures. A
+// copy that still puts kitty placeholder cells on the clipboard (the main
+// screen's, a native drag over text and pictures) is seen by the watcher
+// (lib/frame.ts), which prints a line when the clipboard changes: the
+// clipboard is read once (pbpaste, wl-paste, xclip, xsel or GTK), and cells
+// that fit a page drawn here get a toast that names /iui grab, which reads
+// them (see lib/copy.ts; the drawn pages and the words of a page are in
+// lib/probe.ts). The clipboard is never written but by a copy the person
+// asked for. No timer reads the clipboard or the selection.
 
-// Notes a drawing for a copy (noteDrawn, noteDrawnAgain) and turns on the
-// ask reader and the watcher's clipboard part; a failure never stops the row
-// from drawing.
-function noteCopy($: EngineInterface, note: () => void) {
+// Notes a drawing for a copy (noteDrawn, noteDrawnAgain), turns on the
+// watcher's clipboard part and queues its pages for picture select's
+// cache; a failure never stops the row from drawing.
+function noteCopy($: EngineInterface, id: string, note: () => void) {
   try {
     note()
     watchClipboard($)
+    queueSelect($, id)
   } catch {}
+}
+
+// A drawing whose pages take picture select (drawn with its Client): its
+// pages on screen to the cache (lib/pagecache.ts), the others out of it.
+function queueSelect($: EngineInterface, id: string) {
+  const d = drawnAnswers.get(id)
+  if (d && S.select && S.isFullscreen !== false && !picked.isBroken && blits.sites.has(id)) notePages($, d, selectColor(S.theme))
 }
 
 type CopyRead = { text: string; segments: Segment[]; picks: Pick[]; runs: number; resolved: number }
@@ -271,57 +276,10 @@ async function readCopy($: EngineInterface, raw: string, requestId?: string): Pr
   return read
 }
 
-// A shim's ask (request `id`, lib/clipboard.ts): the text of its picture
-// cells, the selection's row when it is that copy. Each ask gets an answer:
-// '' when there is no text (the shim then keeps its own bytes). A shim that
-// gave up (1.5 s) wrote the cells: the clipboard is not written then (another
-// session can copy the same cells), only a toast names /iui grab.
-async function answerCopy($: EngineInterface, id: string) {
-  let text: string | null = null
-  let answered = false
-  try {
-    const raw = await askRequest($, id)
-    if (raw !== null) {
-      const now = await clockNow($).catch(() => Date.now())
-      clip.asked = [{ text: raw, at: now }, ...clip.asked.filter(a => now - a.at < ASKED_MS)].slice(0, 8)
-      text = await askedText($, raw)
-    }
-  } finally {
-    answered = await answerAsk($, id, text ?? '')
-  }
-  if (answered) {
-    if (text !== null) uiToast($, `Intelligent UI: copied ${text.length} chars of text`)
-    return
-  }
-  await askGaveUp($, id)
-  if (text !== null) uiToast($, 'Intelligent UI: the picture text was not ready in time; /iui grab copies it')
-}
-
-// The text of the cells in `raw`; null when they are not read (one toast).
-async function askedText($: EngineInterface, raw: string): Promise<string | null> {
-  if (!hasPlaceholders(raw) || !drawnAnswers.size) return null
-  const selected = await uiSelection($).catch(() => undefined)
-  clip.raw = raw
-  clip.rawRow = selected && sameCopy(selected.text, raw) ? selected.requestId : undefined
-  const read = await readCopy($, raw, clip.rawRow)
-  if (!read.resolved) {
-    uiToast($, 'Intelligent UI: could not read the selected picture (/iui dump says why)')
-    return null
-  }
-  // The clipboard change of this text is not read again.
-  clip.wrote = read.text
-  clip.seen = read.text
-  return read.text
-}
-
-// A selection and a clipboard text are the same copy (a copy can end in
-// line breaks that the selection does not have, or the other way).
-const sameCopy = (a: string, b: string) => a.replace(/\r\n/g, '\n').replace(/\s+$/, '') === b.replace(/\r\n/g, '\n').replace(/\s+$/, '')
-
 // A watcher line `clip <count>` (null: `clip none`, no PerlObjCBridge or
-// the Linux notifier ended: the automatic copy stays off). The first count
-// of a child (at its start) is only noted: the clipboard then is no new copy (after a hot reload, it can
-// be an old copy of picture cells).
+// the Linux notifier ended: the /iui grab hint stays off). The first count
+// of a child (at its start) is only noted: the clipboard then is no new copy
+// (after a hot reload, it can be an old copy of picture cells).
 function clipChanged($: EngineInterface, count: number | null, first: boolean) {
   if (count === null) {
     clip.none = true
@@ -331,29 +289,20 @@ function clipChanged($: EngineInterface, count: number | null, first: boolean) {
   if (!first) void readClipboard($).catch(() => undefined)
 }
 
-// Cells that a shim of this process asked for lately.
-async function askedFor($: EngineInterface, text: string): Promise<boolean> {
-  const now = await clockNow($).catch(() => Date.now())
-  return clip.asked.some(a => now - a.at < ASKED_MS && sameCopy(a.text, text))
-}
-
-// Picture cells that no shim of this process asked for (the terminal's own
-// copy on the main screen, another session's): never written. Cells that
-// fit a page drawn here get one toast that names /iui grab.
+// Picture cells on the clipboard (a native copy: their session is not
+// known), never written. Cells that fit a page drawn here get one toast that
+// names /iui grab.
 function hintGrab($: EngineInterface, text: string) {
-  clip.seen = text
   if (!pickPages(decodeSelection(text), [...drawnAnswers.values()]).some(Boolean)) return
   clip.raw = text
   clip.rawRow = undefined
+  if (S.debug) traceDebug($, `select: native copy seen: ${decodeSelection(text).filter(seg => seg.kind === 'image').length} picture run(s) on the clipboard`)
   uiToast($, 'Intelligent UI: picture cells copied; /iui grab puts their text on the clipboard')
 }
 
-// The clipboard changed: one read (clipboardNow). Picture cells that a shim
-// of this process asked for are its own copy (answerCopy). Out of the main
-// screen, the terminal's OSC 52 write of a copy comes before its shim asks:
-// the cells wait HINT_WAIT_MS for the ask, then get the hint while the
-// clipboard still has them. A clipboard with no placeholders, and our own
-// write, are never touched. A change while a read runs reads once more after it.
+// The clipboard changed: one read (clipboardNow). A clipboard with no
+// placeholders, and our own write, are never touched. A change while a
+// read runs reads once more after it.
 async function readClipboard($: EngineInterface) {
   if (clip.busy) {
     clip.again = true
@@ -365,21 +314,8 @@ async function readClipboard($: EngineInterface) {
       clip.again = false
       const text = await clipboardNow($)
       if (text === null || text === clip.seen) continue
-      if (text === clip.wrote || !hasPlaceholders(text) || (await askedFor($, text))) {
-        clip.seen = text
-        continue
-      }
-      if (S.isFullscreen !== false) {
-        await new Promise<void>(done => clockAfter($, HINT_WAIT_MS, done))
-        if (await askedFor($, text)) {
-          clip.seen = text
-          continue
-        }
-        if ((await clipboardNow($)) !== text) {
-          clip.again = true
-          continue
-        }
-      }
+      clip.seen = text
+      if (text === clip.wrote || !hasPlaceholders(text)) continue
       hintGrab($, text)
     } while (clip.again)
   } finally {
@@ -394,11 +330,9 @@ async function readClipboard($: EngineInterface) {
 // flag is an argument): its first count is only noted. A child that runs
 // is kept; one that ended is started again (watchFrame caps it). With no
 // PerlObjCBridge (or a notifier that ended) the child goes on as it is
-// (size only). The ask reader (lib/clipboard.ts) starts with the first picture.
+// (size only).
 function watchClipboard($: EngineInterface) {
-  if (!S.env || S.isRemote || !drawnAnswers.size) return
-  listenAsks($, id => void answerCopy($, id).catch(() => undefined))
-  if (clip.none || clipWatchArgs(S.env.isMac) === null) return
+  if (!S.env || S.isRemote || !drawnAnswers.size || clip.none || clipWatchArgs(S.env.isMac) === null) return
   watchFrame($, (count, first) => clipChanged($, count, first))
 }
 
@@ -408,11 +342,12 @@ function stopClipboard($: EngineInterface) {
   if (watchState()?.clip && !clip.none) watchFrame($, null)
 }
 
-// The automatic copy now, for /iui details and dump.
-function autoCopyOf(isOn: boolean): string {
-  return autoCopyText({
-    isMac: !!S.env?.isMac, hostOs: S.hostOs, isRemote: S.isRemote, isOn, isFullscreen: S.isFullscreen, none: clip.none, drawn: drawnAnswers.size > 0,
-    asking: asking(), way: S.clipWay, shims: S.shims,
+// The /iui grab hint now, for /iui details and dump.
+function hintOf(isOn: boolean): string {
+  const now = watchState()
+  return hintText({
+    isMac: !!S.env?.isMac, hostOs: S.hostOs, isRemote: S.isRemote, isOn, none: clip.none, drawn: drawnAnswers.size > 0,
+    running: !!now?.clip && !now.ended, way: S.clipWay,
   })
 }
 
@@ -466,8 +401,8 @@ function screenText(pick: { id: string; page: number }): string {
 // UI is on.
 async function dump($: EngineInterface, on: boolean): Promise<string> {
   await clipWayReady()
-  const auto = autoCopyOf(on)
-  if (!clip.raw) return `Intelligent UI: no clipboard text with picture cells seen yet (auto copy ${auto}; ${drawnAnswers.size} pictures drawn).`
+  const hint = hintOf(on)
+  if (!clip.raw) return `Intelligent UI: no clipboard text with picture cells seen yet (grab hint ${hint}; ${drawnAnswers.size} pictures drawn).`
   const read = await readCopy($, clip.raw, clip.rawRow)
   const runs = read.segments
     .map((seg, i) => {
@@ -483,7 +418,7 @@ async function dump($: EngineInterface, on: boolean): Promise<string> {
     await fsWrite($, `${cache}/copy-debug.json`, JSON.stringify(full, null, 1)).catch(() => undefined)
   }
   return [
-    `Intelligent UI: last clipboard with picture cells (${Array.from(clip.raw).length} code points; auto copy ${auto}):`,
+    `Intelligent UI: last clipboard with picture cells (${Array.from(clip.raw).length} code points; grab hint ${hint}):`,
     codePointsOf(clip.raw, 40),
     runs,
     `Read as ${read.text.length} chars: ${JSON.stringify(read.text.slice(0, 200))}`,
@@ -494,12 +429,13 @@ async function dump($: EngineInterface, on: boolean): Promise<string> {
 // ---- Picture select -------------------------------------------------------
 // The Client over each page (hooks/sel.tsx) posts the selection; the pages
 // show it (a blit of each page's picture, lib/blit.ts) and its text is
-// copied on the button's up, read as a shim's copy is (wordsOf, textOfRun).
+// copied on the button's up, read as a copy of its cells is (wordsOf, textOfRun).
 // See lib/select.ts.
 
 // A Client's post: the selection after it, shown (once a frame at most, the
-// newest selection). A down decodes its page now, for the drag's frames,
-// and lets a page whose blit was refused try again.
+// newest selection). A down puts its page first in the cache (lib/pagecache.ts)
+// and probes its words if they are not there, for the drag's frames and the
+// copy at the up, and lets a page whose blit was refused try again.
 function onSelect($: EngineInterface, post: SelectPost, surface: RenderSurface) {
   if (post.seq <= picked.seq) return
   picked.seq = post.seq
@@ -507,28 +443,40 @@ function onSelect($: EngineInterface, post: SelectPost, surface: RenderSurface) 
   const was = picked.now
   picked.now = d ? selectionAfter(post, topsOf(d.pages)) : null
   if (S.debug) traceDebug($, selectTrace(post, d, picked.now))
+  const page = d?.pages[post.page]
   if (post.phase === 'down') {
     blits.refused.clear()
-    warmPage($, d?.pages[post.page])
+    if (d && page && S.env) {
+      void needFrames($, page, selectColor(S.theme), { id: d.id, index: post.page, seq: d.seq }).catch(() => undefined)
+      void wordsOf($, d, post.page).catch(() => undefined)
+    }
   }
   if (was || picked.now) redrawSelection($)
-  // The copy waits for the page's words (a probe): the next posts do not.
+  // The copy waits for the page's words when they are not there: the next posts do not.
   if (post.phase === 'up' && d && picked.now) void copySelection($, d, picked.now, surface).catch(() => undefined)
 }
 
 // The text of a selection's cells, page by page, as a copy of those cells
 // reads it (textOfRuns); null when a page's words can not be read.
-async function selectionText($: EngineInterface, d: Drawn & { job?: Job }, sel: Omit<Selection, 'id' | 'isUp'>): Promise<string | null> {
+// `probed`: the pages whose words were not there yet (a probe ran or ran on).
+async function selectionText($: EngineInterface, d: Drawn & { job?: Job }, sel: Omit<Selection, 'id' | 'isUp'>, probed: number[] = []): Promise<string | null> {
   const runs = runsOf(selectedRows(sel, d.pages))
   const words = new Map<number, PageWords | null>()
-  for (const run of runs) words.set(run.page, await wordsOf($, d, run.page))
+  for (const run of runs) {
+    const known = knownWords(d, run.page)
+    if (!known) probed.push(run.page)
+    words.set(run.page, known ?? (await wordsOf($, d, run.page)))
+  }
   return textOfRuns(runs, page => words.get(page) ?? null, d.pages)
 }
 
 // The button came up: the selection's text on the clipboard, with the
 // toast of a copy. No text under it: nothing is copied.
 async function copySelection($: EngineInterface, d: Drawn & { job?: Job }, sel: Selection, surface: RenderSurface) {
-  const text = await selectionText($, d, sel)
+  const t = performance.now()
+  const probed: number[] = []
+  const text = await selectionText($, d, sel, probed)
+  const read = performance.now() - t
   if (text === null) {
     uiToast($, 'Intelligent UI: could not read the selected picture')
     return
@@ -539,6 +487,27 @@ async function copySelection($: EngineInterface, d: Drawn & { job?: Job }, sel: 
   clip.seen = text
   const copied = await uiCopy($, { text, surface })
   uiToast($, copied.isCopied ? `Intelligent UI: copied ${text.length} chars of text` : `Intelligent UI: the copy failed: ${copied.reason}`)
+  if (S.debug) void traceCopy($, text, performance.now() - t, read, probed)
+}
+
+// The trace of a copy: the time from the up to the copy, whether the words
+// were there, and whether Claude Code has a selection of its own with
+// picture cells (a native selection: it copies them itself).
+async function traceCopy($: EngineInterface, text: string, total: number, read: number, probed: readonly number[]) {
+  const native = await uiSelection($).catch(() => undefined)
+  const seen = native && hasPlaceholders(native.text) ? `native selection seen (${Array.from(native.text).length} code points with picture cells)` : 'no native selection'
+  const words = probed.length ? `words probed for page ${probed.join(', ')}` : 'words cached'
+  traceDebug($, `select: copy ${text.length} chars ${Math.round(total)}ms after the up (text ${Math.round(read)}ms, ${words}); ${seen}`)
+}
+
+// Picture select now, for /iui details: on, or why it is off.
+function selectState(): string {
+  if (!S.select) return 'off (/iui select off)'
+  if (picked.isBroken) return 'off until a reload (its Client failed: see the debug log)'
+  if (!needsSelect(S.engine)) return `off (Claude Code ${S.engine || 'of an unknown version'}; it needs ${SELECT_SINCE} or newer)`
+  if (S.env && (!S.env.canDraw || S.env.inline)) return 'off (no pictures drawn from files here)'
+  if (S.isFullscreen === false) return 'off on the main screen (use /tui fullscreen, or /iui grab)'
+  return S.isFullscreen === null ? 'on in fullscreen (the screen is not known yet)' : 'on'
 }
 
 // No selection drawn (a new turn, Intelligent UI or select off).
@@ -558,14 +527,11 @@ export const register: Register = on => {
   })
 
   // A /clear or a resume: the process goes on, with no clipboard reads until
-  // the next picture. Any other end (/exit): the watcher and the ask reader
-  // stop, no new child starts, and the FIFO and the request files go.
+  // the next picture. Any other end (/exit): the watcher stops, and no new
+  // child starts.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear' || e.reason === 'resume') stopClipboard($)
-    else {
-      stopWatch()
-      await endAsks($)
-    }
+    else stopWatch()
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -574,6 +540,7 @@ export const register: Register = on => {
   // hold no placeholders and pass on as they are.
   on('ui.copy', async ($, e, next) => {
     if (!hasPlaceholders(e.text) || !drawnAnswers.size) return next(e)
+    if (S.debug) traceDebug($, 'select: native copy seen: a $.ui.copy with picture cells (read as their text)')
     const selected = await uiSelection($).catch(() => undefined)
     clip.raw = e.text
     clip.rawRow = selected?.text === e.text ? selected.requestId : undefined
@@ -738,7 +705,7 @@ export const register: Register = on => {
         ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
         : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+ and Rio 0.5.27+ with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
       await clipWayReady()
-      const auto = `Auto copy: ${autoCopyOf(state === 'on')}`
+      const auto = `Picture select: ${selectState()}\n/iui grab hint: ${hintOf(state === 'on')}`
       const updates = `Update checks: ${updateLine(await updateState($))}`
       return { text: `Intelligent UI is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, row grid ${S.grid ? 'on' : 'off'}, picture select ${S.select ? 'on' : 'off'}, ${font}. ${typst}; ${terminal}.\n${auto}\n${updates}` }
     }
@@ -842,7 +809,7 @@ export const register: Register = on => {
     // Its pages are under the top margin (drawPages) with its link rows
     // under them; the rows on screen at each draw, a memo hit too.
     if (kept) {
-      noteCopy($, () => {
+      noteCopy($, e.requestId, () => {
         noteDrawnAgain(e.requestId, roomColumns(e.viewport), { top: MARGIN_TOP, after: kept.links.length })
         noteOnScreen(e.requestId, e.props.onScreen)
       })
@@ -853,7 +820,7 @@ export const register: Register = on => {
       const links = await linksFor($, e.props.text, ready.env.cwd)
       const tree = drawPages($, e, drawing.result, drawing.bytes, { bullet, links, id: e.requestId })
       const { result } = drawing
-      noteCopy($, () => {
+      noteCopy($, e.requestId, () => {
         noteDrawn(e.requestId, result, roomColumns(e.viewport), { top: MARGIN_TOP, after: links.length })
         noteOnScreen(e.requestId, e.props.onScreen)
       })
@@ -892,7 +859,7 @@ export const register: Register = on => {
           under = kept
           kept.forEach((u, i) => {
             if (!('drawing' in u)) return
-            noteCopy($, () => {
+            noteCopy($, u.id, () => {
               noteDrawnAgain(u.id, room, { after: rowsAfter(kept, i, room) })
               noteOnScreen(u.id, e.props.onScreen)
             })
@@ -905,7 +872,7 @@ export const register: Register = on => {
           drawn.forEach((u, i) => {
             if (!('drawing' in u) || u.drawing.kind !== 'pages') return
             const { result } = u.drawing
-            noteCopy($, () => {
+            noteCopy($, u.id, () => {
               noteDrawn(u.id, result, room, { after: rowsAfter(drawn, i, room) })
               noteOnScreen(u.id, e.props.onScreen)
             })
@@ -993,7 +960,7 @@ export const register: Register = on => {
       if (drawing.kind === 'pages') {
         const { result } = drawing
         const id = `plan:${e.props.tool_use_id}`
-        noteCopy($, () => {
+        noteCopy($, id, () => {
           noteDrawn(id, result, roomColumns(e.viewport), { after: links.length })
           noteOnScreen(id, e.props.onScreen)
         })

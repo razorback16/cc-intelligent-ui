@@ -4,7 +4,7 @@ import { atom, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import {
-  BASE_THEME, DEFAULT_HEIGHT, DEFAULT_SIZE, DESIGNS_KEPT_DAYS, DEFAULT_THEME, DEFAULT_WIDTH, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, noTypstOf, USE_COPY_SHIM,
+  BASE_THEME, DEFAULT_HEIGHT, DEFAULT_SIZE, DESIGNS_KEPT_DAYS, DEFAULT_THEME, DEFAULT_WIDTH, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, noTypstOf,
 } from './settings'
 import { DEFAULT_METRICS, refresh, S, type Env } from './state'
 import { resolveMode, settingOf } from './mode'
@@ -16,7 +16,7 @@ import { registerCommand } from './command'
 import { readHostMode, termFontOf, watchHost } from './host'
 import { readFrame, setFrame, watchFrame } from './frame'
 import { offerSetup } from './setup'
-import { findClipWay, noShims, setUpShims } from './clipboard'
+import { findClipWay } from './clipboard'
 import { findTypst, measureFonts } from './typst'
 import { checkUpdates } from './updates'
 import { configs, envGet, fsList, fsStat, pluginRoot, processRun, sessionCwd, sessionVersion, storeGet, uiToast } from './api'
@@ -26,13 +26,11 @@ import { configs, envGet, fsList, fsStat, pluginRoot, processRun, sessionCwd, se
 const isOn = atom({ plugin: 'cc-intelligent-ui', key: 'isOn' } as const, true)
 
 // Makes the cache folder (stops when it is a link or not this user's),
-// drops key folders not touched for 2 days (not the asks and shims of a
-// live process), the ask FIFOs, request files and shims folders of a pid
-// that is gone (and request files of 2 days), makes the designs folder
+// drops key folders not touched for 2 days, makes the designs folder
 // (outside the tmp cache) and drops design files not touched for
 // DESIGNS_KEPT_DAYS; prints the cache folder, the OS name and the designs
 // folder (the OS name alone when the cache folder can not be made private).
-export const CACHE_SH = `d="\${TMPDIR:-/tmp}"; d="\${d%/}/cc-intelligent-ui-$(id -u)"; g="\${XDG_CACHE_HOME:-$HOME/.cache}/cc-intelligent-ui/designs"; mkdir "$d" 2>/dev/null; [ ! -L "$d" ] && [ -d "$d" ] && [ -O "$d" ] && chmod 700 "$d" && { find "$d" -mindepth 1 -maxdepth 1 -type d -mtime +2 ! -name pkg-cache ! -name ask ! -name 'shims-*' -exec rm -rf {} + 2>/dev/null; for f in "$d"/ask-* "$d"/ask/* "$d"/shims-*; do n=\${f##*/}; n=\${n#ask-}; n=\${n#shims-}; n=\${n%%-*}; case $n in ''|*[!0-9]*) continue ;; esac; kill -0 "$n" 2>/dev/null || rm -rf -- "$f"; done; find "$d/ask" -type f -mtime +2 -delete 2>/dev/null; mkdir -p "$g" 2>/dev/null && find "$g" -type f -mtime +${DESIGNS_KEPT_DAYS} -delete 2>/dev/null; printf '%s\\n%s\\n%s\\n' "$d" "$(uname -s)" "$g"; } || printf '\\n%s\\n\\n' "$(uname -s)"`
+export const CACHE_SH = `d="\${TMPDIR:-/tmp}"; d="\${d%/}/cc-intelligent-ui-$(id -u)"; g="\${XDG_CACHE_HOME:-$HOME/.cache}/cc-intelligent-ui/designs"; mkdir "$d" 2>/dev/null; [ ! -L "$d" ] && [ -d "$d" ] && [ -O "$d" ] && chmod 700 "$d" && { find "$d" -mindepth 1 -maxdepth 1 -type d -mtime +2 ! -name pkg-cache -exec rm -rf {} + 2>/dev/null; mkdir -p "$g" 2>/dev/null && find "$g" -type f -mtime +${DESIGNS_KEPT_DAYS} -delete 2>/dev/null; printf '%s\\n%s\\n%s\\n' "$d" "$(uname -s)" "$g"; } || printf '\\n%s\\n\\n' "$(uname -s)"`
 
 // Once per load: the cache folder, Typst, the terminal and its font, the
 // theme, the cell. A failed setup is tried again on the next call.
@@ -48,14 +46,13 @@ export function setUp($: EngineInterface): Promise<Env> {
     const program = (await envGet($, 'TERM_PROGRAM')) ?? ''
     const term = (await envGet($, 'TERM')) ?? ''
     const ssh = !!(await envGet($, 'SSH_CONNECTION')) || !!(await envGet($, 'SSH_TTY'))
-    const background = (await envGet($, 'CLAUDE_CODE_SESSION_KIND')) === 'bg'
     const canDraw = canDrawIn({
       program,
       term,
       kitty: !!(await envGet($, 'KITTY_WINDOW_ID')),
       tmux: !!(await envGet($, 'TMUX')) || !!(await envGet($, 'STY')) || /^tmux|^screen/i.test(term),
       ssh,
-      background,
+      background: (await envGet($, 'CLAUDE_CODE_SESSION_KIND')) === 'bg',
       engineForced: isSet(await envGet($, 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES')),
       modForced: isSet(await envGet($, 'IUI_FORCE')),
     })
@@ -71,15 +68,6 @@ export function setUp($: EngineInterface): Promise<Env> {
     S.itermProfile = (await envGet($, 'ITERM_PROFILE')) || undefined
     S.isKitty = /kitty/i.test(term) || !!(await envGet($, 'KITTY_WINDOW_ID')) || !!(await envGet($, 'KITTY_PID'))
     S.isRemote = ssh
-    // On this computer, where pictures draw: the clipboard shims, before Claude Code copies.
-    if (!ssh && (S.hostOs === 'Darwin' || S.hostOs === 'Linux')) {
-      if (!USE_COPY_SHIM && !isSet(await envGet($, 'IUI_COPY_SHIM'))) noShims('the copy shims are off')
-      else if (background) noShims('a background session')
-      else if (!canDraw) noShims('no pictures in this terminal')
-      // Never in the shared fallback folder.
-      else if (made1.trim()) await setUpShims($, cache, S.hostOs === 'Darwin')
-      else noShims()
-    }
     S.debug = isSet(await envGet($, 'IUI_DEBUG'))
     S.isIterm = isItermIn({
       program,

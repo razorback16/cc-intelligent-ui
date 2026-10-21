@@ -94,137 +94,179 @@ function tableOf(lens: ArrayLike<number>, n: number): Table {
 const FIXED_LIT = tableOf(Array.from({ length: 288 }, (_, i) => (i < 144 ? 8 : i < 256 ? 9 : i < 280 ? 7 : 8)), 288)
 const FIXED_DIST = tableOf(new Array<number>(32).fill(5), 32)
 
-// Inflates the zlib stream `src` into `out` (its size known); returns the
-// bytes written. Throws on a stream that is not one.
-export function inflate(src: Uint8Array, out: Uint8Array): number {
-  if (src.length < 2 || (src[0]! & 0x0f) !== 8 || ((src[0]! << 8) | src[1]!) % 31 !== 0 || src[1]! & 0x20) throw new Error('not a zlib stream')
-  let pos = 2
-  let bb = 0
-  let bc = 0
-  let op = 0
-  const bitsOf = (n: number) => {
-    while (bc < n) {
-      bb |= (src[pos++] ?? 0) << bc
-      bc += 8
-    }
-    const v = bb & ((1 << n) - 1)
-    bb >>>= n
-    bc -= n
-    return v
+// A zlib stream inflated into `out` (its size known), in steps: `run(limit)`
+// goes on until `limit` bytes are out or the stream ends (true then). Any
+// limits give the same bytes. Throws on a stream that is not one.
+export class Inflater {
+  op = 0
+  isDone = false
+  private pos = 2
+  private bb = 0
+  private bc = 0
+  private last = 0
+  // The block now (null: at a block's header).
+  private lit: Table | null = null
+  private dist: Table | null = null
+  constructor(private readonly src: Uint8Array, readonly out: Uint8Array) {
+    if (src.length < 2 || (src[0]! & 0x0f) !== 8 || ((src[0]! << 8) | src[1]!) % 31 !== 0 || src[1]! & 0x20) throw new Error('not a zlib stream')
   }
-  const symOf = (t: Table) => {
-    while (bc < t.bits) {
-      bb |= (src[pos++] ?? 0) << bc
-      bc += 8
-    }
-    const e = t.table[bb & ((1 << t.bits) - 1)]!
-    const len = e & 15
-    if (!len) throw new Error('bad Huffman code')
-    bb >>>= len
-    bc -= len
-    return e >> 4
-  }
-  for (let last = 0; !last; ) {
-    last = bitsOf(1)
-    const type = bitsOf(2)
-    if (type === 0) {
-      pos -= bc >> 3
-      bb = bc = 0
-      const len = src[pos]! | (src[pos + 1]! << 8)
-      pos += 4
-      if (pos + len > src.length || op + len > out.length) throw new Error('stored block past the end')
-      out.set(src.subarray(pos, pos + len), op)
-      pos += len
-      op += len
-      continue
-    }
-    let lit = FIXED_LIT
-    let dist = FIXED_DIST
-    if (type === 2) {
-      const hlit = bitsOf(5) + 257
-      const hdist = bitsOf(5) + 1
-      const hclen = bitsOf(4) + 4
-      const cl = new Uint8Array(19)
-      for (let i = 0; i < hclen; i++) cl[CL_ORDER[i]!] = bitsOf(3)
-      const clt = tableOf(cl, 19)
-      const lens = new Uint8Array(hlit + hdist)
-      for (let i = 0; i < hlit + hdist; ) {
-        const sym = symOf(clt)
-        if (sym < 16) lens[i++] = sym
-        else {
-          const [rep, prev] = sym === 16 ? [3 + bitsOf(2), i ? lens[i - 1]! : -1] : sym === 17 ? [3 + bitsOf(3), 0] : [11 + bitsOf(7), 0]
-          if (prev < 0 || i + rep > hlit + hdist) throw new Error('bad code lengths')
-          lens.fill(prev, i, i + rep)
-          i += rep
-        }
-      }
-      lit = tableOf(lens.subarray(0, hlit), hlit)
-      dist = tableOf(lens.subarray(hlit), hdist)
-    } else if (type !== 1) throw new Error('bad block type')
-    // The hot loop, inlined: refill, look up, consume.
-    const lt = lit.table
-    const lb = lit.bits
-    const lm = (1 << lb) - 1
-    const dt = dist.table
-    const db = dist.bits
-    const dm = (1 << db) - 1
-    for (;;) {
-      while (bc < lb) {
-        bb |= (src[pos++] ?? 0) << bc
-        bc += 8
-      }
-      let e = lt[bb & lm]!
-      let n = e & 15
-      if (!n) throw new Error('bad Huffman code')
-      bb >>>= n
-      bc -= n
-      const sym = e >> 4
-      if (sym < 256) {
-        if (op >= out.length) throw new Error('output past the end')
-        out[op++] = sym
-        continue
-      }
-      if (sym === 256) break
-      const li = sym - 257
-      if (li >= 29) throw new Error('bad length code')
-      let len = LEN_BASE[li]!
-      n = LEN_EXTRA[li]!
-      while (bc < 15) {
-        bb |= (src[pos++] ?? 0) << bc
-        bc += 8
-      }
-      if (n) {
-        len += bb & ((1 << n) - 1)
-        bb >>>= n
-        bc -= n
-      }
-      while (bc < db) {
-        bb |= (src[pos++] ?? 0) << bc
-        bc += 8
-      }
-      e = dt[bb & dm]!
-      n = e & 15
-      if (!n) throw new Error('bad Huffman code')
-      bb >>>= n
-      bc -= n
-      const di = e >> 4
-      if (di >= 30) throw new Error('bad distance code')
-      n = DIST_EXTRA[di]!
+
+  run(limit: number): boolean {
+    const { src, out } = this
+    let { pos, bb, bc, op } = this
+    const bitsOf = (n: number) => {
       while (bc < n) {
         bb |= (src[pos++] ?? 0) << bc
         bc += 8
       }
-      const d = DIST_BASE[di]! + (bb & ((1 << n) - 1))
+      const v = bb & ((1 << n) - 1)
       bb >>>= n
       bc -= n
-      if (d > op || op + len > out.length) throw new Error('bad match')
-      if (d >= len) {
-        out.copyWithin(op, op - d, op - d + len)
-        op += len
-      } else for (const end = op + len; op < end; op++) out[op] = out[op - d]!
+      return v
     }
+    const symOf = (t: Table) => {
+      while (bc < t.bits) {
+        bb |= (src[pos++] ?? 0) << bc
+        bc += 8
+      }
+      const e = t.table[bb & ((1 << t.bits) - 1)]!
+      const len = e & 15
+      if (!len) throw new Error('bad Huffman code')
+      bb >>>= len
+      bc -= len
+      return e >> 4
+    }
+    const save = () => {
+      this.pos = pos
+      this.bb = bb
+      this.bc = bc
+      this.op = op
+    }
+    while (!this.isDone) {
+      if (!this.lit) {
+        if (this.last) {
+          this.isDone = true
+          break
+        }
+        if (op >= limit) break
+        this.last = bitsOf(1)
+        const type = bitsOf(2)
+        if (type === 0) {
+          pos -= bc >> 3
+          bb = bc = 0
+          const len = src[pos]! | (src[pos + 1]! << 8)
+          pos += 4
+          if (pos + len > src.length || op + len > out.length) throw new Error('stored block past the end')
+          out.set(src.subarray(pos, pos + len), op)
+          pos += len
+          op += len
+          continue
+        }
+        if (type === 1) {
+          this.lit = FIXED_LIT
+          this.dist = FIXED_DIST
+        } else if (type === 2) {
+          const hlit = bitsOf(5) + 257
+          const hdist = bitsOf(5) + 1
+          const hclen = bitsOf(4) + 4
+          const cl = new Uint8Array(19)
+          for (let i = 0; i < hclen; i++) cl[CL_ORDER[i]!] = bitsOf(3)
+          const clt = tableOf(cl, 19)
+          const lens = new Uint8Array(hlit + hdist)
+          for (let i = 0; i < hlit + hdist; ) {
+            const sym = symOf(clt)
+            if (sym < 16) lens[i++] = sym
+            else {
+              const [rep, prev] = sym === 16 ? [3 + bitsOf(2), i ? lens[i - 1]! : -1] : sym === 17 ? [3 + bitsOf(3), 0] : [11 + bitsOf(7), 0]
+              if (prev < 0 || i + rep > hlit + hdist) throw new Error('bad code lengths')
+              lens.fill(prev, i, i + rep)
+              i += rep
+            }
+          }
+          this.lit = tableOf(lens.subarray(0, hlit), hlit)
+          this.dist = tableOf(lens.subarray(hlit), hdist)
+        } else throw new Error('bad block type')
+      }
+      // The hot loop, inlined: refill, look up, consume; it stops at `limit`.
+      const lt = this.lit.table
+      const lb = this.lit.bits
+      const lm = (1 << lb) - 1
+      const dt = this.dist!.table
+      const db = this.dist!.bits
+      const dm = (1 << db) - 1
+      let isEnd = false
+      while (op < limit) {
+        while (bc < lb) {
+          bb |= (src[pos++] ?? 0) << bc
+          bc += 8
+        }
+        let e = lt[bb & lm]!
+        let n = e & 15
+        if (!n) throw new Error('bad Huffman code')
+        bb >>>= n
+        bc -= n
+        const sym = e >> 4
+        if (sym < 256) {
+          if (op >= out.length) throw new Error('output past the end')
+          out[op++] = sym
+          continue
+        }
+        if (sym === 256) {
+          isEnd = true
+          break
+        }
+        const li = sym - 257
+        if (li >= 29) throw new Error('bad length code')
+        let len = LEN_BASE[li]!
+        n = LEN_EXTRA[li]!
+        while (bc < 15) {
+          bb |= (src[pos++] ?? 0) << bc
+          bc += 8
+        }
+        if (n) {
+          len += bb & ((1 << n) - 1)
+          bb >>>= n
+          bc -= n
+        }
+        while (bc < db) {
+          bb |= (src[pos++] ?? 0) << bc
+          bc += 8
+        }
+        e = dt[bb & dm]!
+        n = e & 15
+        if (!n) throw new Error('bad Huffman code')
+        bb >>>= n
+        bc -= n
+        const di = e >> 4
+        if (di >= 30) throw new Error('bad distance code')
+        n = DIST_EXTRA[di]!
+        while (bc < n) {
+          bb |= (src[pos++] ?? 0) << bc
+          bc += 8
+        }
+        const d = DIST_BASE[di]! + (bb & ((1 << n) - 1))
+        bb >>>= n
+        bc -= n
+        if (d > op || op + len > out.length) throw new Error('bad match')
+        if (d >= len) {
+          out.copyWithin(op, op - d, op - d + len)
+          op += len
+        } else for (const end = op + len; op < end; op++) out[op] = out[op - d]!
+      }
+      if (!isEnd) break
+      this.lit = this.dist = null
+    }
+    save()
+    return this.isDone
   }
-  return op
+}
+
+// Inflates the zlib stream `src` into `out` (its size known); returns the
+// bytes written. Throws on a stream that is not one.
+export function inflate(src: Uint8Array, out: Uint8Array): number {
+  const z = new Inflater(src, out)
+  z.run(Infinity)
+  return z.op
 }
 
 // ---- Decode ------------------------------------------------------------------------
@@ -232,9 +274,9 @@ export function inflate(src: Uint8Array, out: Uint8Array): number {
 const SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10]
 const u32 = (b: Uint8Array, i: number) => ((b[i]! << 24) | (b[i + 1]! << 16) | (b[i + 2]! << 8) | b[i + 3]!) >>> 0
 
-// A PNG's pixels as RGBA. Throws on one that is not 8-bit RGBA or RGB, not
-// interlaced, or is broken.
-export function decodePng(png: Uint8Array): Rgba {
+// A PNG's size, its channels (4 RGBA, 3 RGB) and its IDAT data joined.
+// Throws on one that is not 8-bit RGBA or RGB, not interlaced, or is broken.
+export function pngParts(png: Uint8Array): { width: number; height: number; channels: number; z: Uint8Array } {
   if (png.length < 33 || SIGNATURE.some((v, i) => png[i] !== v)) throw new Error('not a PNG')
   let width = 0
   let height = 0
@@ -255,28 +297,74 @@ export function decodePng(png: Uint8Array): Rgba {
     i += 12 + len
   }
   if (!width || !height || !idat.length) throw new Error('no IHDR or IDAT')
-  const z = new Uint8Array(idat.reduce((n, d) => n + d.length, 0))
-  idat.reduce((at, d) => (z.set(d, at), at + d.length), 0)
+  return { width, height, channels, z: concat(idat) }
+}
+
+// A PNG's pixels as RGBA, at once. Throws as pngParts.
+export function decodePng(png: Uint8Array): Rgba {
+  const { width, height, channels, z } = pngParts(png)
   const stride = width * channels
   const filtered = new Uint8Array(height * (stride + 1))
   if (inflate(z, filtered) !== filtered.length) throw new Error('short image data')
-  const rows = unfilter(filtered, width, height, channels)
+  const rows = new Uint8Array(height * stride)
+  unfilterRows(filtered, rows, width, channels, 0, height)
   if (channels === 4) return { width, height, data: rows }
   const data = new Uint8Array(width * height * 4)
-  for (let p = 0, q = 0; p < rows.length; p += 3, q += 4) {
+  rgbaRows(rows, data, width, 0, height)
+  return { width, height, data }
+}
+
+// The same pixels as decodePng, in steps: a yield after each `step` bytes
+// inflated or unfiltered, so a caller can stop between them (pagecache.ts).
+export function* decodeSteps(png: Uint8Array, step = DECODE_STEP): Generator<undefined, Rgba, void> {
+  const { width, height, channels, z } = pngParts(png)
+  const stride = width * channels
+  const line = stride + 1
+  const filtered = new Uint8Array(height * line)
+  const rows = new Uint8Array(height * stride)
+  const inflater = new Inflater(z, filtered)
+  const batch = Math.max(1, Math.floor(step / line))
+  let y = 0
+  for (;;) {
+    const isEnd = inflater.run(inflater.op + step)
+    if (isEnd && inflater.op !== filtered.length) throw new Error('short image data')
+    // The rows inflated whole so far.
+    const ready = isEnd ? height : Math.floor(inflater.op / line)
+    while (y < ready) {
+      const y1 = Math.min(ready, y + batch)
+      unfilterRows(filtered, rows, width, channels, y, y1)
+      y = y1
+      yield
+    }
+    if (isEnd) break
+    yield
+  }
+  if (channels === 4) return { width, height, data: rows }
+  const data = new Uint8Array(width * height * 4)
+  for (let y0 = 0; y0 < height; y0 += batch) {
+    rgbaRows(rows, data, width, y0, Math.min(height, y0 + batch))
+    yield
+  }
+  return { width, height, data }
+}
+// The bytes of one decode step: about a millisecond or less.
+export const DECODE_STEP = 256 * 1024
+
+// RGB rows y0 to y1 (exclusive) of `rows` as opaque RGBA in `data`.
+function rgbaRows(rows: Uint8Array, data: Uint8Array, width: number, y0: number, y1: number) {
+  for (let p = y0 * width * 3, q = y0 * width * 4, end = y1 * width * 3; p < end; p += 3, q += 4) {
     data[q] = rows[p]!
     data[q + 1] = rows[p + 1]!
     data[q + 2] = rows[p + 2]!
     data[q + 3] = 255
   }
-  return { width, height, data }
 }
 
-// The scanlines' filters undone (PNG filter types 0 to 4).
-function unfilter(f: Uint8Array, width: number, height: number, bpp: number): Uint8Array {
+// The scanlines y0 to y1 (exclusive) of `f` with their filters undone (PNG
+// filter types 0 to 4) into `out`; the rows above y0 are done already.
+function unfilterRows(f: Uint8Array, out: Uint8Array, width: number, bpp: number, y0: number, y1: number) {
   const stride = width * bpp
-  const out = new Uint8Array(height * stride)
-  for (let y = 0; y < height; y++) {
+  for (let y = y0; y < y1; y++) {
     const type = f[y * (stride + 1)]!
     const s = y * (stride + 1) + 1
     const o = y * stride
@@ -310,7 +398,6 @@ function unfilter(f: Uint8Array, width: number, height: number, bpp: number): Ui
       }
     } else throw new Error(`bad filter type ${type}`)
   }
-  return out
 }
 
 // ---- Deflate pieces -------------------------------------------------------------------
