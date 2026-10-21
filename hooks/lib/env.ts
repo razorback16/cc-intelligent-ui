@@ -4,7 +4,7 @@ import { atom, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import {
-  BASE_THEME, DEFAULT_HEIGHT, DEFAULT_SIZE, DESIGNS_KEPT_DAYS, DEFAULT_THEME, DEFAULT_WIDTH, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, noTypstOf,
+  BASE_THEME, DEFAULT_HEIGHT, DEFAULT_SIZE, DESIGNS_KEPT_DAYS, DEFAULT_THEME, DEFAULT_WIDTH, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, noTypstOf, USE_COPY_SHIM,
 } from './settings'
 import { DEFAULT_METRICS, refresh, S, type Env } from './state'
 import { resolveMode, settingOf } from './mode'
@@ -73,7 +73,8 @@ export function setUp($: EngineInterface): Promise<Env> {
     S.isRemote = ssh
     // On this computer, where pictures draw: the clipboard shims, before Claude Code copies.
     if (!ssh && (S.hostOs === 'Darwin' || S.hostOs === 'Linux')) {
-      if (background) noShims('a background session')
+      if (!USE_COPY_SHIM && !isSet(await envGet($, 'IUI_COPY_SHIM'))) noShims('the copy shims are off')
+      else if (background) noShims('a background session')
       else if (!canDraw) noShims('no pictures in this terminal')
       // Never in the shared fallback folder.
       else if (made1.trim()) await setUpShims($, cache, S.hostOs === 'Darwin')

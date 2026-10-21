@@ -139,12 +139,13 @@ test('a selection over two pages is the text of each, one line apart; a page wit
 
 // ---- The gate --------------------------------------------------------------------
 
-test('picture select is for Claude Code 2.1.305 and newer (a dev build by its release)', () => {
-  expect(needsSelect('2.1.305')).toBe(true)
+test('picture select is for Claude Code 2.1.298 and newer (a dev build by its release)', () => {
+  expect(needsSelect('2.1.298')).toBe(true)
+  expect(needsSelect('2.1.304')).toBe(true)
   expect(needsSelect('2.1.306')).toBe(true)
   expect(needsSelect('2.2.0')).toBe(true)
   expect(needsSelect('2.1.306-dev')).toBe(true)
-  expect(needsSelect('2.1.304')).toBe(false)
+  expect(needsSelect('2.1.297')).toBe(false)
   expect(needsSelect('2.0.999')).toBe(false)
   expect(needsSelect('')).toBe(false)
   expect(needsSelect('dev')).toBe(false)

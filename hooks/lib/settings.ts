@@ -118,10 +118,14 @@ export const heightText = (height: Height) =>
   : `${height} rows`
 // The grid setting as words.
 export const gridText = (grid: boolean) => (grid ? 'on (each line of text on whole terminal rows)' : 'off')
-// `/iui select`: picture select (select.ts), on by default; it takes effect
-// from the Claude Code version whose own selection skips pictures.
-export const SELECT_SINCE = '2.1.305'
-export const selectText = (on: boolean) => (on ? 'on (select and copy picture text with the mouse, fullscreen, Claude Code 2.1.305+)' : 'off')
+// `/iui select`: picture select (select.ts), on by default, from the oldest
+// Claude Code the mod supports (the Client, ui.message, ui.blit and ui.copy are there).
+export const SELECT_SINCE = '2.1.298'
+export const selectText = (on: boolean) => (on ? 'on (select and copy picture text with the mouse, fullscreen)' : 'off')
+// The copy shims (pbcopy, xclip, wl-copy) that ask the mod for the text of
+// picture cells (clipboard.ts). Off: no shims folder, no PATH change, no ask
+// FIFO, no answers. IUI_COPY_SHIM=1 turns them on for one session (tests too).
+export const USE_COPY_SHIM = false
 export const PICTURES_KEPT = 64
 // The file paths of the link rows under a picture: whether each one is a
 // file, kept for this many paths (the oldest go).

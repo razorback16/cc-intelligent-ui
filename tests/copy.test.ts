@@ -512,7 +512,7 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
   forgetRedraws()
   mock.store(on)
   const clock = mock.clock(on)
-  const vars: Record<string, string | undefined> = { PATH: '/usr/bin:/bin', ...(o.env ?? { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' }) }
+  const vars: Record<string, string | undefined> = { PATH: '/usr/bin:/bin', IUI_COPY_SHIM: '1', ...(o.env ?? { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' }) }
   const envSets: [string, string | undefined][] = []
   on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
   on('env.set', async ($: any, e: any) => {
@@ -1567,8 +1567,8 @@ test('picture select: with no IUI_DEBUG, a post writes no trace line', async ($,
   expect(w.traces.filter(t => t.includes('select: '))).toEqual([])
 })
 
-test('picture select: none before Claude Code 2.1.305', async ($, on) => {
-  const old = world(on, { tty: TTY, version: '2.1.304' })
+test('picture select: none before Claude Code 2.1.298', async ($, on) => {
+  const old = world(on, { tty: TTY, version: '2.1.297' })
   await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await drawAnswer($, old)
   expect(tree(await ui.drawn()).some(n => n.type === 'Client')).toBe(false)

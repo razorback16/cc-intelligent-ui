@@ -14,7 +14,7 @@ export type EnvName =
   | 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC' | 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES' | 'CLAUDE_CODE_SESSION_KIND' | 'CLAUDE_CODE_TMPDIR'
   | 'CMUX_SOCKET_PATH' | 'CMUX_SURFACE_ID' | 'CMUX_WORKSPACE_ID' | 'COLORFGBG' | 'DISABLE_AUTOUPDATER' | 'DISABLE_UPDATES' | 'DISPLAY'
   | 'GHOSTTY_RESOURCES_DIR' | 'HOME'
-  | 'ITERM_PROFILE' | 'ITERM_SESSION_ID' | 'IUI_COPY_ASK' | 'IUI_DEBUG' | 'IUI_FORCE' | 'KITTY_CONFIG_DIRECTORY' | 'KITTY_PID'
+  | 'ITERM_PROFILE' | 'ITERM_SESSION_ID' | 'IUI_COPY_ASK' | 'IUI_COPY_SHIM' | 'IUI_DEBUG' | 'IUI_FORCE' | 'KITTY_CONFIG_DIRECTORY' | 'KITTY_PID'
   | 'KITTY_WINDOW_ID' | 'LC_TERMINAL' | 'PATH' | 'RIO_CONFIG_HOME' | 'SHELL' | 'SSH_CONNECTION' | 'SSH_TTY' | 'STY'
   | 'TERM' | 'TERM_PROGRAM' | 'TMUX' | 'WAYLAND_DISPLAY' | 'XDG_CONFIG_HOME' | 'XDG_CURRENT_DESKTOP' | 'ZDOTDIR'
 // The variables the mod sets (the clipboard shims).
@@ -62,6 +62,7 @@ export function envGet($: EngineInterface, name: EnvName): Promise<string | unde
     case 'ITERM_PROFILE': return $.env.get('ITERM_PROFILE')
     case 'ITERM_SESSION_ID': return $.env.get('ITERM_SESSION_ID')
     case 'IUI_COPY_ASK': return $.env.get('IUI_COPY_ASK')
+    case 'IUI_COPY_SHIM': return $.env.get('IUI_COPY_SHIM')
     case 'IUI_DEBUG': return $.env.get('IUI_DEBUG')
     case 'IUI_FORCE': return $.env.get('IUI_FORCE')
     case 'KITTY_CONFIG_DIRECTORY': return $.env.get('KITTY_CONFIG_DIRECTORY')

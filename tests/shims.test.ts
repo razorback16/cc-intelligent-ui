@@ -184,7 +184,7 @@ test('a cache or shims folder that is not private (exit 3 at find or at install)
 test('no private cache folder (the cache script failed): no shim step, PATH not changed; details say why', async ($, on) => {
   const runs: string[][] = []
   const sets: string[] = []
-  on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', PATH: '/usr/bin', TERM_PROGRAM: 'ghostty' } as Record<string, string>)[e.name] }))
+  on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', PATH: '/usr/bin', TERM_PROGRAM: 'ghostty', IUI_COPY_SHIM: '1' } as Record<string, string>)[e.name] }))
   on('env.set', async ($: any, e: any) => (sets.push(e.name), { value: {} }))
   // The cache script gives only the OS name: the shared fallback is for Typst only.
   on('process.run', async ($: any, e: any) => (runs.push(e.argv), /cc-intelligent-ui-/.test(e.argv.join(' ')) ? ok('\nDarwin\n\n') : ok('', 1)))
@@ -201,7 +201,7 @@ for (const [what, vars, off] of [
   test(`${what}: no shims, PATH not changed; details say why`, async ($, on) => {
     const runs: string[][] = []
     const sets: string[] = []
-    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', PATH: '/usr/bin', ...vars } as Record<string, string>)[e.name] }))
+    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', PATH: '/usr/bin', IUI_COPY_SHIM: '1', ...vars } as Record<string, string>)[e.name] }))
     on('env.set', async ($: any, e: any) => (sets.push(e.name), { value: {} }))
     on('process.run', async ($: any, e: any) => (runs.push(e.argv), /cc-intelligent-ui-/.test(e.argv.join(' ')) ? ok('/c\nDarwin\n') : ok('', 1)))
     const ran = await $.command.run({ command: 'iui', args: 'details' } as any)

@@ -237,7 +237,7 @@ function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Rec
   mock.store(on)
   const clock = mock.clock(on)
   const vars: Record<string, string | undefined> = {
-    PATH: '/usr/local/bin:/usr/bin', ...(o.env ?? { HOME: '/h', TERM: 'xterm-kitty', KITTY_WINDOW_ID: '1', WAYLAND_DISPLAY: 'wayland-1', XDG_CURRENT_DESKTOP: 'sway' }),
+    PATH: '/usr/local/bin:/usr/bin', IUI_COPY_SHIM: '1', ...(o.env ?? { HOME: '/h', TERM: 'xterm-kitty', KITTY_WINDOW_ID: '1', WAYLAND_DISPLAY: 'wayland-1', XDG_CURRENT_DESKTOP: 'sway' }),
   }
   on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
   on('env.set', async ($: any, e: any) => {

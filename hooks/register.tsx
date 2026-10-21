@@ -680,7 +680,7 @@ export const register: Register = on => {
         await storeSet($, 'select', S.select)
       }
       const head = asked.on === undefined ? 'Picture select is' : 'Picture select is now'
-      return { text: `${head} ${selectText(S.select)}. When on, a mouse drag over a picture selects its text and copies it; Claude Code 2.1.305 and newer no longer select pictures by themselves. Use /iui select on (the default), or /iui select off.` }
+      return { text: `${head} ${selectText(S.select)}. When on, a mouse drag over a picture selects its text and copies it. Use /iui select on (the default), or /iui select off.` }
     }
     if (asked.kind === 'updates') {
       await loadUpdates($)
