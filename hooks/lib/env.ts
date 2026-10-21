@@ -84,6 +84,7 @@ export function setUp($: EngineInterface): Promise<Env> {
     if (S.setupNeeded) void offerSetup($).catch(() => undefined)
     S.isCmux = !!(await envGet($, 'CMUX_SURFACE_ID')) || !!(await envGet($, 'CMUX_WORKSPACE_ID')) || !!(await envGet($, 'CMUX_SOCKET_PATH'))
     S.colorFgBg = (await envGet($, 'COLORFGBG')) ?? ''
+    S.userFontPaths = (await envGet($, 'TYPST_FONT_PATHS')) ?? ''
     if (S.setting === 'auto') S.host = (await readHostMode($).catch(() => null)) ?? S.host
     S.theme = resolveMode(S.setting, S.host)
     watchHost($)

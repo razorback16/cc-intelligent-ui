@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
-  alignFirstLine, DEFAULT_METRICS, DEFAULT_SIZE, firstLineOf, fontFit, ghosttyFontOf, itermFontOf, parseFontSpec, typstCall,
+  alignFirstLine, cmuxConfigOf, DEFAULT_METRICS, DEFAULT_SIZE, firstLineOf, fontFit, ghosttyFontOf, ghosttyFontsOf, itermFontOf, parseFontSpec, typstCall,
   blocksOf, canDrawIn, columnsFor, DEFAULT_CELL, hashOf, imagePathOf, isSet, localImages, DEFAULT_WIDTH, IMAGE_MAX_COLUMNS,
   parseOd, plainOf, pngSize, shouldRetrySafe, sizeOf, sizing, splitSegments, themeOf, TYPST_PROMPT,
   escapeControls, luminanceOf, modeOfLuminance, OSC11_PL, parseOsc11, pickProfile, itermAppearanceOf, itermModeOf,
@@ -360,6 +360,16 @@ test('with the grid on, the template gets grid=1 and top=0; with it off, no grid
   expect(on.ppi).toBe(off.ppi)
 })
 
+test('a terminal font with no bold face gives the template term-bold=0; any other font no input', () => {
+  const term = { adv: 0.6, xh: 0.55, avg: 0.6 }
+  const inputsOf = (metrics: Env['metrics']) =>
+    typstInputs({ key: 'k', requestId: 'r', text: 'x', columns: 100, cell: DEFAULT_CELL, theme: 'dark', size: 100, grid: false, themeDir: '/t', env: { metrics, termFont: 'Monaco' } as Env, epoch: 0 } as Job, ['x'], '/c/k', false).inputs
+  expect(inputsOf({ ...DEFAULT_METRICS, term, termBold: false })['term-bold']).toBe(0)
+  expect('term-bold' in inputsOf({ ...DEFAULT_METRICS, term, termBold: true })).toBe(false)
+  expect('term-bold' in inputsOf({ ...DEFAULT_METRICS, term })).toBe(false)
+  expect('term-bold' in inputsOf({ ...DEFAULT_METRICS, term: null, termBold: false })).toBe(false)
+})
+
 test('the room goes to the template in pt: the design page width and room height', () => {
   expect(roomInputs(undefined)).toEqual({})
   // A first render: the design is the space now, so the factor is 1 (design-w = width).
@@ -425,6 +435,9 @@ test('the terminal font is read from iTerm2 and Ghostty settings', () => {
   expect(parseFontSpec('MesloLGS-NF-Regular 14')).toEqual({ name: 'MesloLGS-NF-Regular', size: 14 })
   expect(parseFontSpec('Menlo-Regular 12.5')).toEqual({ name: 'Menlo-Regular', size: 12.5 })
   expect(parseFontSpec('nosize')).toBe(null)
+  // iTerm2 saves the font's settings after the size; it reads the name to the first space.
+  expect(parseFontSpec('JetBrainsMono-Regular 13 {"featureSettings":[{"CTFeatureTypeIdentifier":35}]}')).toEqual({ name: 'JetBrainsMono-Regular', size: 13 })
+  expect(parseFontSpec('Monaco 12')).toEqual({ name: 'Monaco', size: 12 })
   const marks = JSON.stringify([
     { Name: 'Default', Guid: 'G1', 'Normal Font': 'MesloLGS-NF-Regular 14' },
     { Name: 'Work', Guid: 'G2', 'Normal Font': 'Menlo-Regular 12' },
@@ -433,8 +446,17 @@ test('the terminal font is read from iTerm2 and Ghostty settings', () => {
   expect(itermFontOf(marks, undefined, 'G1\n')).toBe('MesloLGS-NF-Regular 14')
   expect(itermFontOf(marks, 'Gone', 'G1')).toBe('MesloLGS-NF-Regular 14')
   expect(itermFontOf('not json', 'Work', 'G1')).toBe(null)
+  // No profile: null (not known); a profile with no font: '' (iTerm2 draws its default).
+  expect(itermFontOf(marks, 'Gone', 'G9')).toBe(null)
+  expect(itermFontOf(JSON.stringify([{ Name: 'Default', Guid: 'G1' }]), undefined, 'G1')).toBe('')
+  expect(ghosttyFontsOf('font-family = Nope\nfont-family = "Iosevka"\nfont-size = 13')).toEqual(['Nope', 'Iosevka'])
+  expect(ghosttyFontsOf('font-family = Nope\nfont-family = \nfont-family = Menlo')).toEqual(['Menlo'])
   expect(ghosttyFontOf('theme = x\nfont-family = \nfont-family = "JetBrains Mono"\nfont-family = Menlo')).toBe('JetBrains Mono')
   expect(ghosttyFontOf('font-size = 13')).toBe(null)
+  // An empty value clears the list; cmux's own config comes after +show-config.
+  expect(ghosttyFontOf('font-family = Menlo\nfont-family = \nfont-family = Iosevka\nfont-family = Menlo')).toBe('Iosevka')
+  expect(ghosttyFontOf(cmuxConfigOf('font-size = 13\n', 'font-family = "Fira Code"\n'))).toBe('Fira Code')
+  expect(ghosttyFontOf(cmuxConfigOf('font-family = Menlo\n', 'font-family = "Fira Code"\n'))).toBe('Menlo')
 })
 
 test('typst also reads the font folder of the font that Ghostty carries, when there is one', () => {
@@ -1050,7 +1072,11 @@ test('typst gets no network in either case of the proxy variables, and its packa
     expect('TYPST_FONT_PATHS' in env).toBe(false)
     S.fontPaths = '/f1:/f2'
     expect(noNetworkEnv('/c').TYPST_FONT_PATHS).toBe('/f1:/f2')
+    // The user's own TYPST_FONT_PATHS stays, first.
+    S.userFontPaths = '/u/fonts'
+    expect(noNetworkEnv('/c').TYPST_FONT_PATHS).toBe('/u/fonts:/f1:/f2')
   } finally {
     S.fontPaths = saved
+    S.userFontPaths = ''
   }
 })

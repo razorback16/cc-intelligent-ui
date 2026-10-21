@@ -79,6 +79,8 @@ export function renderKey(o: {
   // `/iui grid` on: the lines on the row grid, another picture (with
   // GRID_VERSION). Off adds nothing, so the keys of before stay.
   grid?: boolean
+  // The fake bold of a terminal font with no bold face (fauxBoldOf).
+  fauxBold?: boolean
 }): string {
   const { room } = o
   return hashOf([
@@ -87,6 +89,7 @@ export function renderKey(o: {
     ...(o.base ? ['base', o.base] : []),
     ...(room ? ['room', room.heightPt, room.design.widthPt, room.design.heightPt] : []),
     ...(o.grid ? ['grid', GRID_VERSION] : []),
+    ...(o.fauxBold ? ['faux-bold'] : []),
   ])
 }
 

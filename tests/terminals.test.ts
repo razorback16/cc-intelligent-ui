@@ -184,11 +184,15 @@ test("Rio's background: adaptive theme (force-theme, else the OS), else theme, e
   expect(rioBackgroundOf({}, 'light', themes)).toEqual({ bg: RIO_DEFAULT_BG, detail: 'default background' })
 })
 
-test("Rio's font: [fonts] family, else [fonts.regular] family, else Cascadia Code", () => {
+test("Rio's font: [fonts] family, else [fonts.regular] family, else the Cascadia Code NF it carries", () => {
   expect(rioFontOf({ 'fonts.family': 'Iosevka', 'fonts.regular.family': 'JetBrains Mono' })).toBe('Iosevka')
   expect(rioFontOf({ 'fonts.regular.family': 'JetBrains Mono' })).toBe('JetBrains Mono')
+  // The family name of the font in Rio's program, as Typst lists it.
+  expect(RIO_DEFAULT_FONT).toBe('Cascadia Code NF')
   expect(rioFontOf({})).toBe(RIO_DEFAULT_FONT)
-  expect(rioFontOf({ 'fonts.family': 'cascadiacode' })).toBe('Cascadia Code')
+  // Rio's default name, in any case and spacing, is always its own font.
+  for (const family of ['cascadiacode', 'Cascadia Code', 'CASCADIA CODE ']) expect(rioFontOf({ 'fonts.family': family })).toBe(RIO_DEFAULT_FONT)
+  expect(rioFontOf({ 'fonts.family': 'Cascadia Mono' })).toBe('Cascadia Mono')
 })
 
 // ---- iTerm2 and cmux ------------------------------------------------------------

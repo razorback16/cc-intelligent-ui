@@ -66,6 +66,15 @@ test('pages cut for ssh have keys of their own; local keys do not change', () =>
   expect(renderKey({ ...o, inline: true })).not.toBe(renderKey(o))
 })
 
+test('a fake bold has keys of its own; the other keys do not change', () => {
+  const o = {
+    textHash: 'h', columns: 100, cell: DEFAULT_CELL, size: 100, mode: 'dark' as const, termFont: 'Monaco', columnPt: 6,
+    templateStamp: '1', look: { name: 'vscode', dir: '/t', stamp: '0' },
+  }
+  expect(renderKey({ ...o, fauxBold: false })).toBe(renderKey(o))
+  expect(renderKey({ ...o, fauxBold: true })).not.toBe(renderKey(o))
+})
+
 // ---- The Image source -------------------------------------------------------
 
 const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: exitCode ? 'error: boom' : '', isStdoutTruncated: false, isStderrTruncated: false } })

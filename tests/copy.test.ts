@@ -1624,28 +1624,28 @@ test('picture select: /iui select off and /iui off let the page cache go', async
 })
 
 test('picture select: a frame of a page file the row no longer draws is not blitted; the new file gets its own frame', async ($, on) => {
-  let redraw: (() => Promise<void>) | null = null
+  let release = () => {}
+  let isHeld = false
   const w = world(on, {
     tty: TTY,
-    // The row is drawn again with a new page file while the first frame is written.
-    beforeWrite: async () => {
-      const r = redraw
-      redraw = null
-      await r?.()
-    },
+    // The first frame write is held; the test draws the row again meanwhile (one clock mover at a time).
+    beforeWrite: () => (isHeld ? Promise.resolve() : ((isHeld = true), new Promise<void>(r => (release = r)))),
   })
   await $.command.run({ command: 'iui', args: '' } as any)
   const ui = await drawAnswer($, w)
   const other = `${SMALL_MD}\n\nOne more line.`
-  redraw = async () => {
-    await ui.redraw(props(other))
-    await w.clock.settle()
-    await w.clock.advance(1000)
-    await w.clock.settle()
-    await ui.redraw(props(other))
-    await w.clock.settle()
-  }
   await drag(ui)
+  await settle(w)
+  expect(w.writes).toBe(1)
+  expect(w.frames).toEqual([])
+  // The row is drawn again with a new page file while the first frame is written.
+  await ui.redraw(props(other))
+  await w.clock.settle()
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  await ui.redraw(props(other))
+  await w.clock.settle()
+  release()
   await settle(w)
   expect(w.compiles.length).toBe(2)
   const stale = w.frames[0]!.path

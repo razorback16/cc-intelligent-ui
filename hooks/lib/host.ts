@@ -9,11 +9,11 @@ import { S } from './state'
 import { beginEpoch } from './epoch'
 import { luminanceOf, modeOfColorFgBg, modeOfLuminance, modeOfMacAppearance, parseOsc11, resolveMode, schemeOfPortal, type HostMode } from './mode'
 import {
-  cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, familyOfFc, GHOSTTY_DEFAULT_FONT, ghosttyBackgroundOf, ghosttyFontOf, ghosttyHasColors,
+  cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, familyOfFc, GHOSTTY_DEFAULT_FONT, ghosttyBackgroundOf, ghosttyFontsOf, ghosttyHasColors,
   ghosttyThemePaths, ghosttyThemesOf,
   ghosttyValueOf, hexColorOf, itermAppearanceOf, itermFontOf, itermModeOf, jsoncOf, kittyAutoFileOf, kittyBackgroundOf,
-  kittyConfigDirsOf, kittyEntriesOf, kittyFontOf, kittySchemeOfGnome, kittyValueOf, parseFontSpec, rioBackgroundOf,
-  rioConfigDirOf, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf, type CmuxAppearance, type KittyEntries,
+  kittyConfigDirsOf, kittyEntriesOf, kittyFontOf, kittySchemeOfGnome, kittyValueOf, KITTY_MAC_FONT, parseFontSpec, rioBackgroundOf,
+  rioConfigDirOf, RIO_DEFAULT_FONT, RIO_OLD_FONT, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf, type CmuxAppearance, type KittyEntries,
 } from './terminals'
 import { firstLine } from './markdown'
 import { isGhosttyHere } from './terminal'
@@ -84,28 +84,48 @@ export const WATCH_PL = [
 export const perlFor = (isMac: boolean) => (isMac ? '/usr/bin/perl' : 'perl')
 const ITERM_BOOKMARKS_SH = `defaults export com.googlecode.iterm2 - | plutil -extract "New Bookmarks" json -o - -`
 const ITERM_DEFAULT_SH = `defaults read com.googlecode.iterm2 "Default Bookmark Guid"`
-// A PostScript name (argv[0]) to its family name.
-const FAMILY_JXA = 'function run(argv) { ObjC.import("AppKit"); var f = $.NSFont.fontWithNameSize(argv[0], 12); return f.isNil() ? "" : f.familyName.js }'
+// A PostScript name (argv[0]) to its family name; with argv[1] `user`, a
+// name that is not installed gives the user's fixed-pitch font (iTerm2 then
+// draws it: Menlo, unless it was changed).
+const FAMILY_JXA = 'function run(argv) { ObjC.import("AppKit"); var f = argv[0] ? $.NSFont.fontWithNameSize(argv[0], 12) : null; if ((!f || f.isNil()) && argv[1] === "user") f = $.NSFont.userFixedPitchFontOfSize(12); return !f || f.isNil() ? "" : f.familyName.js }'
+// Whether a family (argv[0]) is installed, as CoreText finds it by name:
+// yes or no; with argv[1] `mono`, `proportional` when no style of it is fixed-pitch.
+const HAS_FAMILY_JXA = 'function run(argv) { ObjC.import("AppKit"); var m = $.NSFontManager.sharedFontManager.availableMembersOfFontFamily(argv[0]); if (m.isNil()) return "no"; if (argv[1] !== "mono") return "yes"; for (var i = 0; i < m.count; i++) if (m.objectAtIndex(i).objectAtIndex(3).js & 0x400) return "yes"; return "proportional" }'
 // iTerm2's appearance, the default profile's GUID and the profiles, split by "@" lines.
 const ITERM_MODE_SH = `defaults read com.googlecode.iterm2 TabStyleWithAutomaticOption 2>/dev/null; echo @; ${ITERM_DEFAULT_SH} 2>/dev/null; echo @; ${ITERM_BOOKMARKS_SH}`
 const GHOSTTY_SH = `"\${GHOSTTY_BIN_DIR:+\$GHOSTTY_BIN_DIR/}ghostty" +show-config`
-// Copies the JetBrains Mono that Ghostty carries in its program (no font
-// files: the TrueType data is inside it) to a folder that Typst can read,
-// once per Ghostty build: the variable Regular and Italic (an `fvar` table
-// and the family in the `name` table), each size once (a universal program
-// has a copy per CPU). The folder is in the user cache, by the program's
-// path, size and mtime; it prints the folder, and exit 1 when no font was
-// found. Made in a temporary folder first, so a compile never sees half.
-export const GHOSTTY_FONTS_PL = [
+// Copies the font that a terminal carries in its program (no font files:
+// the TrueType data is inside it; Ghostty's JetBrains Mono, Rio's Cascadia
+// Code NF) to a folder that Typst can read, once per build: the variable
+// Regular and Italic (an `fvar` table and the family, argument 2, in the
+// `name` table), each size once (a universal program has a copy per CPU).
+// The folder is in the user cache, by the tag (argument 1) and the
+// program's path, size and mtime; it prints the folder. Exit 3 when the
+// program has no such font (kept as a `.none` marker, so the next run does
+// not read the program again); exit 1 for other failures. Made in a
+// temporary folder first, so a compile never sees half. Each new copy or
+// marker removes the tag's temporary folders of 1 day and its other folders
+// and markers of 7 days (an older build's).
+export const PROGRAM_FONTS_PL = [
   'use strict;',
-  'my $f = shift or exit 1;',
+  'my ($tag, $family, $f) = @ARGV; $f or exit 1;',
   'my @st = stat($f) or exit 1;',
   'my $base = ($ENV{XDG_CACHE_HOME} || "$ENV{HOME}/.cache") . "/cc-intelligent-ui/fonts";',
   'my $key = unpack("%32C*", $f) . "-$st[7]-$st[9]";',
-  'my $d = "$base/ghostty-$key";',
+  'my $d = "$base/$tag-$key";',
   'if (-d $d) { utime(undef, undef, $d); print "$d\\n"; exit 0 }',
+  'exit 3 if -e "$d.none";',
+  'sub sweep {',
+  '  opendir(my $dh, $base) or return;',
+  '  for my $e (readdir $dh) {',
+  '    next unless index($e, "$tag-") == 0; my $p = "$base/$e";',
+  '    next if $p eq $d || $p eq "$d.none"; my $age = -M $p; next unless defined $age;',
+  '    next unless $e =~ /\\.\\d+$/ ? $age > 1 : $age > 7;',
+  '    if (-d $p) { system("rm", "-rf", $p) } else { unlink $p }',
+  '  }',
+  '}',
   'open(my $h, "<:raw", $f) or exit 1; my $b = do { local $/; <$h> }; close $h;',
-  'my $want = "\\0" . join("\\0", split(//, "JetBrains Mono"));',
+  'my $want = "\\0" . join("\\0", split(//, $family));',
   'system("mkdir", "-p", $base) == 0 or exit 1;',
   'my $t = "$d.$$"; mkdir($t) or exit 1;',
   'my (%seen, $n);',
@@ -114,32 +134,39 @@ export const GHOSTTY_FONTS_PL = [
   '  next if $k < 4 || $k > 40;',
   '  my ($end, $fvar, $name, $bad) = (0, 0, "", 0);',
   '  for my $i (0 .. $k - 1) {',
-  '    my ($tag, $cs, $off, $len) = unpack("a4NNN", substr($b, $o + 12 + 16 * $i, 16));',
-  '    if ($tag !~ m{^[A-Za-z0-9/ ]{4}$} || $off + $len > 20000000) { $bad = 1; last }',
+  '    my ($tt, $cs, $off, $len) = unpack("a4NNN", substr($b, $o + 12 + 16 * $i, 16));',
+  '    if ($tt !~ m{^[A-Za-z0-9/ ]{4}$} || $off + $len > 20000000) { $bad = 1; last }',
   '    $end = $off + $len if $off + $len > $end;',
-  '    $fvar = 1 if $tag eq "fvar";',
-  '    $name = substr($b, $o + $off, $len) if $tag eq "name";',
+  '    $fvar = 1 if $tt eq "fvar";',
+  '    $name = substr($b, $o + $off, $len) if $tt eq "name";',
   '  }',
   '  next if $bad || !$fvar || index($name, $want) < 0 || $seen{$end}++;',
-  '  open(my $w, ">:raw", "$t/JetBrainsMono-" . ++$n . ".ttf") or next;',
+  '  open(my $w, ">:raw", "$t/$tag-" . ++$n . ".ttf") or next;',
   '  print $w substr($b, $o, $end); close $w;',
   '}',
-  'if (!$n) { rmdir $t; exit 1 }',
+  'if (!$n) { rmdir $t; if (open(my $m, ">", "$d.none")) { close $m } sweep(); exit 3 }',
   'rename($t, $d) or system("rm", "-rf", $t);',
-  '-d $d or exit 1; print "$d\\n";',
+  '-d $d or exit 1; sweep(); print "$d\\n";',
 ].join('\n')
-// Runs GHOSTTY_FONTS_PL (with the perl of perlFor) on the first Ghostty
-// program found: the one of GHOSTTY_BIN_DIR, the PATH's, then each other
-// argument (the apps' places).
-export const GHOSTTY_FONTS_SH = [
-  'perl=$1; pl=$2; shift 2',
-  'for f in "${GHOSTTY_BIN_DIR:+$GHOSTTY_BIN_DIR/ghostty}" "$(command -v ghostty)" "$@"; do',
-  '  [ -n "$f" ] && [ -f "$f" ] && exec "$perl" -e "$pl" "$f"',
+// Runs PROGRAM_FONTS_PL (with the perl of perlFor) with a tag and a family
+// on the first program found: for ghostty the one of GHOSTTY_BIN_DIR, then
+// the PATH's command of that name, then each other path (the apps' places).
+// Exit 2 when no program is found.
+export const PROGRAM_FONTS_SH = [
+  'perl=$1; pl=$2; tag=$3; family=$4; name=$5; shift 5',
+  'first=; [ "$name" = ghostty ] && first=${GHOSTTY_BIN_DIR:+$GHOSTTY_BIN_DIR/ghostty}',
+  'for f in "$first" "$(command -v "$name")" "$@"; do',
+  '  [ -n "$f" ] && [ -f "$f" ] && exec "$perl" -e "$pl" "$tag" "$family" "$f"',
   'done',
-  'exit 1',
+  'exit 2',
 ].join('\n')
 // Where the apps keep their Ghostty program.
 const GHOSTTY_PROGRAMS = ['/Applications/cmux.app/Contents/Resources/bin/ghostty', '/Applications/Ghostty.app/Contents/MacOS/ghostty']
+// Where Rio's program can be (after the PATH's): the macOS app (rio.app), cargo's, Flatpak's.
+const rioProgramsOf = (home: string) => [
+  '/Applications/rio.app/Contents/MacOS/rio', `${home}/Applications/rio.app/Contents/MacOS/rio`, `${home}/.cargo/bin/rio`,
+  '/var/lib/flatpak/app/com.rioterm.Rio/current/active/files/bin/rio', `${home}/.local/share/flatpak/app/com.rioterm.Rio/current/active/files/bin/rio`,
+]
 // Asks the terminal for its background (OSC 11) and prints the answer. It
 // opens the tty itself, non-blocking, changes no tty mode, and waits 300 ms at
 // most. Claude Code reads the same tty, so the answer may go to it instead.
@@ -164,8 +191,10 @@ export const HEADERS_SH = `for f in "$@"; do head -c 24 "$f" | od -An -v -tx1; e
 
 // The terminal's font family: iTerm2's profile font, Ghostty's font-family,
 // kitty's font_family, Rio's [fonts] family; '' elsewhere or when it can't
-// be read. On Linux, when the terminal's config names none: fontconfig's
-// monospace font (fc-match), which kitty and most terminals use.
+// be read. A family that the terminal does not find is the one it draws in
+// its place (its own font, Menlo, or fontconfig's nearest). On Linux, when
+// the terminal's config names none: fontconfig's monospace font (fc-match),
+// which kitty and most terminals use.
 export async function termFontOf($: EngineInterface, isMac: boolean): Promise<string> {
   // Over ssh, a config here is not the one of the user's terminal.
   if (S.isRemote) return ''
@@ -174,6 +203,9 @@ export async function termFontOf($: EngineInterface, isMac: boolean): Promise<st
   return fcFamily($, 'monospace')
 }
 
+// A family as a fontconfig pattern: its `-`, `:`, `,` and `\` escaped.
+export const fcPatternOf = (family: string) => family.replace(/[\\\-:,]/g, '\\$&')
+
 // A family fontconfig gives for a pattern (the first of its names), '' when
 // fc-match fails. `fc-match` always gives a font, the nearest one.
 async function fcFamily($: EngineInterface, pattern: string): Promise<string> {
@@ -181,17 +213,86 @@ async function fcFamily($: EngineInterface, pattern: string): Promise<string> {
   return got?.exitCode === 0 ? familyOfFc(got.stdout) : ''
 }
 
-// Ghostty draws its own JetBrains Mono when no font-family is set. Typst
-// draws it from the system's fonts when fontconfig has it (Linux), else
-// from a copy of the one in Ghostty's program (S.fontPaths).
+// The family of the first font that fontconfig lists for a pattern (only
+// fonts that match it), '' for none.
+async function fcListFamily($: EngineInterface, pattern: string): Promise<string> {
+  const got = await processRun($, ['fc-list', pattern, 'family'], { timeoutMs: 5000 }).catch(() => null)
+  return got?.exitCode === 0 ? familyOfFc(firstLine(got.stdout)) : ''
+}
+
+// What CoreText says of a family (HAS_FAMILY_JXA), '' when it can't be read.
+async function macFamily($: EngineInterface, family: string, mono = false): Promise<string> {
+  const got = await processRun($, ['osascript', '-l', 'JavaScript', '-e', HAS_FAMILY_JXA, family, ...(mono ? ['mono'] : [])], { timeoutMs: 5000 }).catch(() => null)
+  return got?.exitCode === 0 ? firstLine(got.stdout) : ''
+}
+
+// Whether a family is installed: CoreText on macOS, fontconfig on Linux
+// (`exact`: the name as is, as Rio's font database matches it; else in
+// any case and spacing). Null when that can't be read (then the family is
+// taken as is).
+async function hasFamily($: EngineInterface, isMac: boolean, family: string, exact = false): Promise<boolean | null> {
+  if (isMac) {
+    const seen = await macFamily($, family)
+    return seen ? seen === 'yes' : null
+  }
+  if (exact) {
+    const got = await processRun($, ['fc-list', ':', 'family'], { timeoutMs: 5000 }).catch(() => null)
+    if (got?.exitCode !== 0) return null
+    // Each line is a family's names, split by commas, with `\` escapes.
+    return got.stdout.split('\n').some(line => line.split(/(?<!\\),/).some(name => name.replace(/\\(.)/g, '$1').trim() === family))
+  }
+  const got = await processRun($, ['fc-list', '-q', fcPatternOf(family)], { timeoutMs: 5000 }).catch(() => null)
+  return got?.exitCode === 0 ? true : got?.exitCode === 1 ? false : null
+}
+
+// Copies the font a terminal carries in its program (PROGRAM_FONTS_PL) and
+// gives it to Typst (S.fontPaths): 'copied', 'none' (the program has no
+// such font) or 'failed' (no program, or the copy failed).
+async function programFont($: EngineInterface, isMac: boolean, o: { tag: string; family: string; name: string; paths: readonly string[] }): Promise<'copied' | 'none' | 'failed'> {
+  const argv = ['sh', '-c', PROGRAM_FONTS_SH, 'sh', perlFor(isMac), PROGRAM_FONTS_PL, o.tag, o.family, o.name, ...o.paths]
+  const made = await processRun($, argv, { timeoutMs: 10000 }).catch(() => null)
+  if (made?.exitCode === 3) return 'none'
+  const dir = made?.exitCode === 0 ? firstLine(made.stdout) : ''
+  if (!dir) return 'failed'
+  S.fontPaths = dir
+  return 'copied'
+}
+
+// Ghostty draws its own JetBrains Mono when no font-family is set (and on
+// macOS when it finds none of them). Typst draws it from the system's fonts
+// when fontconfig has it (Linux), else from a copy of the one in Ghostty's
+// program (S.fontPaths).
 async function ghosttyDefaultFont($: EngineInterface, isMac: boolean): Promise<string> {
   const got = await processRun($, ['fc-list', '-q', GHOSTTY_DEFAULT_FONT], { timeoutMs: 5000 }).catch(() => null)
   if (got?.exitCode === 0) return GHOSTTY_DEFAULT_FONT
-  const made = await processRun($, ['sh', '-c', GHOSTTY_FONTS_SH, 'sh', perlFor(isMac), GHOSTTY_FONTS_PL, ...GHOSTTY_PROGRAMS], { timeoutMs: 10000 }).catch(() => null)
-  const dir = made?.exitCode === 0 ? firstLine(made.stdout) : ''
-  if (!dir) return ''
-  S.fontPaths = dir
-  return GHOSTTY_DEFAULT_FONT
+  const o = { tag: 'ghostty', family: GHOSTTY_DEFAULT_FONT, name: 'ghostty', paths: GHOSTTY_PROGRAMS }
+  return (await programFont($, isMac, o)) === 'copied' ? GHOSTTY_DEFAULT_FONT : ''
+}
+
+// Ghostty's font: the first family of its font-family list that it finds.
+// None found: on macOS its own JetBrains Mono; on Linux fontconfig's
+// nearest font for the first family (Ghostty takes the first font of
+// fontconfig's sorted list). No list: its own JetBrains Mono.
+async function ghosttyFont($: EngineInterface, isMac: boolean, names: readonly string[]): Promise<string> {
+  if (!names.length) return ghosttyDefaultFont($, isMac)
+  for (const name of names) if ((await hasFamily($, isMac, name)) !== false) return name
+  if (isMac) return ghosttyDefaultFont($, isMac)
+  return (await fcFamily($, fcPatternOf(names[0]!))) || names[0]!
+}
+
+// Rio draws its own Cascadia Code NF when the config names no font (or
+// `cascadiacode`, or one it does not find by its exact name): a copy of
+// the one in Rio's program. A Rio up to 0.4 carries a Cascadia Code with
+// no `fvar` (none found): Cascadia Code. No program: the system's Cascadia
+// Code (the same letters) when it is installed.
+async function rioFont($: EngineInterface, isMac: boolean): Promise<string> {
+  const named = rioFontOf((await readRioConfig($)).config)
+  if (named !== RIO_DEFAULT_FONT && (await hasFamily($, isMac, named, true)) !== false) return named
+  const home = (await envGet($, 'HOME')) ?? ''
+  const copy = await programFont($, isMac, { tag: 'rio', family: RIO_DEFAULT_FONT, name: 'rio', paths: rioProgramsOf(home) })
+  if (copy === 'copied') return RIO_DEFAULT_FONT
+  if (copy === 'none') return RIO_OLD_FONT
+  return (await hasFamily($, isMac, RIO_OLD_FONT)) ? RIO_OLD_FONT : RIO_DEFAULT_FONT
 }
 
 // The font that the terminal's own config or profile names.
@@ -202,29 +303,40 @@ async function configFontOf($: EngineInterface, isMac: boolean): Promise<string>
       processRun($, ['sh', '-c', ITERM_BOOKMARKS_SH], { timeoutMs: 5000 }).catch(() => null),
       processRun($, ['sh', '-c', ITERM_DEFAULT_SH], { timeoutMs: 5000 }).catch(() => null),
     ])
-    const spec = parseFontSpec(itermFontOf(marks?.stdout ?? '', profile, guid?.stdout ?? '') ?? '')
-    if (!spec) return ''
-    const named = await processRun($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_JXA, spec.name], { timeoutMs: 5000 }).catch(() => null)
+    // A read that failed or no profile: not known.
+    const font = marks?.exitCode === 0 ? itermFontOf(marks.stdout, profile, guid?.stdout ?? '') : null
+    if (font === null) return ''
+    // An empty or bad profile font, or one that is not installed: iTerm2 draws the user's fixed-pitch font.
+    const named = await processRun($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_JXA, parseFontSpec(font)?.name ?? '', 'user'], { timeoutMs: 5000 }).catch(() => null)
     return named?.exitCode === 0 ? firstLine(named.stdout) : ''
   }
   if (isGhosttyHere()) {
     const shown = await processRun($, ['sh', '-c', GHOSTTY_SH], { timeoutMs: 5000 }).catch(() => null)
-    return ghosttyFontOf(shown?.stdout ?? '') ?? (await ghosttyDefaultFont($, isMac))
+    // cmux loads its own config after Ghostty's; +show-config does not read it.
+    const own = S.isCmux ? ((await readText($, cmuxGhosttyConfigPath((await envGet($, 'HOME')) ?? ''))) ?? '') : ''
+    return ghosttyFont($, isMac, ghosttyFontsOf(cmuxConfigOf(shown?.stdout ?? '', own)))
   }
   if (S.isKitty) {
-    // A family name as is; a PostScript name to its family (macOS: AppKit;
-    // Linux: fontconfig); the system's monospace from fontconfig (Linux,
-    // termFontOf; on macOS it is Menlo).
+    // As kitty finds a font: a family name, else a full or PostScript name
+    // (macOS: AppKit; Linux: fontconfig), else the nearest font (macOS:
+    // Menlo; Linux: fontconfig's monospace match). kitty looks only at
+    // fixed-pitch fonts. No font_family: the system's monospace (macOS:
+    // Menlo; Linux: fontconfig's, in termFontOf).
     const font = kittyFontOf(kittyValueOf((await readKittyConfig($)).entries, 'font_family'))
-    if (font && 'family' in font) return font.family
-    if (font && isMac) {
-      const named = await processRun($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_JXA, font.postscript], { timeoutMs: 5000 }).catch(() => null)
-      return named?.exitCode === 0 ? firstLine(named.stdout) : ''
+    if (!font) return isMac ? KITTY_MAC_FONT : ''
+    const name = 'family' in font ? font.family : font.postscript
+    if (isMac) {
+      const seen = 'family' in font ? await macFamily($, name, true) : 'no'
+      if (seen === 'yes' || seen === '') return name
+      if (seen === 'proportional') return KITTY_MAC_FONT
+      const named = await processRun($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_JXA, name], { timeoutMs: 5000 }).catch(() => null)
+      return named?.exitCode === 0 ? firstLine(named.stdout) || KITTY_MAC_FONT : ''
     }
-    if (font) return fcFamily($, `:postscriptname=${font.postscript}`)
-    return ''
+    if ('family' in font && (await hasFamily($, isMac, name)) !== false) return name
+    const exact = (await fcListFamily($, `:postscriptname=${fcPatternOf(name)}`)) || (await fcListFamily($, `:fullname=${fcPatternOf(name)}`))
+    return exact || (await fcFamily($, `${'family' in font ? fcPatternOf(name) : `:postscriptname=${fcPatternOf(name)}`}:spacing=mono`))
   }
-  if (isRioHere()) return rioFontOf((await readRioConfig($)).config)
+  if (isRioHere()) return rioFont($, isMac)
   return ''
 }
 

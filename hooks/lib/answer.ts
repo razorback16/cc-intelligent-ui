@@ -6,7 +6,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { BLANK_AFTER_LIVE_MS, BLANK_RESUMED_MS, DEFAULT_THEME, LIVE_STILL_MS, RESULTS_KEPT, SETTLE_MS } from './settings'
-import { epochOpen, finalized, keep, lastKey, lastText, live, pending, results, S, type Env, type Frame, type Job, type Result, type Room } from './state'
+import { epochOpen, fauxBoldOf, finalized, keep, lastKey, lastText, live, pending, results, S, type Env, type Frame, type Job, type Result, type Room } from './state'
 import { fontFit, hashOf, inlineOf, renderKey, sizing } from './draw'
 import { needsRoom } from './markdown'
 import { pictureColumns } from './frame'
@@ -107,7 +107,7 @@ export async function pagesOf($: EngineInterface, o: PagesInput): Promise<Drawin
   const room = await roomOf($, { hasRoom, textHash, base, env, rows, widthPt, rowPt, isLive: liveNow() })
   const key = renderKey({
     textHash, columns, cell, size: S.size, mode: S.theme, termFont: env.termFont,
-    columnPt, templateStamp: env.stamp, look: active, inline: env.inline, base, room, grid: S.grid,
+    columnPt, templateStamp: env.stamp, look: active, inline: env.inline, base, room, grid: S.grid, fauxBold: fauxBoldOf(env.metrics),
   })
   const seen = lastText.get(id)
   const changed = seen !== text

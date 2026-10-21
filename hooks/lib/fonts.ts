@@ -46,6 +46,26 @@ export function fontListOf(stdout: string): Map<string, Face[]> {
   return families
 }
 
+// Whether `typst fonts --variants` lists a bold face of a family: a weight
+// of 600 or more (a variable font: its top weight). Null when the family is
+// not listed.
+export function hasBoldFace(stdout: string, family: string): boolean | null {
+  const want = family.trim().toLowerCase()
+  let inFamily = false
+  let seen = false
+  let bold = false
+  for (const line of stdout.split('\n')) {
+    if (line && !/^\s/.test(line)) {
+      inFamily = line.trim().toLowerCase() === want
+      seen ||= inFamily
+      continue
+    }
+    const m = inFamily ? /Weight:\s*(\d+)(?:-(\d+))?/.exec(line) : null
+    if (m && Number(m[2] ?? m[1]) >= 600) bold = true
+  }
+  return seen ? bold : null
+}
+
 // The font files of the lean set, in the order of the list: the faces of
 // the terminal font and of each body and code font that is not skipped.
 // Null when the lean set can draw differently: the first font of a list

@@ -53,14 +53,17 @@ export function itermModeOf(bookmarks: string, profile: string | undefined, defa
 }
 
 // "MesloLGS-NF-Regular 14" (iTerm2's Normal Font) → PostScript name and size.
+// As iTerm2 reads it: the name to the first space, the size, then any
+// settings (`{"featureSettings":…}`), which are skipped.
 export function parseFontSpec(spec: string): { name: string; size: number } | null {
-  const m = /^\s*(\S.*?)\s+(\d+(?:\.\d+)?)\s*$/.exec(spec)
+  const m = /^\s*(\S+) +(\d+(?:\.\d+)?)(?:\s|$)/.exec(spec)
   return m ? { name: m[1]!, size: Number(m[2]) } : null
 }
 
 // The Normal Font of the iTerm2 profile in use: the bookmark named
 // ITERM_PROFILE, else the default bookmark. `bookmarks` is the JSON of the
-// plist's "New Bookmarks" array.
+// plist's "New Bookmarks" array. Null when that is not JSON or has no such
+// profile; '' when the profile has no font.
 export function itermFontOf(bookmarks: string, profile: string | undefined, defaultGuid: string): string | null {
   let list: unknown
   try {
@@ -69,8 +72,10 @@ export function itermFontOf(bookmarks: string, profile: string | undefined, defa
     return null
   }
   if (!Array.isArray(list)) return null
-  const font = pickProfile(list, profile, defaultGuid)?.['Normal Font']
-  return typeof font === 'string' && font.trim() ? font.trim() : null
+  const mark = pickProfile(list, profile, defaultGuid)
+  if (!mark) return null
+  const font = mark['Normal Font']
+  return typeof font === 'string' ? font.trim() : ''
 }
 
 // Ghostty's background when its config sets none and no theme.
@@ -142,15 +147,24 @@ export const GHOSTTY_DEFAULT_FONT = 'JetBrains Mono'
 // can be a list (`Noto Sans Mono,Noto Sans Mono Regular`).
 export const familyOfFc = (stdout: string) => (stdout.split(',')[0] ?? '').trim()
 
-// The first `font-family = X` of `ghostty +show-config`.
-export function ghosttyFontOf(config: string): string | null {
+// Ghostty's `font-family` list: `ghostty +show-config` (with cmux's own
+// config after it). An empty value clears the list.
+export function ghosttyFontsOf(config: string): string[] {
+  let list: string[] = []
   for (const line of config.split('\n')) {
     const m = /^\s*font-family\s*=\s*(.*?)\s*$/.exec(line)
-    const family = m?.[1]?.replace(/^"(.*)"$/, '$1').trim()
-    if (family) return family
+    if (!m) continue
+    const family = m[1]!.replace(/^"(.*)"$/, '$1').trim()
+    list = family ? [...list, family] : []
   }
-  return null
+  return list
 }
+
+// The first font of Ghostty's `font-family` list, or null.
+export const ghosttyFontOf = (config: string): string | null => ghosttyFontsOf(config)[0] ?? null
+
+// The font kitty draws on macOS for `monospace` and for a font it does not find.
+export const KITTY_MAC_FONT = 'Menlo'
 
 // kitty's background when no config or auto theme sets one.
 export const KITTY_DEFAULT_BG = '#000000'
@@ -256,8 +270,11 @@ export function kittyBackgroundOf(conf: KittyEntries, auto: { file: string; entr
 
 // Rio's background when neither its config nor a theme sets one.
 export const RIO_DEFAULT_BG = '#0f0d0e'
-// Rio's font when the config names none (the Cascadia Code it carries).
-export const RIO_DEFAULT_FONT = 'Cascadia Code'
+// The font Rio carries and draws when the config names none (or one that
+// it does not find): Cascadia Code NF, by its family name.
+export const RIO_DEFAULT_FONT = 'Cascadia Code NF'
+// The font a Rio up to 0.4 carries (no `fvar`, so it is not copied out).
+export const RIO_OLD_FONT = 'Cascadia Code'
 
 // The string values of a TOML file by dotted path (`[fonts.regular]` then
 // `family = "X"` is `fonts.regular.family`). Only what Rio's few keys need:
@@ -345,10 +362,11 @@ export function rioBackgroundOf(config: Readonly<Record<string, string>>, appear
 }
 
 // Rio's font: `[fonts] family` (it sets every style), else `[fonts.regular]
-// family`, else the one Rio carries.
+// family`, else the one Rio carries (also for `cascadiacode`, its default
+// name, in any case and spacing: Rio then never looks in the system).
 export function rioFontOf(config: Readonly<Record<string, string>>): string {
   const family = (config['fonts.family'] || config['fonts.regular.family'] || '').trim()
-  return !family || family.replace(/\s/g, '').toLowerCase() === 'cascadiacode' ? RIO_DEFAULT_FONT : family
+  return !family || family.replace(/ /g, '').toLowerCase() === 'cascadiacode' ? RIO_DEFAULT_FONT : family
 }
 
 // iTerm2: TERM_PROGRAM says so; with no TERM_PROGRAM (it is not always

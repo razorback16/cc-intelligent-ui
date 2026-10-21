@@ -85,16 +85,15 @@ export function planFileOf(input: unknown): string {
   return typeof file === 'string' && file.startsWith('/') ? file : ''
 }
 
-// The plan a row of the call shows: the text edited in the mod's flow, else
-// the result's, else the call's; '' for none and for a subagent's or a
-// teammate's result.
+// The plan a row of the call shows: '' for a subagent's or a teammate's
+// result; else the result's (the approved text, also an edit in the
+// engine's dialog), else the text the mod read or edited, else the call's.
 export function planShownOf(edited: string | undefined, output: unknown, input: unknown): string {
-  if (edited?.trim()) return edited
   if (output && typeof output === 'object') {
     const o = output as { isAgent?: unknown; awaitingLeaderApproval?: unknown }
     if (o.isAgent === true || o.awaitingLeaderApproval === true) return ''
   }
-  return planOf(output) ?? planInputOf(input)
+  return planOf(output) ?? (edited?.trim() ? edited : planInputOf(input))
 }
 
 // A path as the person reads it: `~/...` under the home folder.
@@ -252,6 +251,7 @@ export async function decidePlan(
 // The plan file's text once no Write or Edit of it is still running (at most
 // PLAN_WRITE_WAIT_MS): Claude may write the plan and call ExitPlanMode in one
 // message, and the call then carries the file as it was before the write.
+// 2.1.306 reads it again for the call, but the row's input stays the streamed copy.
 // `fallback` when the file can't be read.
 export async function currentPlan($: EngineInterface, file: string, fallback: string): Promise<string> {
   if (!file) return fallback

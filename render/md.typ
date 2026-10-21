@@ -15,6 +15,7 @@
 //   grid=1               the row grid (optional; needs row; below)
 //   code=<fraction>      code size as a fraction of the body text (default 0.9)
 //   term-font=<family>   the terminal's font, used first for code (optional)
+//   term-bold=0          the terminal font has no bold face: a fake bold (optional)
 //   height=<pt>          the room height of one drawing now (default 0 =
 //                        unknown: no height limit and no height factor)
 //   design-w=<pt>        the design page width: the `width` at the first
@@ -165,6 +166,33 @@
 )
 #set par(leading: E.text.leading-em * 1em, spacing: E.text.paragraph-em * 1em, justify: false)
 #set block(spacing: E.text.paragraph-em * 1em)
+
+// ---------- a fake bold for a terminal font with no bold face ----------
+// term-bold=0: Typst has no bold face of the terminal font (Monaco, for
+// one), so its bold text would draw regular. As a terminal does, bold
+// text in that font gets a stroke of its own fill (0.04em: as thick as
+// Menlo's and DejaVu Sans Mono's bold). Text in other fonts stays.
+#let faux-bold = term-font != "" and inp.at("term-bold", default: "1") == "0"
+#let faux-stroke = 0.04em
+#let weight-num = (thin: 100, extralight: 200, light: 300, regular: 400, medium: 500, semibold: 600, bold: 700, extrabold: 800, black: 900)
+#let weight-of(w) = if type(w) == int { w } else { weight-num.at(w, default: 400) }
+// The first font of the current list, lower case (needs context).
+#let first-font() = {
+  let f = text.font
+  let x = if type(f) == array { f.at(0, default: "") } else { f }
+  lower(if type(x) == dictionary { x.name } else { x })
+}
+#show: doc => if not faux-bold { doc } else {
+  let term = lower(term-font)
+  // strong adds its delta when it is shaped; as a weight, the text rule sees it.
+  show strong: it => context if first-font() != term { it } else {
+    text(weight: calc.min(weight-of(text.weight) + it.delta, 900), it.body)
+  }
+  show text: it => context if weight-of(text.weight) < 600 or first-font() != term { it } else {
+    text(stroke: faux-stroke + text.fill, it)
+  }
+  doc
+}
 
 // ---------- the row grid (grid=1) ----------
 // Lengths on the grid: `rows-near` the whole rows nearest a length (gaps,

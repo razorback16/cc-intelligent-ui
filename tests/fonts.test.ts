@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-import { fontListOf, isPlain, LEAN_SH, leanDirOf, leanFiles, leanFontsFor } from '../hooks/lib/fonts'
-import { compile, forgetTouches, leanFontsOf, probeCall, typstCall } from '../hooks/lib/typst'
-import { DEFAULT_METRICS, leanDirs, type Env, type Job, type LeanFonts } from '../hooks/lib/state'
+import { fontListOf, hasBoldFace, isPlain, LEAN_SH, leanDirOf, leanFiles, leanFontsFor } from '../hooks/lib/fonts'
+import { compile, forgetTouches, leanFontsOf, measureFonts, probeCall, typstCall } from '../hooks/lib/typst'
+import { DEFAULT_METRICS, fauxBoldOf, leanDirs, type Env, type Job, type LeanFonts } from '../hooks/lib/state'
 import { DEFAULT_CELL } from '../hooks/lib/settings'
 
 // `typst fonts --variants` as Typst 0.15 prints it.
@@ -81,6 +81,60 @@ test('a variable font is read by its file, without the (Variable) mark', () => {
   // The lean set links the two files first, as the terminal font.
   const both = new Map([...fontListOf(LISTING), ...list])
   expect(leanFiles(both, 'JetBrains Mono', FONTS)?.slice(0, 2)).toEqual(['/c/fonts/ghostty-1/JetBrainsMono-1.ttf', '/c/fonts/ghostty-1/JetBrainsMono-2.ttf'])
+})
+
+// Monaco has one face (no bold); a variable font has a range of weights.
+const MONACO = ['Monaco', '  └ /System/Library/Fonts/Monaco.ttf', '      Style: Normal, Weight: 400, Stretch: 100%', ''].join('\n')
+const VARIABLE = (top: number) => ['Cascadia Code NF', '  └ /c/fonts/rio-1/rio-1.ttf (Variable)', '      Style: Normal', '      Stretch: 100%', `      Weight: 200-${top} (Default: 400)`, ''].join('\n')
+
+test('a bold face is a weight of 600 or more; null when Typst does not list the family', () => {
+  expect(hasBoldFace(LISTING, 'Menlo')).toBe(true)
+  expect(hasBoldFace(LISTING, 'dejavu sans mono')).toBe(true)
+  expect(hasBoldFace(LISTING, 'Helvetica')).toBe(false)
+  expect(hasBoldFace(LISTING + MONACO, 'Monaco')).toBe(false)
+  expect(hasBoldFace(VARIABLE(700), 'Cascadia Code NF')).toBe(true)
+  expect(hasBoldFace(VARIABLE(500), 'Cascadia Code NF')).toBe(false)
+  expect(hasBoldFace(LISTING, 'Monaco')).toBe(null)
+  expect(hasBoldFace('', 'Menlo')).toBe(null)
+})
+
+const METRICS = JSON.stringify({ term: { adv: 0.6, xh: 0.55, avg: 0.6 }, menlo: { adv: 0.6, xh: 0.55, avg: 0.6 }, body: { adv: 0.6, xh: 0.52, avg: 0.48 } })
+// The measure and the font list in the same time, with the same font paths.
+const measured = async (family: string, listing: string | null) => {
+  const ran: { argv: string[]; env?: Record<string, string> }[] = []
+  const run = (stdout: string, exitCode = 0) => ({ exitCode, stdout, stderr: '' })
+  const $ = {
+    process: {
+      run: async (argv: string[], init?: { env?: Record<string, string> }) => {
+        ran.push({ argv, env: init?.env })
+        if (argv[1] === 'eval') return run(METRICS)
+        if (argv[1] === 'fonts') return listing === null ? run('', 1) : run(listing)
+        return run('', 1)
+      },
+    },
+  }
+  return { m: await measureFonts($ as any, '/usr/bin/typst', '/r', '/c', family, '/t'), ran }
+}
+
+test('the measure keeps whether the terminal font has a bold face; a fake bold only when it has none', async () => {
+  const monaco = await measured('Monaco', LISTING + MONACO)
+  expect(monaco.m.termBold).toBe(false)
+  expect(fauxBoldOf(monaco.m)).toBe(true)
+  // The list sees the same fonts as the measure (the same font paths).
+  const [measure, list] = [monaco.ran.find(r => r.argv[1] === 'eval')!, monaco.ran.find(r => r.argv[1] === 'fonts')!]
+  expect(list.argv).toEqual(['/usr/bin/typst', 'fonts', '--variants'])
+  expect(list.env).toEqual(measure.env)
+  expect((await measured('Menlo', LISTING)).m.termBold).toBe(true)
+  // Not listed, or the list fails: not known, so no fake bold.
+  for (const listing of [LISTING, null]) {
+    const m = (await measured('Monaco', listing)).m
+    expect('termBold' in m).toBe(false)
+    expect(fauxBoldOf(m)).toBe(false)
+  }
+  // No terminal font: no list.
+  expect((await measured('', LISTING)).ran.some(r => r.argv[1] === 'fonts')).toBe(false)
+  // Typst does not have the font (no term metrics): no fake bold.
+  expect(fauxBoldOf({ ...DEFAULT_METRICS, term: null, termBold: false })).toBe(false)
 })
 
 test('the lean set has the terminal font and the Latin fonts, not the CJK and emoji fonts', () => {

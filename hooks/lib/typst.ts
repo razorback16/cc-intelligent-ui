@@ -3,7 +3,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { COMPILE_TIMEOUT_MS, MAX_IMAGE_ROWS, NO_NETWORK, SEGMENT_ROWS, TOUCH_FLUSH_MS, TYPST_FALLBACKS } from './settings'
-import { DEFAULT_METRICS, S, type Cell, type FontMetrics, type Job, type LeanFonts, type Metrics, type Page, type Result } from './state'
+import { DEFAULT_METRICS, fauxBoldOf, S, type Cell, type FontMetrics, type Job, type LeanFonts, type Metrics, type Page, type Result } from './state'
 import { firstLine, imagePathOf, localImages, plainOf, splitInTwo, splitSegments } from './markdown'
 import { inlineBudget } from './terminal'
 import { fontFit, placeFirstLine, sizing } from './draw'
@@ -11,7 +11,7 @@ import { DEFAULT_GRID, gridOf } from './grid'
 import { HEADERS_SH } from './host'
 import { logDebug } from './log'
 import { positionsOf, type Mark, type Positions } from './copy'
-import { leanFontsFor } from './fonts'
+import { hasBoldFace, leanFontsFor } from './fonts'
 import { clockAfter, envGet, fsExists, fsList, fsRead, fsWrite, processRun, spawn } from './api'
 
 // The typst command and its environment. Network off (see NO_NETWORK) and a
@@ -86,7 +86,8 @@ export function noNetworkEnv(cache: string): Record<string, string> {
     NO_PROXY: '',
     no_proxy: '',
     TYPST_PACKAGE_CACHE_PATH: `${cache}/pkg-cache`,
-    ...(S.fontPaths ? { TYPST_FONT_PATHS: S.fontPaths } : {}),
+    // The user's own folders stay (':' is the separator on macOS and Linux).
+    ...(S.fontPaths ? { TYPST_FONT_PATHS: [S.userFontPaths, S.fontPaths].filter(Boolean).join(':') } : {}),
   }
 }
 
@@ -144,15 +145,24 @@ export function leanFontsOf(v: unknown): LeanFonts | undefined {
   return f && names(f.body) && names(f.code) && typeof f.plain === 'boolean' ? { body: f.body, code: f.code, plain: f.plain } : undefined
 }
 
-// The fonts' metrics from render/measure.typ; the macOS defaults when that fails.
+// The fonts' metrics from render/measure.typ; the macOS defaults when that
+// fails. With the font list (in the same time): whether the terminal's font
+// has a bold face.
 export async function measureFonts($: EngineInterface, typst: string, root: string, cache: string, family: string, themeDir: string): Promise<Metrics> {
   const argv = measureCall(typst, root, family, themeDir)
-  const got = await processRun($, argv, { timeoutMs: 10000, env: noNetworkEnv(cache) }).catch(() => null)
+  const env = noNetworkEnv(cache)
+  const [got, listed] = await Promise.all([
+    processRun($, argv, { timeoutMs: 10000, env }).catch(() => null),
+    family ? processRun($, [typst, 'fonts', '--variants'], { timeoutMs: 10000, env }).catch(() => null) : null,
+  ])
   try {
     const m = JSON.parse(got?.stdout ?? '') as Metrics
     const ok = (x: FontMetrics | null | undefined) => !!x && x.adv > 0 && x.xh > 0 && x.avg > 0
     const fonts = leanFontsOf(m.fonts)
-    if (ok(m.menlo) && ok(m.body)) return { term: ok(m.term) ? m.term : null, menlo: m.menlo, body: m.body, grid: gridOf(m.grid) ?? DEFAULT_GRID, ...(fonts ? { fonts } : {}) }
+    const bold = listed?.exitCode === 0 ? hasBoldFace(listed.stdout, family) : null
+    if (ok(m.menlo) && ok(m.body)) {
+      return { term: ok(m.term) ? m.term : null, menlo: m.menlo, body: m.body, grid: gridOf(m.grid) ?? DEFAULT_GRID, ...(fonts ? { fonts } : {}), ...(bold === null ? {} : { termBold: bold }) }
+    }
   } catch {}
   return DEFAULT_METRICS
 }
@@ -322,6 +332,7 @@ export function typstInputs(job: Job, segments: readonly string[], dir: string, 
     ...(job.grid ? { grid: 1 } : {}),
     code: fit.code,
     ...(job.env.termFont ? { 'term-font': job.env.termFont } : {}),
+    ...(fauxBoldOf(job.env.metrics) ? { 'term-bold': 0 } : {}),
     'theme-dir': job.themeDir,
     doc: `${dir}/doc.json`,
     ...roomInputs(job.room),

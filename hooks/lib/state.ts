@@ -41,8 +41,11 @@ export type LeanFonts = { body: string[]; code: string[]; plain: boolean }
 // `term` the terminal's font (null when unknown or not installed), `menlo`
 // the template's code font, `body` its text font, `grid` the row grid's
 // numbers (DEFAULT_GRID when not given), `fonts` the theme's font lists
-// (none: no lean font set).
-export type Metrics = { term: FontMetrics | null; menlo: FontMetrics; body: FontMetrics; grid?: GridMetrics; fonts?: LeanFonts }
+// (none: no lean font set), `termBold` whether Typst has a bold face of the
+// terminal's font (none: not known).
+export type Metrics = { term: FontMetrics | null; menlo: FontMetrics; body: FontMetrics; grid?: GridMetrics; fonts?: LeanFonts; termBold?: boolean }
+// The terminal's font is known and has no bold face: md.typ draws a fake bold (term-bold=0).
+export const fauxBoldOf = (m: Metrics) => !!m.term && m.termBold === false
 // Measured with Typst on macOS: Menlo and SF Pro Text.
 export const DEFAULT_METRICS: Metrics = {
   term: null,
@@ -173,9 +176,11 @@ export const S = {
   // iTerm2 (isItermIn) and cmux (Ghostty inside, with its CMUX_* variables), set in setUp.
   isIterm: false,
   isCmux: false,
-  // A font folder for Typst (TYPST_FONT_PATHS): the fonts Ghostty carries in
-  // its program, when it draws them (no font-family set). '' for none.
+  // A font folder for Typst (TYPST_FONT_PATHS): the font a terminal carries
+  // in its program (Ghostty's, Rio's), when it draws it. '' for none.
   fontPaths: '',
+  // The user's own TYPST_FONT_PATHS (set in setUp); fontPaths goes after it.
+  userFontPaths: '',
   // Over ssh (set in setUp): the terminal's config and the OS appearance here
   // are the remote computer's, not those of the user's screen.
   isRemote: false,

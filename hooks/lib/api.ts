@@ -16,7 +16,7 @@ export type EnvName =
   | 'GHOSTTY_RESOURCES_DIR' | 'HOME'
   | 'ITERM_PROFILE' | 'ITERM_SESSION_ID' | 'IUI_DEBUG' | 'IUI_FORCE' | 'KITTY_CONFIG_DIRECTORY' | 'KITTY_PID'
   | 'KITTY_WINDOW_ID' | 'LC_TERMINAL' | 'RIO_CONFIG_HOME' | 'SHELL' | 'SSH_CONNECTION' | 'SSH_TTY' | 'STY'
-  | 'TERM' | 'TERM_PROGRAM' | 'TMUX' | 'WAYLAND_DISPLAY' | 'XDG_CONFIG_HOME' | 'XDG_CURRENT_DESKTOP' | 'ZDOTDIR'
+  | 'TERM' | 'TERM_PROGRAM' | 'TMUX' | 'TYPST_FONT_PATHS' | 'WAYLAND_DISPLAY' | 'XDG_CONFIG_HOME' | 'XDG_CURRENT_DESKTOP' | 'ZDOTDIR'
 
 export function clockAfter($: EngineInterface, ms: number, fn: () => void) {
   return $.clock.after(ms, fn)
@@ -73,6 +73,7 @@ export function envGet($: EngineInterface, name: EnvName): Promise<string | unde
     case 'TERM': return $.env.get('TERM')
     case 'TERM_PROGRAM': return $.env.get('TERM_PROGRAM')
     case 'TMUX': return $.env.get('TMUX')
+    case 'TYPST_FONT_PATHS': return $.env.get('TYPST_FONT_PATHS')
     case 'WAYLAND_DISPLAY': return $.env.get('WAYLAND_DISPLAY')
     case 'XDG_CONFIG_HOME': return $.env.get('XDG_CONFIG_HOME')
     case 'XDG_CURRENT_DESKTOP': return $.env.get('XDG_CURRENT_DESKTOP')

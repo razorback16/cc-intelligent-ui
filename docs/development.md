@@ -11,6 +11,8 @@ claude --plugin-dir .          # once: Claude Code writes the API types to .clau
 npx -p typescript tsc -p .     # type check
 claude plugin test .           # tests
 sh tests/cache-sh-test.sh      # the cache folder sweep (CACHE_SH) in sh, dash and bash --posix
+sh tests/fonts-sh-test.sh      # the copy of a font out of a terminal's program (PROGRAM_FONTS_SH and _PL) with perl
+sh tests/bold-sh-test.sh       # the fake bold of md.typ (term-bold=0) with the real Typst and Monaco (skips with no Monaco)
 claude plugin validate .
 ```
 

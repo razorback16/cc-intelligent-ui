@@ -37,8 +37,14 @@ test('the plan of an ExitPlanMode result: a non-empty one of the main loop only'
   expect(planOf(undefined)).toBe(null)
 })
 
-test('the plan a row shows: the edited text, else the result, else the call', () => {
-  expect(planShownOf('# Edited', { plan: '# Done', isAgent: false }, { plan: '# Asked' })).toBe('# Edited')
+test('the plan a row shows: the result, else the edited text, else the call', () => {
+  // The result is the approved text: an edit in the engine's dialog wins over the text read at the call.
+  expect(planShownOf('# Edited', { plan: '# Done', isAgent: false }, { plan: '# Asked' })).toBe('# Done')
+  expect(planShownOf('# Edited', undefined, { plan: '# Asked' })).toBe('# Edited')
+  expect(planShownOf('# Edited', { plan: '', isAgent: false }, { plan: '# Asked' })).toBe('# Edited')
+  // A subagent's or a teammate's plan: never drawn, also with a text kept for its call.
+  expect(planShownOf('# Edited', { plan: '# Done', isAgent: true }, { plan: '# Asked' })).toBe('')
+  expect(planShownOf('# Edited', { plan: '# Done', isAgent: false, awaitingLeaderApproval: true }, { plan: '# Asked' })).toBe('')
   expect(planShownOf(undefined, { plan: '# Done', isAgent: false }, { plan: '# Asked' })).toBe('# Done')
   expect(planShownOf(undefined, undefined, { plan: '# Asked' })).toBe('# Asked')
   expect(planShownOf(undefined, { plan: '# Done', isAgent: true }, { plan: '# Asked' })).toBe('')
@@ -426,6 +432,42 @@ test('a plan written in the same message waits for the write, then the new text 
   expect(w.decisions).toMatchObject([{ behavior: 'allow', updatedInput: { plan: EDITED, planFilePath: FILE } }])
   expect(got.result.plan).toBe(EDITED)
   await $.ui.mount(use())
+  await w.clock.settle()
+  expect(w.compiled).toEqual([EDITED])
+})
+
+test("an Edit in the same message: the row draws the file, not the message's older copy", async ($, on) => {
+  const w = world($, on, { answers: [PLAN_AUTO] })
+  await ready($)
+  // The Edit has run; the engine reads the file again for the call, but the row keeps the streamed input.
+  w.files.set(FILE, EDITED)
+  const got: any = await exitPlan($, { plan: EDITED })
+  expect(w.decisions).toMatchObject([{ behavior: 'allow', updatedInput: { plan: EDITED } }])
+  expect(got.result.plan).toBe(EDITED)
+  await $.ui.mount(use({ input: { plan: PLAN, planFilePath: FILE } }))
+  await w.clock.settle()
+  expect(w.compiled).toEqual([EDITED])
+})
+
+test("a teammate's or a subagent's result draws no plan, also after a call kept its text", async ($, on) => {
+  const w = world($, on, { answers: [PLAN_AUTO, PLAN_AUTO] })
+  await ready($)
+  await exitPlan($, { tool_use_id: 'tu-a' })
+  await exitPlan($, { tool_use_id: 'tu-b' })
+  const rows = [
+    use({ id: 'tu-a', output: { plan: PLAN, isAgent: false, awaitingLeaderApproval: true }, isRunning: false }),
+    use({ id: 'tu-b', output: { plan: PLAN, isAgent: true }, isRunning: false }),
+  ]
+  for (const row of rows) expect(await (await $.ui.mount(row)).drawn()).toMatchObject(ENGINE)
+  await w.clock.settle()
+  expect(w.compiled).toEqual([])
+})
+
+test("the result's plan wins over the text read at the call (an edit in the engine's dialog)", async ($, on) => {
+  const w = world($, on, { answers: [PLAN_AUTO] })
+  await ready($)
+  await exitPlan($)
+  await $.ui.mount(use({ output: { plan: EDITED, isAgent: false, filePath: FILE }, isRunning: false }))
   await w.clock.settle()
   expect(w.compiled).toEqual([EDITED])
 })

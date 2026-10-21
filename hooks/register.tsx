@@ -24,7 +24,7 @@ import {
   DEFAULT_THEME, gridText, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_WIDTH, MIN_HEIGHT, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
   SELECT_SINCE, selectText, typstHintOf, widthText,
 } from './lib/settings'
-import { clip, drawnAnswers, editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env, type Job } from './lib/state'
+import { clip, DEFAULT_METRICS, drawnAnswers, editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env, type Job } from './lib/state'
 import { beginEpoch } from './lib/epoch'
 import { escapeControls, luminanceOf, modeLine, modeOfLuminance, parseOsc11, settingOf } from './lib/mode'
 import { applyTheme, themeListing, userThemesOf } from './lib/themes'
@@ -80,7 +80,7 @@ export {
 } from './lib/themes'
 export { commandSuggestions, parseCommand, type Command, type Suggestion } from './lib/command'
 export { hasSetup, SETUP_END, SETUP_NOT_MAC, SETUP_START, setupBlock, shellRcOf, withoutSetup, withSetup, type ShellRc } from './lib/setup'
-export { OSC11_PL, perlFor, WATCH_PL } from './lib/host'
+export { fcPatternOf, OSC11_PL, perlFor, PROGRAM_FONTS_PL, PROGRAM_FONTS_SH, WATCH_PL } from './lib/host'
 export {
   convertCall, isSafePage, measureCall, noNetworkEnv, pageRowsOf, parseOd, pngSize, probeCall, resultOf, roomInputs, shouldRetrySafe, typstCall, typstInputs,
 } from './lib/typst'
@@ -736,7 +736,11 @@ export const register: Register = on => {
     const bad = asked.kind === 'bad' ? `Not understood: "${e.args.trim()}".\n` : ''
     const theme = S.look?.name ?? DEFAULT_THEME
     if (asked.kind === 'details') {
-      const font = ready.termFont ? `terminal font ${ready.termFont}` : `terminal font not known (${ready.isMac ? 'Menlo' : "the theme's code font"} assumed)`
+      // A measure with no term metrics: Typst does not have the font (it would fall back).
+      const missing = !!ready.typst && ready.metrics !== DEFAULT_METRICS && !ready.metrics.term
+      const font = !ready.termFont
+        ? `terminal font not known (${ready.isMac ? 'Menlo' : "the theme's code font"} assumed)`
+        : `terminal font ${ready.termFont}${missing ? " (Typst does not have this font, so the pictures use the theme's fonts)" : ''}`
       const typst = ready.typst ? `Typst: ${ready.typst}` : `Typst: not found (${typstHintOf(ready.isMac)})`
       const terminal = S.cacheProblem
         ? `Intelligent UI draws no pictures: ${S.cacheProblem} (it never uses a shared folder instead)`
@@ -989,9 +993,10 @@ export const register: Register = on => {
     const row = await next(e)
     if (e.surface !== 'terminal' || e.props.isErrored || e.props.isInterrupted || subagentPlans.has(e.props.tool_use_id)) return row
     try {
-      const plan = planShownOf(editedPlans.get(e.props.tool_use_id), e.props.output, e.props.input)
-      const ready = plan ? await answerEnv($, e) : null
-      if (!ready) return row
+      // `done` first: a plan set (and refreshed) after this read draws the row again.
+      const ready = await answerEnv($, e)
+      const plan = ready ? planShownOf(editedPlans.get(e.props.tool_use_id), e.props.output, e.props.input) : ''
+      if (!ready || !plan) return row
       const { drawing, links } = await planDrawing($, e, e.props.tool_use_id, plan, ready)
       // Its pages can be copied as an answer's, by the call's id (the row's
       // requestId can be an answer's own). The engine's row is above them:
@@ -1078,10 +1083,9 @@ export const register: Register = on => {
         const id = e.tool_use_id
         const file = planFileOf(e)
         const plan = await currentPlan($, file, callPlan)
-        if (plan !== callPlan) {
-          editedPlans.set(id, plan)
-          refresh($)
-        }
+        // Always: the row's input is the message's copy, read before an Edit in the same message.
+        editedPlans.set(id, plan)
+        refresh($)
         const outcome = await decidePlan($, {
           plan, callPlan, file, isMac: ready.isMac, isRemote: S.isRemote,
           onEdited: text => {
