@@ -22,7 +22,7 @@ import { convertCall, logDebug, parseOd, pngSize } from './typst'
 import { pagesOf, type Drawing } from './answer'
 import { HEADERS_SH } from './host'
 import { frameFor, pictureColumns, shownFor, type Frame } from './frame'
-import { clockAfter, fsExists, fsList, fsRead, fsStat, fsWrite, processRun, sessionId, sessionRoot, uiClose, uiInvalidate, uiOpen, uiResolve } from './api'
+import { clockAfter, fsExists, fsList, fsRead, fsStat, fsWrite, processRun, sessionId, sessionRoot, uiClose, invalidate, uiOpen, uiResolve } from './api'
 
 export type Picture = { file: string; stamp: string; bytes: number; width: number; height: number }
 export type Shown = { source: ImageSource; columns: number; rows: number; alt: string }
@@ -408,7 +408,7 @@ async function askPage($: EngineInterface, line: PageLine) {
   pageAsk.now = { row: line.row, file: line.file, box: line.box, value: String(line.page), note: '' }
   await uiOpen($, { id: PAGE_PANE, title: 'Page', focus: true, closeOnEscape: true, rows: 2, columns: 24 }).catch(() => undefined)
   // An open field (another row's) draws the new page.
-  uiInvalidate($, 'ui.render')
+  invalidate($, 'ui.render')
 }
 
 // Enter in the page field: a page that exists shows in its row and the
@@ -426,7 +426,7 @@ async function submitPage($: EngineInterface, text: string) {
   if (!page || made !== true) {
     const note = !page ? 'Type a page number' : made === false ? `No page ${page}` : `Page ${page}: ${made ?? 'Typst could not make it'}`
     pageAsk.now = { ...mine, note }
-    uiInvalidate($, 'ui.render')
+    invalidate($, 'ui.render')
     return
   }
   keep(pdfPages, ask.row, page, PICTURES_KEPT)
@@ -532,7 +532,7 @@ export function underRow($: EngineInterface, e: RowInput, row: RenderElement, un
           if (drawing.kind === 'blank') return <Box key={`blank-${i}`} />
           return (
             <Box key={`pages-${i}`} flexDirection="column">
-              {drawPages($, e, drawing.result, drawing.bytes, { gutter: 0, marginTop: 0, keys: `file${i}-`, links: s.links })}
+              {drawPages($, e, drawing.result, drawing.bytes, { gutter: 0, marginTop: 0, keys: `file${i}-`, links: s.links, id: s.id })}
             </Box>
           )
         })}

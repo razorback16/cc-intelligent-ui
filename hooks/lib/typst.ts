@@ -12,7 +12,7 @@ import { HEADERS_SH } from './host'
 import { logDebug } from './log'
 import { positionsOf, type Mark, type Positions } from './copy'
 import { leanFontsFor } from './fonts'
-import { clockAfter, envGet, fsExists, fsList, fsRead, fsWrite, processRun, processSpawn } from './api'
+import { clockAfter, envGet, fsExists, fsList, fsRead, fsWrite, processRun, spawn } from './api'
 
 // The typst command and its environment. Network off (see NO_NETWORK) and a
 // package cache of our own, so only the vendored packages load, and the
@@ -263,7 +263,7 @@ export async function runKillable(
   const timer = clockAfter($, o.timeoutMs, () => stop('timeout'))
   let code: number | null = 1
   try {
-    const child = processSpawn($, { argv: wrapPid(argv), ...(o.env ? { env: o.env } : {}) })
+    const child = spawn($, { argv: wrapPid(argv), ...(o.env ? { env: o.env } : {}) })
     for (;;) {
       const got = await child.next()
       if (got.done) {

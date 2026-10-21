@@ -38,7 +38,8 @@ You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15, and macO
 | ssh | Yes, from kitty or Ghostty | Refer to [Install](docs/install.md#terminals) |
 | tmux, screen | No | — |
 | Warp | Not yet | Support comes when [warpdotdev/warp#16312](https://github.com/warpdotdev/warp/pull/16312) is merged |
-| WezTerm, Konsole, Terminal.app, Alacritty, VS Code, Windows Terminal, GNOME Terminal, others | No | — |
+| WezTerm | Not yet | Support comes when [wezterm/wezterm#7924](https://github.com/wezterm/wezterm/pull/7924) is merged |
+| Konsole, Terminal.app, Alacritty, VS Code, Windows Terminal, GNOME Terminal, others | No | — |
 
 In other terminals, the mod shows the normal text. Refer to [Install](docs/install.md#terminals) for all the details, and run `/iui details` to see why pictures do or do not show.
 
@@ -87,6 +88,7 @@ More in the [gallery](docs/gallery.md): plots, fractals and a tour of all the Ma
 | `/iui theme <name>` | Changes the theme: `claude-code`, `vscode-modern`, `vscode` or your own |
 | `/iui size <80–200>` | Text size in percent of your terminal text |
 | `/iui grid on` / `off` | Puts each line of text on the terminal rows, so that a mouse selection covers the text (on by default) |
+| `/iui select on` / `off` | Claude Code 2.1.305+, fullscreen: the mod selects and copies picture text with the mouse (on by default) |
 | `/iui updates on` / `off` | Turns the daily check for a new version on or off (on by default) |
 | `/iui details` | Shows the terminal, font, mode and Typst that the mod found |
 | `/iui setup` | iTerm2 (macOS): adds the shell line that turns pictures on |
@@ -94,6 +96,10 @@ More in the [gallery](docs/gallery.md): plots, fractals and a tour of all the Ma
 | `/iui dump` | Shows how the mod read the last clipboard with picture cells (for a bug report) |
 
 All commands are in [Usage](docs/usage.md).
+
+## Clipboard shims
+
+For the automatic copy, the clipboard must get the text of a copy in place of its picture cells. At the start (not over ssh, not in a background session, and only in a terminal that shows the pictures), the mod writes small `sh` scripts (shims) for the clipboard tools that Claude Code uses and that are installed: `pbcopy` on macOS, and `wl-copy`, `xclip` and `xsel` on Linux. It puts them in a folder of this Claude Code process, `shims-<pid>/`, in its cache folder (`${TMPDIR}/cc-intelligent-ui-<uid>/`), and puts this folder first on the `PATH` of the process. It also makes the folder `ask/` and a FIFO (a named pipe) `ask-<pid>` in the cache folder, and sets `IUI_COPY_ASK` to the FIFO. Before that, a setup script (`hooks/clip-shim-setup.sh`) makes sure that these folders are yours, are not links, and only you can write to them. If not, the mod makes no shims and does not change `PATH`. A shim runs the real tool with the same arguments and the same exit status. A shim asks only when Claude Code itself starts it (the shim is a direct child of the process of the FIFO) and Claude Code writes text (not an image) to the clipboard. Then `perl` keeps the text in memory. If the text has picture cells and is 4 MiB or less, the shim writes it to a request file in `ask/` (mode 600) and writes the name of the file to the FIFO. The mod of this session reads the name, finds the text under the cells, and writes it to an answer file. The shim gives this text to the real tool. If no answer comes in 1.5 s, or the mod does not run, the shim gives the cells as they are. Then it deletes the files. The shim writes no other text to disk. Nothing leaves the computer. Refer to [How it works](docs/how-it-works.md).
 
 ## Docs
 

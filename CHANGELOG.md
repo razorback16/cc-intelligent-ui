@@ -2,6 +2,18 @@
 
 All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Code finds a new version by the `version` in `.claude-plugin/plugin.json`. To get it, refer to [Update](docs/install.md#update).
 
+## Unreleased
+
+### New
+
+- **Picture select.** Since Claude Code 2.1.305, the mouse selection of Claude Code skips pictures: no highlight and no text. In fullscreen mode, the mod now selects the text of a picture itself. Drag over the picture: the selected rows show on a blue background, and when you release the button, the mod copies their text and shows the toast "copied N chars of text". A click with no drag removes the selection. This needs Claude Code 2.1.305 or newer. `/iui select off` turns it off. Refer to [Copy text from a picture](docs/usage.md#copy-text-from-a-picture).
+
+### Changed
+
+- **The automatic copy asks its own session.** The mod puts small shims of Claude Code's clipboard tools (`pbcopy`; `wl-copy`, `xclip`, `xsel`) first on the `PATH` of the Claude Code process, in a folder of that process only. When Claude Code copies picture cells, the shim asks the mod of its session for their text through a private FIFO, and the real tool gets that text. The shim waits 1.5 s at most; then it uses the cells, and a toast names `/iui grab`. The mod never writes the clipboard for a copy that it did not answer. Thus a copy of a different session is never changed, also when it has the same cells. Before, the mod read the clipboard after the copy and used the mouse selection: a session with an old selection of the same cells changed the copy of a different session. Refer to [Clipboard shims](README.md#clipboard-shims).
+- A copy of picture cells that is not from this session gets the `/iui grab` toast, also in fullscreen mode.
+- `/iui details` says why the automatic copy is off when the shims cannot work (ssh, a background session, a terminal with no pictures, no `perl`, or Linux with no `wl-copy`, `xclip` or `xsel`).
+
 ## 0.3.0 (2026-10-20)
 
 ### New

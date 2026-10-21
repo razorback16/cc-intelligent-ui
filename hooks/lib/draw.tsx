@@ -11,6 +11,8 @@ import { DEFAULT_GRID, gridFirstRow, type GridMetrics } from './grid'
 import { FENCE, imagePathOf } from './markdown'
 import { linksOf, type LinkItem } from './links'
 import { fitBox, fitsInline, roomColumns } from './terminal'
+import { overlayRows, picked, redrawSelection, selectColor, selectedRows, selectOn, stripFile, stripPlan, type SelRow } from './select'
+import { cutStrips, hasStrips } from './strips'
 import { fsExists, fsRead, uiCopy, uiResolve, uiToast } from './api'
 
 // FNV-1a over the parts, twice with different offsets: 16 hex digits.
@@ -178,8 +180,9 @@ export async function inlineOf($: EngineInterface, result: Result): Promise<stri
 // How a set of pages sits: `bullet` the reply bullet in the gutter (on the
 // first line's row), `gutter` its width (0: none), `marginTop` the rows above,
 // `keys` a prefix for its Images' and Buttons' keys (several sets in one
-// tree), `links` the link rows under the pages (one row each).
-export type PagesLayout = { bullet?: boolean; gutter?: number; marginTop?: number; keys?: string; links?: readonly ShownLink[] }
+// tree), `links` the link rows under the pages (one row each), `id` the
+// drawing's id in drawnAnswers (its pages take picture select).
+export type PagesLayout = { bullet?: boolean; gutter?: number; marginTop?: number; keys?: string; links?: readonly ShownLink[]; id?: string }
 
 // The bullet's row when the page is drawn `factor` as wide.
 export function scaledBulletRow(bulletRow: number, factor: number): number {
@@ -194,11 +197,22 @@ export function scaledBulletRow(bulletRow: number, factor: number): number {
 export function drawPages(
   $: EngineInterface, e: ResolveInput<RenderComponent, 'terminal'> & { viewport?: RenderViewport }, result: Result, inline?: readonly string[], layout: PagesLayout = {},
 ) {
-  const { Box, Text, Image } = uiResolve($, e)
+  const table = uiResolve($, e)
+  const { Box, Text, Image } = table
+  // Absent in an engine with no Client element.
+  const Client: typeof table.Client | undefined = table.Client
   const gutter = layout.gutter ?? GUTTER
   const room = roomColumns(e.viewport)
   const first = result.pages[0]
   const factor = first && first.columns > room ? room / first.columns : 1
+  const keys = layout.keys ?? ''
+  const boxes = result.pages.map(page => fitBox(page, room))
+  // Picture select: each page in a Box of its size, the selected rows over
+  // it, and last the Client that takes the pointer (select.ts). Both in the
+  // flow, pulled up over the page (marginTop), never absolute (overlayRows).
+  const id = layout.id
+  const cell = id && !inline ? selectOn({ hasClient: !!Client, isFullscreen: e.viewport?.isFullscreen }) : null
+  const sel = id && cell && picked.now?.id === id ? selectedRows(picked.now, boxes) : null
   return (
     <Box flexDirection="row" marginTop={layout.marginTop ?? MARGIN_TOP}>
       {gutter > 0 ? (
@@ -208,23 +222,61 @@ export function drawPages(
       ) : null}
       <Box flexDirection="column" flexShrink={0}>
         {result.pages.map((page, i) => {
-          const box = fitBox(page, room)
+          const box = boxes[i]!
           const shrunk = box.columns !== page.columns
-          return (
+          const image = (
             <Image
-              key={`${layout.keys ?? ''}p${i}`}
+              key={`${keys}p${i}`}
               source={inline ? { png: inline[i]! } : { file: page.file, format: 'png', ...(shrunk ? { generation: box.columns * 1000 + box.rows } : {}) }}
               columns={box.columns}
               rows={box.rows}
               alt={page.alt}
             />
           )
+          const plan = cell ? stripPlan(page, box, cell) : null
+          if (!plan || !Client || !id) return image
+          return (
+            <Box key={`${keys}w${i}`} flexDirection="column" width={box.columns} height={box.rows} flexShrink={0}>
+              {image}
+              <Box key={`${keys}o${i}`} flexDirection="column" marginTop={-box.rows} width={box.columns} height={box.rows} flexShrink={0}>
+                {drawSelected($, e, page, { ...plan, columns: box.columns }, sel?.[i] ?? [], `${keys}${i}`)}
+              </Box>
+              <Box key={`${keys}c${i}`} marginTop={-box.rows} width={box.columns} height={box.rows} flexShrink={0}>
+                <Client key={`${keys}sel${i}`} module="../sel.tsx" width={box.columns} height={box.rows} props={{ id, page: i }} />
+              </Box>
+            </Box>
+          )
         })}
         {result.note ? <Text dimColor wrap="truncate-end">Typst error: {result.note}</Text> : null}
-        {layout.links?.length ? drawLinks($, e, layout.links, layout.keys ?? '') : null}
+        {layout.links?.length ? drawLinks($, e, layout.links, keys) : null}
       </Box>
     </Box>
   )
+}
+
+// The selected rows of a page ("clip, do not crop"): each row's strip (the
+// page's own row) in a Box of the selected columns on the selection colour,
+// shifted left so its cells stay over the page's. The page is transparent,
+// so the colour shows under its text. Each row in the flow (overlayRows).
+// Nothing while the strips are cut: they draw once there.
+function drawSelected(
+  $: EngineInterface, e: ResolveInput<RenderComponent, 'terminal'>, page: { file: string; width: number; height: number },
+  plan: { rowPx: number; rows: number; columns: number }, rows: readonly SelRow[], keys: string,
+) {
+  if (!rows.length || !S.env) return null
+  if (!hasStrips(page.file, plan.rowPx)) {
+    cutStrips($, S.env, page, plan, () => redrawSelection($))
+    return null
+  }
+  const { Box, Image } = uiResolve($, e)
+  const bg = selectColor(S.theme, picked.gen)
+  return overlayRows(rows).map(r => (
+    <Box key={`${keys}r${r.row}`} marginTop={r.top} marginLeft={r.x0} width={r.x1 - r.x0 + 1} height={1} flexShrink={0} overflow="hidden" backgroundColor={bg}>
+      <Box marginLeft={-r.x0} width={plan.columns} flexShrink={0}>
+        <Image key={`${keys}s${r.row}`} source={{ file: stripFile(page.file, plan.rows, r.row), format: 'png' }} columns={plan.columns} rows={1} alt=" " />
+      </Box>
+    </Box>
+  ))
 }
 
 // ---- Links ------------------------------------------------------------------

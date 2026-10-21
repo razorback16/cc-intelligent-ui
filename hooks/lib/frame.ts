@@ -16,7 +16,7 @@ import { columnsFor, isGhosttyHere, sizeOf } from './terminal'
 import { CELL_SH, perlFor, termFontOf, WATCH_PL } from './host'
 import { clipWatchArgs } from './clipboard'
 import { measureFonts } from './typst'
-import { clockAfter, processRun, processSpawn } from './api'
+import { clockAfter, processRun, spawn } from './api'
 
 export type { Cell, Frame } from './state'
 
@@ -253,7 +253,7 @@ export function watchFrame($: EngineInterface, clip?: ((count: number | null, fi
   watcher = me
   try {
     const isMac = S.hostOs === 'Darwin'
-    const child = processSpawn($, { argv: [perlFor(isMac), '-e', WATCH_PL, ...(isClip ? ['clip', ...(clipWatchArgs(isMac) ?? [])] : [])] })
+    const child = spawn($, { argv: [perlFor(isMac), '-e', WATCH_PL, ...(isClip ? ['clip', ...(clipWatchArgs(isMac) ?? [])] : [])] })
     void followWatcher(child, line => {
       if ('pid' in line) {
         pid = line.pid

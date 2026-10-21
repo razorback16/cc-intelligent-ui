@@ -15,7 +15,7 @@ import { S, writesLive } from './state'
 import { firstLine } from './markdown'
 import type { Drawing } from './answer'
 import { drawPages, type ShownLink } from './draw'
-import { clockAfter, commandRun, envGet, fsRead, processRun, promptSubmit, turnAbort, uiAsk, uiResolve } from './api'
+import { clockAfter, commandRun, envGet, fsRead, processRun, submit, turnAbort, uiAsk, uiResolve } from './api'
 
 // The question's chip and its two wordings.
 export const PLAN_HEADER = 'Plan'
@@ -269,7 +269,7 @@ export function scheduleClear($: EngineInterface, plan: string, turnId: string) 
   clockAfter($, CLEAR_DELAY_MS, async () => {
     if (turnId) await turnAbort($, { turnId }).catch(() => undefined)
     await commandRun($, { command: 'clear' }).catch(() => undefined)
-    await promptSubmit($, { text: `${PLAN_IMPLEMENT}\n\n${plan}`, asUser: true }).catch(() => undefined)
+    await submit($, { text: `${PLAN_IMPLEMENT}\n\n${plan}`, asUser: true }).catch(() => undefined)
   })
 }
 
@@ -279,15 +279,15 @@ type Terminal = ResolveInput<RenderComponent, 'terminal'> & { viewport?: RenderV
 
 // The ExitPlanMode ToolUse row: the engine's row, then the plan's pages and
 // their link rows (a dim line while they compile; the engine's row alone
-// when they fail).
-export function drawPlanUse($: EngineInterface, e: Terminal, row: RenderElement, drawing: Drawing, links: readonly ShownLink[] = []): RenderElement {
+// when they fail). `id`: the drawing's (picture select).
+export function drawPlanUse($: EngineInterface, e: Terminal, row: RenderElement, drawing: Drawing, links: readonly ShownLink[] = [], id?: string): RenderElement {
   if (drawing.kind === 'text') return row
   const { Box, Text } = uiResolve($, e)
   return (
     <Box flexDirection="column">
       {row}
       {drawing.kind === 'pages' ? (
-        drawPages($, e, drawing.result, drawing.bytes, { bullet: true, links })
+        drawPages($, e, drawing.result, drawing.bytes, { bullet: true, links, ...(id ? { id } : {}) })
       ) : (
         <Box marginTop={1} marginLeft={GUTTER}>
           <Text dimColor>{PLAN_DRAWING}</Text>

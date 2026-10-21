@@ -2,10 +2,11 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import {
   autoCopyText, clipToolsOf, clipWayOf, editorArgv, familyOfFc, FIND_SH, GHOSTTY_DEFAULT_FONT, GTK_READ_PY, GTK_WATCH_PY, guiEditorOf, LINUX_EDITORS,
-  placeholderCell, schemeOfPortal, SETUP_NOT_MAC, WATCH_PL, WL_WATCH_SH, X11_WATCH_SH, type ClipWay,
+  placeholderCell, schemeOfPortal, SETUP_NOT_MAC, WATCH_PL, WL_WATCH_SH, X11_WATCH_SH, type ClipWay, type ShimState,
 } from '../hooks/register'
 import { CACHE_SH } from '../hooks/lib/env'
-import { clipboardNow, clipWatchArgs, clipWayReady, findClipWay } from '../hooks/lib/clipboard'
+import { ANSWER_SH, ASK_END_SH, ASK_PL, clipboardNow, clipWatchArgs, clipWayReady, findClipWay, SHIM_SETUP } from '../hooks/lib/clipboard'
+import { ASKED_MS, HINT_WAIT_MS } from '../hooks/lib/settings'
 import { S } from '../hooks/lib/state'
 import { SMALL_MARKS, SMALL_MD } from './copy-fixture'
 
@@ -75,24 +76,35 @@ test('the GTK scripts: X11 events, a line at the start, a text read that fails w
   expect(GTK_READ_PY).toContain('if t is None: sys.exit(1)')
 })
 
-test('the automatic copy line: the macOS texts as they were, the Linux way or why it is off', () => {
-  const base = { isMac: true, hostOs: 'Darwin', isRemote: false, isOn: true, isFullscreen: true as boolean | null, none: false, drawn: true, running: true, way: null }
+test('the automatic copy line: the shims and the ask reader say on or off; the watcher only the /iui grab hint', () => {
+  const base = {
+    isMac: true, hostOs: 'Darwin', isRemote: false, isOn: true, isFullscreen: true as boolean | null, none: false, drawn: true, asking: true, way: null,
+    shims: { tools: ['pbcopy'] } as ShimState | null,
+  }
   expect(autoCopyText(base)).toBe('on')
   // Only fullscreen copies by itself: the main screen has /iui grab.
   expect(autoCopyText({ ...base, isFullscreen: false })).toBe('off on the main screen (use /iui grab)')
   expect(autoCopyText({ ...base, isFullscreen: false, isOn: false })).toBe('off (Intelligent UI is off)')
-  expect(autoCopyText({ ...base, isFullscreen: null })).toBe('off (fullscreen or main screen is not known yet)')
+  // The layout not known yet: the ask says whose copy it is, so it is on.
+  expect(autoCopyText({ ...base, isFullscreen: null })).toBe('on')
+  // The shims: not set up yet, or off with the reason.
+  expect(autoCopyText({ ...base, shims: null })).toBe('off (the clipboard shims are not set up yet)')
+  expect(autoCopyText({ ...base, shims: { off: 'no pbcopy' } })).toBe('off (no pbcopy)')
+  expect(autoCopyText({ ...base, shims: { off: 'no perl' } })).toBe('off (no perl)')
+  expect(autoCopyText({ ...base, shims: { off: 'no pbcopy' }, isRemote: true })).toBe('off (ssh)')
   expect(autoCopyText({ ...base, isFullscreen: null, drawn: false })).toBe('off (no picture yet)')
-  expect(autoCopyText({ ...base, none: true })).toBe('off (no PerlObjCBridge in /usr/bin/perl)')
+  expect(autoCopyText({ ...base, asking: false })).toBe('off (the ask reader does not run)')
+  expect(autoCopyText({ ...base, none: true })).toBe('on (no /iui grab hint: no PerlObjCBridge in /usr/bin/perl)')
   expect(autoCopyText({ ...base, isRemote: true })).toBe('off (ssh)')
-  expect(autoCopyText({ ...base, running: false })).toBe('off (the watcher does not run)')
   const wl = clipWayOf({ wayland: true, x11: false, desktop: 'sway', found: ALL })
   const linux = { ...base, isMac: false, hostOs: 'Linux', way: wl }
   expect(autoCopyText(linux)).toBe('on, with wl-paste --watch (Wayland)')
-  expect(autoCopyText({ ...linux, none: true })).toBe('off (wl-paste --watch (Wayland) stopped: the compositor may not have the data-control protocol)')
-  expect(autoCopyText({ ...linux, way: clipWayOf({ wayland: false, x11: true, desktop: '', found: ALL }), none: true })).toBe('off (clipnotify and xclip (X11) stopped)')
-  expect(autoCopyText({ ...linux, way: { off: 'no Wayland or X11 display' } })).toBe('off (no Wayland or X11 display)')
-  expect(autoCopyText({ ...linux, way: null })).toBe('off (the clipboard tools are not looked up yet)')
+  expect(autoCopyText({ ...linux, none: true })).toBe('on (no /iui grab hint: wl-paste --watch (Wayland) stopped: the compositor may not have the data-control protocol)')
+  expect(autoCopyText({ ...linux, way: clipWayOf({ wayland: false, x11: true, desktop: '', found: ALL }), none: true })).toBe('on (no /iui grab hint: clipnotify and xclip (X11) stopped)')
+  expect(autoCopyText({ ...linux, way: { off: 'no Wayland or X11 display' } })).toBe('on (no /iui grab hint: no Wayland or X11 display)')
+  expect(autoCopyText({ ...linux, way: null })).toBe('on')
+  const addon = { off: 'no wl-copy, xclip or xsel: Claude Code copies with its own addon' }
+  expect(autoCopyText({ ...linux, shims: addon })).toBe('off (no wl-copy, xclip or xsel: Claude Code copies with its own addon)')
   expect(autoCopyText({ ...linux, drawn: false })).toBe('off (no picture yet)')
   expect(autoCopyText({ ...linux, isFullscreen: false })).toBe('off on the main screen (use /iui grab)')
   expect(autoCopyText({ ...linux, hostOs: 'FreeBSD' })).toBe('off (not macOS or Linux)')
@@ -215,21 +227,54 @@ const cells = (row: number, from: number, to: number, lead = '  ') =>
 // A Linux computer in kitty on Wayland (sway): uname says Linux, the tools
 // are wl-paste only, the portal says `scheme`, kitty's config names no font
 // (fontconfig gives one), and the watcher is `perl` with the notifier after
-// `clip`. `copy` changes the clipboard: each clip child prints a line.
-function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Record<string, string>; noTypst?: boolean; jetbrains?: boolean } = {}) {
+// `clip`. The clipboard write tools found are `writers` (wl-copy by default),
+// with perl and the FIFO L_ASK; the ask reader is `perl` too. `copy` is
+// Claude Code's own copy: the OSC 52 write, then the shim, whose ask for
+// picture cells the reader gets and the mod answers (ANSWER_SH). `foreign`
+// is a copy with no ask (another session's, the terminal's): each changes
+// the clipboard, and each clip child prints a line.
+function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Record<string, string>; noTypst?: boolean; jetbrains?: boolean; writers?: string[] } = {}) {
   mock.store(on)
   const clock = mock.clock(on)
-  mock.env(on, o.env ?? { HOME: '/h', TERM: 'xterm-kitty', KITTY_WINDOW_ID: '1', WAYLAND_DISPLAY: 'wayland-1', XDG_CURRENT_DESKTOP: 'sway' })
+  const vars: Record<string, string | undefined> = {
+    PATH: '/usr/local/bin:/usr/bin', ...(o.env ?? { HOME: '/h', TERM: 'xterm-kitty', KITTY_WINDOW_ID: '1', WAYLAND_DISPLAY: 'wayland-1', XDG_CURRENT_DESKTOP: 'sway' }),
+  }
+  on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
+  on('env.set', async ($: any, e: any) => {
+    vars[e.name] = e.value
+    return { value: {} }
+  })
   const files = new Map<string, string>()
   const ran: string[][] = []
   const watchers: { argv: string[]; say: (line: string) => void; dead: boolean; n: number }[] = []
+  const readers: { argv: string[]; say: (line: string) => void; dead: boolean }[] = []
+  const waits = new Map<string, (text: string) => void>()
   const w = {
-    clock, files, ran, watchers, clipboard: 'old', reads: 0, copies: [] as string[], toasts: [] as string[],
+    clock, files, ran, watchers, readers, vars, clipboard: 'old', reads: 0, asks: 0, copies: [] as string[], toasts: [] as string[], ended: [] as string[][],
     selection: undefined as { text: string } | undefined,
     copy(text: string) {
-      w.clipboard = text
       // A mouse copy of picture cells in fullscreen is this session's selection.
       if (text.includes('\u{10EEEE}')) w.selection = { text }
+      w.foreign(text)
+      void w.shim(text)
+    },
+    async shim(text: string) {
+      let out = text
+      const reader = readers.find(c => !c.dead)
+      if (text.includes('\u{10EEEE}') && reader) {
+        const id = `77-${++w.asks}-1`
+        files.set(`/c/ask/${id}`, text)
+        const answered = new Promise<string | null>(r => waits.set(id, r))
+        reader.say(`ask ${id}`)
+        out = (await Promise.race([answered, clock.sleep(1500).then(() => null)])) ?? text
+        waits.delete(id)
+        files.delete(`/c/ask/${id}`)
+      }
+      if (out !== text) w.copies.push(out)
+      w.foreign(out)
+    },
+    foreign(text: string) {
+      w.clipboard = text
       for (const c of watchers) if (!c.dead && c.argv[3] === 'clip') c.say(`clip ${c.n++}`)
     },
   }
@@ -245,6 +290,19 @@ function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Rec
       // The notifier's first line, at its start.
       if (argv[3] === 'clip') me.say(`clip ${me.n++}`)
       watchers.push(me)
+      killers.set(pid, () => ((me.dead = true), wake()))
+      for (;;) {
+        while (lines.length && !me.dead) yield { stream: 'stdout', text: `${lines.shift()}\n` }
+        if (me.dead) return { value: { code: null, signal: 'SIGTERM' } }
+        await new Promise<void>(r => (wake = r))
+      }
+    }
+    if (argv[0] === 'perl' && argv[1] === '-e' && argv[2] === ASK_PL && argv[3] === L_ASK) {
+      const pid = String(pids++)
+      const lines = [`pid ${pid}`]
+      let wake = () => {}
+      const me = { argv, dead: false, say: (line: string) => (lines.push(line), wake()) }
+      readers.push(me)
       killers.set(pid, () => ((me.dead = true), wake()))
       for (;;) {
         while (lines.length && !me.dead) yield { stream: 'stdout', text: `${lines.shift()}\n` }
@@ -271,6 +329,23 @@ function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Rec
     if (/cc-intelligent-ui-/.test(cmd)) return ok('/c\nLinux\n/h/.cache/cc-intelligent-ui/designs\n')
     if (cmd.includes('command -v typst')) return o.noTypst ? ok('', 1) : ok('/usr/bin/typst\n')
     if (argv[0] === 'sh' && argv[2] === FIND_SH) return ok('wl-paste /usr/bin/wl-paste\n')
+    if (argv[0] === 'sh' && argv[1]?.endsWith(SHIM_SETUP) && argv[2] === 'find') {
+      return ok(`pid 77\n${(o.writers ?? ['wl-copy']).map(t => `${t} /usr/bin/${t}\n`).join('')}perl /usr/bin/perl\nask ${L_ASK}\n`)
+    }
+    if (argv[0] === 'sh' && argv[2] === ANSWER_SH) {
+      const to = waits.get(argv[4]!.slice('/c/ask/'.length))
+      if (!to) return ok('', 1)
+      to(e.init?.stdin ?? '')
+      return ok('')
+    }
+    if (argv[0] === 'sh' && argv[2] === ASK_END_SH) {
+      w.ended.push(argv.slice(4))
+      return ok('')
+    }
+    if (argv[0] === 'sh' && argv[1]?.endsWith(SHIM_SETUP) && argv[2] === 'install') {
+      for (const f of argv.slice(5)) files.set(f, files.get(`${f}${argv[4]}`) ?? '')
+      return ok('')
+    }
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
     if (cmd.includes('od -An')) return ok(argv.filter(a => a.endsWith('.png')).map(() => `${HEAD}\n@\n`).join(''))
     if (argv[0] === 'gdbus') return o.noPortal ? ok('', 1) : ok(`(<<uint32 ${o.scheme ?? 1}>>,)\n`)
@@ -288,7 +363,9 @@ function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Rec
     files.set(e.path, e.text)
     return { value: undefined }
   })
-  on('fs.read', async ($: any, e: any, next: any) => (files.has(e.path) ? { value: files.get(e.path) } : e.path.startsWith('/c/') || e.path.startsWith('/h/') ? { deny: 'ENOENT' } : next(e)))
+  on('fs.stat', async ($: any, e: any, next: any) =>
+    e.path.startsWith('/c/ask/') && files.has(e.path) ? { value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } } : next(e))
+  on('fs.read', async ($: any, e: any, next: any) => (e.path.endsWith('/hooks/clip-shim.sh') ? { value: 'tool=@TOOL@ real=@REAL@' } : files.has(e.path) ? { value: files.get(e.path) } : e.path.startsWith('/c/') || e.path.startsWith('/h/') ? { deny: 'ENOENT' } : next(e)))
   on('fs.exists', async ($: any, e: any, next: any) => (o.noTypst || e.path.startsWith('/h/') ? { value: false } : next(e)))
   on('fs.list', async ($: any, e: any, next: any) => {
     if (!e.path.startsWith('/c/')) return next(e)
@@ -306,8 +383,12 @@ function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Rec
     return { value: undefined }
   })
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine drawing'] }) as any)
+  on('session.end', async ($: any, e: any) => ({ sessionId: e.sessionId }))
   return w
 }
+
+// The FIFO of this process (pid 77).
+const L_ASK = '/c/ask-77'
 
 const message = (requestId: string, text: string, isFullscreen = true) =>
   ({
@@ -317,7 +398,7 @@ const message = (requestId: string, text: string, isFullscreen = true) =>
 
 const autoLine = async ($: any) => ((await $.command.run({ command: 'iui', args: 'details' } as any)).text ?? '').split('\n').find((l: string) => l.startsWith('Auto copy:'))
 
-test('Linux on Wayland: the watcher runs wl-paste --watch after clip, and a copy of picture cells is read with wl-paste and written as text', async ($, on) => {
+test('Linux on Wayland: the reader (perl) gets the asks of the wl-copy shim, and the watcher runs wl-paste --watch after clip for the hint', async ($, on) => {
   const w = linuxWorld(on)
   await $.command.run({ command: 'iui', args: '' } as any)
   expect(await autoLine($)).toBe('Auto copy: off (no picture yet)')
@@ -329,6 +410,7 @@ test('Linux on Wayland: the watcher runs wl-paste --watch after clip, and a copy
   await w.clock.settle()
   // The size watcher (perl from the PATH), then the one with the notifier.
   expect(w.watchers.map(c => c.argv.slice(3))).toEqual([[], ['clip', '/usr/bin/wl-paste', '--watch', 'sh', '-c', WL_WATCH_SH]])
+  expect(w.readers.map(c => c.argv[0])).toEqual(['perl'])
   expect(await autoLine($)).toBe('Auto copy: on, with wl-paste --watch (Wayland)')
   // The first line (the notifier's start) is not a change: no read.
   expect(w.reads).toBe(0)
@@ -340,8 +422,45 @@ test('Linux on Wayland: the watcher runs wl-paste --watch after clip, and a copy
   w.copy('plain text')
   await w.clock.settle()
   expect(w.copies.length).toBe(1)
+  // Another session's copy of picture cells (no ask here, none of them lately): never written, one hint after the wait.
+  await w.clock.advance(ASKED_MS)
+  w.foreign([cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n'))
+  await w.clock.advance(HINT_WAIT_MS)
+  expect(w.copies.length).toBe(1)
+  expect(w.toasts).toContain('Intelligent UI: picture cells copied; /iui grab puts their text on the clipboard')
   // pbpaste is never run on Linux.
   expect(w.ran.some(argv => argv[0] === 'pbpaste')).toBe(false)
+  // The wl-copy shim only (the tool found), its folder first on PATH.
+  expect([...w.files.keys()].filter(k => k.startsWith('/c/shims') && !k.includes('.new-'))).toEqual(['/c/shims-77/wl-copy'])
+  expect(w.vars.PATH).toBe('/c/shims-77:/usr/local/bin:/usr/bin')
+  expect(w.vars.IUI_COPY_ASK).toBe(L_ASK)
+  // The end of the session: the FIFO, the requests and the shims of pid 77 go.
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1' } as any)
+  await w.clock.settle()
+  expect(w.ended).toEqual([[L_ASK, '/c/ask', '77', '/c/shims-77']])
+  expect(w.readers.map(c => c.dead)).toEqual([true])
+})
+
+test('Linux with no wl-copy, xclip or xsel: Claude Code copies with its addon, so no shim, no automatic copy; the hint and /iui grab stay', async ($, on) => {
+  const w = linuxWorld(on, { writers: [] })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await $.ui.mount(message('ans-1', SMALL_MD))
+  await w.clock.settle()
+  await ui.redraw({ text: SMALL_MD, isFirstOfReply: true } as any)
+  await w.clock.settle()
+  await w.clock.advance(300)
+  await w.clock.settle()
+  expect(await autoLine($)).toBe('Auto copy: off (no wl-copy, xclip or xsel: Claude Code copies with its own addon)')
+  expect(w.vars.PATH).toBe('/usr/local/bin:/usr/bin')
+  expect(w.vars.IUI_COPY_ASK).toBeUndefined()
+  expect(w.readers).toEqual([])
+  w.copy([cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n'))
+  await w.clock.advance(HINT_WAIT_MS)
+  expect(w.copies).toEqual([])
+  expect(w.toasts).toContain('Intelligent UI: picture cells copied; /iui grab puts their text on the clipboard')
+  w.selection = undefined
+  const grabbed = await $.command.run({ command: 'iui', args: 'grab' } as any)
+  expect(grabbed.text).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read).')
 })
 
 test('Linux on Wayland, main screen: a copy of picture cells is not changed; /iui grab reads it with wl-paste and writes its text', async ($, on) => {
@@ -354,8 +473,8 @@ test('Linux on Wayland, main screen: a copy of picture cells is not changed; /iu
   await w.clock.advance(300)
   await w.clock.settle()
   expect(await autoLine($)).toBe('Auto copy: off on the main screen (use /iui grab)')
-  w.copy([cells(1, 0, 97, '● '), cells(2, 0, 97), cells(3, 0, 21)].join('\n'))
-  w.selection = undefined
+  // The terminal's own copy: no ask, the hint at once.
+  w.foreign([cells(1, 0, 97, '● '), cells(2, 0, 97), cells(3, 0, 21)].join('\n'))
   await w.clock.settle()
   expect(w.copies).toEqual([])
   expect(w.toasts).toContain('Intelligent UI: picture cells copied; /iui grab puts their text on the clipboard')

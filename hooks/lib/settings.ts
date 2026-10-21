@@ -83,6 +83,11 @@ export const HOST_CHECK_MS = 2000
 // many pages are kept in memory (a copy probes only the pages it reads).
 export const CLIP_WAKE_MS = 300
 export const PROBED_KEPT = 64
+// A copy of picture cells that the watcher sees waits this long for its shim's
+// ask (which waits 1.5 s at most) before the /iui grab hint; an ask keeps
+// its cells from the hint this long.
+export const HINT_WAIT_MS = 2000
+export const ASKED_MS = 5000
 // The base every theme merges over (its theme.json and syntax files).
 export const BASE_THEME = 'vscode'
 // The theme used when none is chosen, or when the chosen one is not usable.
@@ -113,6 +118,10 @@ export const heightText = (height: Height) =>
   : `${height} rows`
 // The grid setting as words.
 export const gridText = (grid: boolean) => (grid ? 'on (each line of text on whole terminal rows)' : 'off')
+// `/iui select`: picture select (select.ts), on by default; it takes effect
+// from the Claude Code version whose own selection skips pictures.
+export const SELECT_SINCE = '2.1.305'
+export const selectText = (on: boolean) => (on ? 'on (select and copy picture text with the mouse, fullscreen, Claude Code 2.1.305+)' : 'off')
 export const PICTURES_KEPT = 64
 // The file paths of the link rows under a picture: whether each one is a
 // file, kept for this many paths (the oldest go).

@@ -16,7 +16,8 @@
 - **Rio 0.5.27 or later (not tested):** set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` before you start Claude Code. Rio works on macOS and on Linux.
 - Do not put the variable in the `env` of `~/.claude/settings.json`. It then applies in every terminal, also where pictures cannot show.
 - **Warp (not yet):** Warp does not draw kitty pictures with Unicode placeholders yet. The pull request [warpdotdev/warp#16312](https://github.com/warpdotdev/warp/pull/16312) adds them. The mod will support Warp when that pull request is merged.
-- **Not supported:** WezTerm and Konsole do not draw kitty pictures with Unicode placeholders, so they show no pictures, also with the variable set. Alacritty, Terminal.app, Windows Terminal, GNOME Terminal (and other VTE terminals), foot, VS Code, Tabby, Hyper and JetBrains terminals have no kitty pictures.
+- **WezTerm (not yet):** WezTerm does not draw kitty pictures with Unicode placeholders yet, so it shows no pictures, also with the variable set. The pull request [wezterm/wezterm#7924](https://github.com/wezterm/wezterm/pull/7924) adds them. The mod will support WezTerm when that pull request is merged.
+- **Not supported:** Konsole does not draw kitty pictures with Unicode placeholders, so it shows no pictures, also with the variable set. Alacritty, Terminal.app, Windows Terminal, GNOME Terminal (and other VTE terminals), foot, VS Code, Tabby, Hyper and JetBrains terminals have no kitty pictures.
 - **tmux and screen:** no pictures. Claude Code does not send pictures through tmux or screen, also with the variable set. Set `IUI_FORCE=1` to try anyway.
 - **ssh:** pictures work when the terminal on your computer is kitty or Ghostty (`TERM` must come through ssh), or when you set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` on the remote computer. The mod sends each picture as data, because the terminal cannot read files on the remote computer. A page larger than 4096 pixels on a side or 2 MiB shows as text. An image of that size does not show.
 - Background sessions (agent view, forks, `claude attach`) cannot draw pictures.
@@ -54,15 +55,16 @@ The mod finds Typst on the `PATH` of your login shell. It also looks in `/usr/lo
 
 The mod works on Linux with X11 and with Wayland. It uses these tools. Most Linux systems have the first three.
 
-- **perl** (perl 5): reads the terminal size and its cell size, and watches for a change of the size.
+- **perl** (perl 5): reads the terminal size and its cell size, and watches for a change of the size. The clipboard shims and their reader also use it (for the automatic copy).
 - **fontconfig** (`fc-match`, `fc-list`): finds the terminal font when the terminal's config does not name one. kitty and most terminals use fontconfig's `monospace` font. Ghostty uses its own JetBrains Mono when its config names no font. If fontconfig does not have JetBrains Mono, the mod copies the font from the Ghostty program (refer to [How it works](how-it-works.md)).
 - **The light or dark mode of the desktop** (for the `auto` theme): the freedesktop portal (`org.freedesktop.appearance color-scheme`, through `gdbus` or `busctl`). GNOME, KDE Plasma and most desktops have the portal. If the portal does not answer, the mod reads GNOME's `color-scheme` (`gsettings`).
-- **The clipboard** (for the automatic copy in fullscreen mode and for `/iui grab` on the main screen, refer to [Copy text from a picture](usage.md#copy-text-from-a-picture)). The mod uses the first of these that it finds:
+- **The clipboard** (for the `/iui grab` toast and for `/iui grab` on the main screen, refer to [Copy text from a picture](usage.md#copy-text-from-a-picture)). The mod uses the first of these that it finds:
   1. **Wayland, not GNOME:** `wl-paste` from `wl-clipboard`. `wl-paste --watch` tells the mod about each clipboard change. It needs the data-control protocol of the compositor (KDE Plasma, Sway, Hyprland and other wlroots compositors have it).
   2. **X11, and GNOME on Wayland (through Xwayland):** `clipnotify` tells the mod about each clipboard change, and `xclip` or `xsel` reads the clipboard. If `clipnotify` is not installed, the mod uses GTK 3 from Python (`python3-gi`, which most GNOME desktops have) for both.
-  3. **GNOME on Wayland with no X11 tool:** `wl-paste`. GNOME does not have the data-control protocol, so `wl-paste --watch` stops, and the automatic copy is off.
+  3. **GNOME on Wayland with no X11 tool:** `wl-paste`. GNOME does not have the data-control protocol, so `wl-paste --watch` stops, and there is no `/iui grab` toast.
 
-  If none of these work, the automatic copy is off. `/iui grab` (with a selection, in fullscreen mode), Claude Code's `/copy` and the `ui.copy` hook still work. `/iui details` shows the tool in use, or why the automatic copy is off, on the line `Auto copy:`.
+  If none of these work, there is no `/iui grab` toast. The automatic copy, `/iui grab` (with a selection, in fullscreen mode), Claude Code's `/copy` and the `ui.copy` hook still work. `/iui details` shows the tool in use, or why there is no toast, on the line `Auto copy:`.
+- **The clipboard write tools** (for the automatic copy): `wl-copy` (from `wl-clipboard`), `xclip` or `xsel`. Claude Code copies with one of them. The mod puts a shim for each one that is installed first on the `PATH` (refer to [How it works](how-it-works.md)). The shims need `perl`. If none of these tools is installed, Claude Code copies with its own built-in code, and the automatic copy is off.
 - **"Edit the plan"** (refer to [Plan approval](usage.md#plan-approval)): VS Code (`code --wait`), else the first of VSCodium, Zed, Sublime Text, Kate, gedit and gvim that is on the `PATH`. These editors can wait until you close the file. If none is installed, the option does not show.
 - **The cache folder** is in `$TMPDIR`, else in `/tmp`.
 

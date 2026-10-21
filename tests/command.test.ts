@@ -17,7 +17,7 @@ test('the first word completes as a subcommand', () => {
   expect(at('/iui h').map(r => r.text)).toEqual(['height'])
   expect(at('/iui g').map(r => r.text)).toEqual(['grid', 'grab'])
   expect(at('/iui o').map(r => r.text)).toEqual(['on', 'off'])
-  expect(at('/iui S').map(r => r.text)).toEqual(['size', 'setup'])
+  expect(at('/iui S').map(r => r.text)).toEqual(['size', 'select', 'setup'])
   expect(at('/iui x')).toEqual([])
   expect(at('/iui t')[0]!.description).toBe('list the themes, or switch to one')
 })
@@ -68,9 +68,17 @@ test('a theme name or size completes after its word', () => {
   expect(at('/iui grid on extra')).toEqual([])
 })
 
+test('select completes its values; on is the default', () => {
+  expect(at('/iui select').map(r => r.text)).toEqual(['select on', 'select off'])
+  expect(at('/iui select').map(r => r.description)).toEqual(['in use', undefined])
+  const off = (text: string) => commandSuggestions(text, /\S+$/.exec(text)![0], text.lastIndexOf(' ') + 1, { ...o, select: false })
+  expect(off('/iui select o').map(r => r.description)).toEqual(['the default', 'in use'])
+  expect(at('/iui select of').map(r => r.label)).toEqual(['off'])
+})
+
 test('the command name itself offers the subcommands, as rows that hold it', () => {
   const rows = at('/iui')
-  expect(rows.map(r => r.label)).toEqual(['on', 'off', 'size', 'width', 'height', 'grid', 'updates', 'theme', 'setup', 'details', 'grab', 'dump'])
+  expect(rows.map(r => r.label)).toEqual(['on', 'off', 'size', 'width', 'height', 'grid', 'select', 'updates', 'theme', 'setup', 'details', 'grab', 'dump'])
   expect(rows.find(r => r.label === 'theme')!.text).toBe('/iui theme')
   expect(at('  /iui').map(r => r.text)).toContain('/iui grid')
   expect(at('tell me /iui')).toEqual([])
@@ -125,6 +133,11 @@ const parses: [string, object][] = [
   ['GRID Off', { kind: 'grid', grid: false }],
   ['grid yes', BAD],
   ['grid on off', BAD],
+  // select: on, off, or nothing to show it
+  ['select', { kind: 'select' }],
+  ['select off', { kind: 'select', on: false }],
+  ['SELECT On', { kind: 'select', on: true }],
+  ['select maybe', BAD],
   // theme: a name kept as typed
   ['theme', { kind: 'theme' }],
   ['THEME', { kind: 'theme' }],
@@ -174,7 +187,7 @@ test('a size row takes a % after the number, and marks the one in use and the te
 
 test('right after the command name and a space, every subcommand is offered by its bare name', () => {
   const rows = commandSuggestions('/iui ', '', 5, o)
-  expect(rows.map(r => r.text)).toEqual(['on', 'off', 'size', 'width', 'height', 'grid', 'updates', 'theme', 'setup', 'details', 'grab', 'dump'])
+  expect(rows.map(r => r.text)).toEqual(['on', 'off', 'size', 'width', 'height', 'grid', 'select', 'updates', 'theme', 'setup', 'details', 'grab', 'dump'])
   expect(rows.every(r => r.description)).toBe(true)
 })
 
@@ -265,11 +278,20 @@ test('width, height and grid with no value show the setting and keep nothing', a
   expect(store.get('width')).toBe(160)
 })
 
+test('select off is kept and named; select with no value shows it', async ($, on) => {
+  const { store } = world(on)
+  expect(await run($, 'select')).toContain('Picture select is on (')
+  expect(store.has('select')).toBe(false)
+  expect(await run($, 'select off')).toContain('Picture select is now off.')
+  expect(store.get('select')).toBe(false)
+  expect(await run($, 'details')).toContain('picture select off')
+})
+
 test('a word that is not a subcommand gets the not-understood line, then the state', async ($, on) => {
   world(on)
   const text = await run($, '  bigger please ')
   expect(text.startsWith('Not understood: "bigger please".\nIntelligent UI is on: theme ')).toBe(true)
-  expect(text).toContain('Change: /iui on | off | size | width | height | grid | updates | theme. More: /iui details')
+  expect(text).toContain('Change: /iui on | off | size | width | height | grid | select | updates | theme. More: /iui details')
 })
 
 test('the state tells when Typst is not found, and when the terminal shows no pictures', async ($, on) => {
