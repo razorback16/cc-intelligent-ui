@@ -2,7 +2,7 @@
 
 All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Code finds a new version by the `version` in `.claude-plugin/plugin.json`. To get it, refer to [Update](docs/install.md#update).
 
-## Unreleased
+## 0.3.1 (2026-10-21)
 
 ### New
 
@@ -25,6 +25,7 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 - cmux: a `font-family` in cmux's own config (`config.ghostty` in its Application Support folder) is read.
 - `/iui details` tells you when Typst does not have the terminal font.
 - **Bold text in a terminal font with no bold face** (for example, Monaco in iTerm2): the pictures draw a fake bold, as the terminal does. Before, bold text in that font was drawn regular, because Typst does not make a bold face. Text in other fonts does not change. Refer to [Limitations](docs/limitations.md).
+- Plan mode: when Claude changes the plan and asks for approval again in the same message, the picture shows the changed plan. Before, it showed the plan before the change.
 - Picture select: a push of the button on a page that had just gone off the screen no longer waits for ever (no highlight until a reload).
 - Picture select: two tall pages on the screen no longer make each other ready again and again (the page cache keeps the pages on the screen, and the page of the selection).
 - Picture select: a drawing drawn again with new page files (a stream, a resize, a theme or size change) no longer keeps its old pages in the queue.
