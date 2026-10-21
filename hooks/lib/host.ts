@@ -91,6 +91,8 @@ const FAMILY_JXA = 'function run(argv) { ObjC.import("AppKit"); var f = argv[0] 
 // Whether a family (argv[0]) is installed, as CoreText finds it by name:
 // yes or no; with argv[1] `mono`, `proportional` when no style of it is fixed-pitch.
 const HAS_FAMILY_JXA = 'function run(argv) { ObjC.import("AppKit"); var m = $.NSFontManager.sharedFontManager.availableMembersOfFontFamily(argv[0]); if (m.isNil()) return "no"; if (argv[1] !== "mono") return "yes"; for (var i = 0; i < m.count; i++) if (m.objectAtIndex(i).objectAtIndex(3).js & 0x400) return "yes"; return "proportional" }'
+// The installed family (`=Name`) whose name is argv[0] in any case, else `no`.
+const FAMILY_NOCASE_JXA = 'function run(argv) { ObjC.import("AppKit"); var a = $.NSFontManager.sharedFontManager.availableFontFamilies, w = argv[0].toLowerCase(); for (var i = 0; i < a.count; i++) { var f = a.objectAtIndex(i).js; if (f.toLowerCase() === w) return "=" + f } return "no" }'
 // iTerm2's appearance, the default profile's GUID and the profiles, split by "@" lines.
 const ITERM_MODE_SH = `defaults read com.googlecode.iterm2 TabStyleWithAutomaticOption 2>/dev/null; echo @; ${ITERM_DEFAULT_SH} 2>/dev/null; echo @; ${ITERM_BOOKMARKS_SH}`
 const GHOSTTY_SH = `"\${GHOSTTY_BIN_DIR:+\$GHOSTTY_BIN_DIR/}ghostty" +show-config`
@@ -105,13 +107,15 @@ const GHOSTTY_SH = `"\${GHOSTTY_BIN_DIR:+\$GHOSTTY_BIN_DIR/}ghostty" +show-confi
 // not read the program again); exit 1 for other failures. Made in a
 // temporary folder first, so a compile never sees half. Each new copy or
 // marker removes the tag's temporary folders of 1 day and its other folders
-// and markers of 7 days (an older build's).
+// and markers of 30 days (an older build's). The key has the scanner's
+// version and the family, so a change to either reads the program again.
+// A write that fails leaves no folder and no marker (exit 1).
 export const PROGRAM_FONTS_PL = [
   'use strict;',
   'my ($tag, $family, $f) = @ARGV; $f or exit 1;',
   'my @st = stat($f) or exit 1;',
   'my $base = ($ENV{XDG_CACHE_HOME} || "$ENV{HOME}/.cache") . "/cc-intelligent-ui/fonts";',
-  'my $key = unpack("%32C*", $f) . "-$st[7]-$st[9]";',
+  'my $key = "v2-" . unpack("%32C*", "$family/$f") . "-$st[7]-$st[9]";',
   'my $d = "$base/$tag-$key";',
   'if (-d $d) { utime(undef, undef, $d); print "$d\\n"; exit 0 }',
   'exit 3 if -e "$d.none";',
@@ -120,15 +124,16 @@ export const PROGRAM_FONTS_PL = [
   '  for my $e (readdir $dh) {',
   '    next unless index($e, "$tag-") == 0; my $p = "$base/$e";',
   '    next if $p eq $d || $p eq "$d.none"; my $age = -M $p; next unless defined $age;',
-  '    next unless $e =~ /\\.\\d+$/ ? $age > 1 : $age > 7;',
+  '    next unless $e =~ /\\.\\d+$/ ? $age > 1 : $age > 30;',
   '    if (-d $p) { system("rm", "-rf", $p) } else { unlink $p }',
   '  }',
   '}',
   'open(my $h, "<:raw", $f) or exit 1; my $b = do { local $/; <$h> }; close $h;',
   'my $want = "\\0" . join("\\0", split(//, $family));',
   'system("mkdir", "-p", $base) == 0 or exit 1;',
-  'my $t = "$d.$$"; mkdir($t) or exit 1;',
-  'my (%seen, $n);',
+  'my $t = "$d.$$"; system("rm", "-rf", $t); mkdir($t) or exit 1;',
+  'sub fail { system("rm", "-rf", $t); exit 1 }',
+  'my %seen; my $n = 0;',
   'while ($b =~ /\\x00\\x01\\x00\\x00/g) {',
   '  my $o = pos($b) - 4; my $k = unpack("n", substr($b, $o + 4, 2));',
   '  next if $k < 4 || $k > 40;',
@@ -141,8 +146,8 @@ export const PROGRAM_FONTS_PL = [
   '    $name = substr($b, $o + $off, $len) if $tt eq "name";',
   '  }',
   '  next if $bad || !$fvar || index($name, $want) < 0 || $seen{$end}++;',
-  '  open(my $w, ">:raw", "$t/$tag-" . ++$n . ".ttf") or next;',
-  '  print $w substr($b, $o, $end); close $w;',
+  '  open(my $w, ">:raw", "$t/$tag-" . ($n + 1) . ".ttf") or fail();',
+  '  (print $w substr($b, $o, $end)) && close($w) or fail(); $n++;',
   '}',
   'if (!$n) { rmdir $t; if (open(my $m, ">", "$d.none")) { close $m } sweep(); exit 3 }',
   'rename($t, $d) or system("rm", "-rf", $t);',
@@ -226,23 +231,26 @@ async function macFamily($: EngineInterface, family: string, mono = false): Prom
   return got?.exitCode === 0 ? firstLine(got.stdout) : ''
 }
 
-// Whether a family is installed: CoreText on macOS, fontconfig on Linux
-// (`exact`: the name as is, as Rio's font database matches it; else in
-// any case and spacing). Null when that can't be read (then the family is
-// taken as is).
-async function hasFamily($: EngineInterface, isMac: boolean, family: string, exact = false): Promise<boolean | null> {
+// The installed family of a name, as Typst must name it: CoreText on
+// macOS, fontconfig on Linux (in any case and spacing; `exact`: in any
+// case only, as Rio's font database matches it). '' when it is not
+// installed; null when that can't be read (then the name is taken as is).
+async function installedFamily($: EngineInterface, isMac: boolean, family: string, exact = false): Promise<string | null> {
+  if (isMac && exact) {
+    const got = await processRun($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_NOCASE_JXA, family], { timeoutMs: 5000 }).catch(() => null)
+    const line = got?.exitCode === 0 ? firstLine(got.stdout) : ''
+    return line.startsWith('=') ? line.slice(1) : line === 'no' ? '' : null
+  }
   if (isMac) {
     const seen = await macFamily($, family)
-    return seen ? seen === 'yes' : null
+    return seen === 'yes' ? family : seen === 'no' ? '' : null
   }
-  if (exact) {
-    const got = await processRun($, ['fc-list', ':', 'family'], { timeoutMs: 5000 }).catch(() => null)
-    if (got?.exitCode !== 0) return null
-    // Each line is a family's names, split by commas, with `\` escapes.
-    return got.stdout.split('\n').some(line => line.split(/(?<!\\),/).some(name => name.replace(/\\(.)/g, '$1').trim() === family))
-  }
-  const got = await processRun($, ['fc-list', '-q', fcPatternOf(family)], { timeoutMs: 5000 }).catch(() => null)
-  return got?.exitCode === 0 ? true : got?.exitCode === 1 ? false : null
+  const got = await processRun($, ['fc-list', exact ? ':' : fcPatternOf(family), 'family'], { timeoutMs: 5000 }).catch(() => null)
+  if (got?.exitCode !== 0) return null
+  // Each line is a font's family names, split by commas, with `\` escapes.
+  const names = got.stdout.split('\n').flatMap(line => line.split(/(?<!\\),/).map(name => name.replace(/\\(.)/g, '$1').trim())).filter(Boolean)
+  const loose = (n: string) => (exact ? n : n.replace(/\s/g, '')).toLowerCase()
+  return names.find(n => loose(n) === loose(family)) ?? (exact ? '' : names[0] ?? '')
 }
 
 // Copies the font a terminal carries in its program (PROGRAM_FONTS_PL) and
@@ -251,8 +259,10 @@ async function hasFamily($: EngineInterface, isMac: boolean, family: string, exa
 async function programFont($: EngineInterface, isMac: boolean, o: { tag: string; family: string; name: string; paths: readonly string[] }): Promise<'copied' | 'none' | 'failed'> {
   const argv = ['sh', '-c', PROGRAM_FONTS_SH, 'sh', perlFor(isMac), PROGRAM_FONTS_PL, o.tag, o.family, o.name, ...o.paths]
   const made = await processRun($, argv, { timeoutMs: 10000 }).catch(() => null)
-  if (made?.exitCode === 3) return 'none'
   const dir = made?.exitCode === 0 ? firstLine(made.stdout) : ''
+  // No copy now: an older folder (maybe gone) is not given to Typst.
+  if (!dir) S.fontPaths = ''
+  if (made?.exitCode === 3) return 'none'
   if (!dir) return 'failed'
   S.fontPaths = dir
   return 'copied'
@@ -275,7 +285,10 @@ async function ghosttyDefaultFont($: EngineInterface, isMac: boolean): Promise<s
 // fontconfig's sorted list). No list: its own JetBrains Mono.
 async function ghosttyFont($: EngineInterface, isMac: boolean, names: readonly string[]): Promise<string> {
   if (!names.length) return ghosttyDefaultFont($, isMac)
-  for (const name of names) if ((await hasFamily($, isMac, name)) !== false) return name
+  for (const name of names) {
+    const found = await installedFamily($, isMac, name)
+    if (found !== '') return found ?? name
+  }
   if (isMac) return ghosttyDefaultFont($, isMac)
   return (await fcFamily($, fcPatternOf(names[0]!))) || names[0]!
 }
@@ -287,12 +300,13 @@ async function ghosttyFont($: EngineInterface, isMac: boolean, names: readonly s
 // Code (the same letters) when it is installed.
 async function rioFont($: EngineInterface, isMac: boolean): Promise<string> {
   const named = rioFontOf((await readRioConfig($)).config)
-  if (named !== RIO_DEFAULT_FONT && (await hasFamily($, isMac, named, true)) !== false) return named
+  const found = named === RIO_DEFAULT_FONT ? '' : await installedFamily($, isMac, named, true)
+  if (found !== '') return found ?? named
   const home = (await envGet($, 'HOME')) ?? ''
   const copy = await programFont($, isMac, { tag: 'rio', family: RIO_DEFAULT_FONT, name: 'rio', paths: rioProgramsOf(home) })
   if (copy === 'copied') return RIO_DEFAULT_FONT
   if (copy === 'none') return RIO_OLD_FONT
-  return (await hasFamily($, isMac, RIO_OLD_FONT)) ? RIO_OLD_FONT : RIO_DEFAULT_FONT
+  return (await installedFamily($, isMac, RIO_OLD_FONT)) ? RIO_OLD_FONT : RIO_DEFAULT_FONT
 }
 
 // The font that the terminal's own config or profile names.
@@ -332,7 +346,8 @@ async function configFontOf($: EngineInterface, isMac: boolean): Promise<string>
       const named = await processRun($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_JXA, name], { timeoutMs: 5000 }).catch(() => null)
       return named?.exitCode === 0 ? firstLine(named.stdout) || KITTY_MAC_FONT : ''
     }
-    if ('family' in font && (await hasFamily($, isMac, name)) !== false) return name
+    const found = 'family' in font ? await installedFamily($, isMac, name) : ''
+    if (found !== '') return found ?? name
     const exact = (await fcListFamily($, `:postscriptname=${fcPatternOf(name)}`)) || (await fcListFamily($, `:fullname=${fcPatternOf(name)}`))
     return exact || (await fcFamily($, `${'family' in font ? fcPatternOf(name) : `:postscriptname=${fcPatternOf(name)}`}:spacing=mono`))
   }

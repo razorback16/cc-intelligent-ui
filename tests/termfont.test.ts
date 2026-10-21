@@ -63,9 +63,15 @@ function world(on: any, o: {
       if (!families.some(f => f.toLowerCase() === family.toLowerCase())) return ok('no\n')
       return ok(argv.includes('mono') && o.proportional?.includes(family) ? 'proportional\n' : 'yes\n')
     }
+    if (argv[0] === 'osascript' && cmd.includes('availableFontFamilies')) {
+      const found = families.find(f => f.toLowerCase() === argv.at(-1)!.toLowerCase())
+      return ok(found ? `=${found}\n` : 'no\n')
+    }
     if (argv[0] === 'osascript' && cmd.includes('fontWithNameSize')) return ok(`${o.names?.[argAfter(argv, 'fontWithNameSize')] ?? ''}\n`)
     if (argv[0] === 'fc-list' && argv[1] === ':') return ok(families.map(f => fcPatternOf(f)).join('\n'))
-    if (argv[0] === 'fc-list' && argv.at(-1) === 'family') return ok(o.names?.[argv[1]!.replace(/^:\w+=/, '').replace(/\\(.)/g, '$1')] ?? '')
+    // A full or PostScript name: its family; a family: the installed ones it matches loosely.
+    if (argv[0] === 'fc-list' && argv.at(-1) === 'family' && argv[1]!.startsWith(':')) return ok(o.names?.[argv[1]!.replace(/^:\w+=/, '').replace(/\\(.)/g, '$1')] ?? '')
+    if (argv[0] === 'fc-list' && argv.at(-1) === 'family') return ok(families.filter(f => loose(f) === loose(argv[1]!)).map(f => fcPatternOf(f)).join('\n'))
     if (argv[0] === 'fc-list' && argv[1] === '-q') return ok('', families.some(f => loose(f) === loose(argv[2]!)) ? 0 : 1)
     if (argv[0] === 'fc-match' && argv[1] === 'monospace') return ok('DejaVu Sans Mono')
     if (argv[0] === 'fc-match') {
@@ -123,6 +129,23 @@ fontTest("Rio on Linux finds a family by its exact name only (its font database)
   world(on, { isMac: false, env: { TERM_PROGRAM: 'rio' }, copied: FONTS_DIR, families: ['IoSevka Term'], files: { '/h/.config/rio/config.toml': '[fonts]\nfamily = "iosevkaterm"\n' } })
   expect(await details($)).toContain(`terminal font ${RIO_DEFAULT_FONT}.`)
 })
+
+for (const isMac of [true, false]) {
+  fontTest(`Rio on ${isMac ? 'macOS' : 'Linux'} finds a family in any case (Rio compares lower case): the installed name`, async ($, on) => {
+    const w = world(on, { isMac, env: { TERM_PROGRAM: 'rio' }, copied: FONTS_DIR, families: ['Iosevka Term'], files: { '/h/.config/rio/config.toml': '[fonts]\nfamily = "iosevka term"\n' } })
+    expect(await details($)).toContain('terminal font Iosevka Term.')
+    expect(w.copies()).toEqual([])
+  })
+}
+
+for (const term of ['ghostty', 'kitty']) {
+  fontTest(`${term} on Linux with a family in another case and spacing: the name fontconfig has, for Typst`, async ($, on) => {
+    const files: Record<string, string> = term === 'kitty' ? { '/h/.config/kitty/kitty.conf': 'font_family iosevkaterm\n' } : {}
+    const env: Record<string, string> = term === 'kitty' ? { TERM: 'xterm-kitty' } : { TERM_PROGRAM: 'ghostty' }
+    world(on, { isMac: false, env, families: ['Iosevka Term'], files, run: shows('font-family = iosevkaterm\n') })
+    expect(await details($)).toContain('terminal font Iosevka Term.')
+  })
+}
 
 fontTest('Rio with no Cascadia Code NF in its program (a Rio up to 0.4): Cascadia Code', async ($, on) => {
   world(on, { isMac: true, env: { TERM_PROGRAM: 'rio' }, copied: 'none' })

@@ -4,7 +4,7 @@
 # bash: on a fake program that holds small sfnt fonts (with `fvar` and
 # `name` tables), it checks the folder and its files, a second run from
 # the cache, the `.none` marker, the sweep of old folders, two runs at the
-# same time, and no program.
+# same time, a family of its own key, a write that fails, and no program.
 # Usage: sh tests/fonts-sh-test.sh   (exit 0 when all pass)
 set -u
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -37,6 +37,7 @@ EOF
 "$perl" "$tmp/font.pl" "Test Mono" 0 "$tmp/regular.ttf"
 "$perl" "$tmp/font.pl" "Test Mono" 8 "$tmp/italic.ttf"
 "$perl" "$tmp/font.pl" "Other Font" 4 "$tmp/other.ttf"
+"$perl" "$tmp/font.pl" "Big Mono" 4000 "$tmp/big.ttf"
 # A program: filler, the fonts (the regular one twice, as in a universal
 # program), and another family's font.
 program() {
@@ -54,13 +55,13 @@ for s in $shells; do
   mkdir -p "$bin"; program "$bin/term"
   run() { XDG_CACHE_HOME=$xdg PATH=$bin:/usr/bin:/bin $s -c "$sh_text" sh "$perl" "$pl" "$@"; }
   # Old folders of the tag: a temporary one of 2 days and a key folder of
-  # 8 days go; a key folder of today and another tag's old folder stay.
+  # 31 days go; a key folder of today and another tag's old folder stay.
   mkdir -p "$base/test-old" "$base/test-1-2-3.999" "$base/test-new" "$base/other-old"
   touch -t 202001010000 "$base/test-old" "$base/test-1-2-3.999" "$base/other-old"
   # The first run: the folder, one file for each size of the family.
   out=$(run test "Test Mono" term /nowhere); code=$?
   dir=$(echo "$out" | sed -n 1p)
-  [ "$code" = 0 ] && case $dir in "$base"/test-*) true ;; *) false ;; esac && ok || bad "$s: exit $code, folder '$dir'"
+  [ "$code" = 0 ] && case $dir in "$base"/test-v2-*) true ;; *) false ;; esac && ok || bad "$s: exit $code, folder '$dir'"
   [ "$(ls "$dir" | tr '\n' ' ')" = "test-1.ttf test-2.ttf " ] && ok || bad "$s: the files are $(ls "$dir" | tr '\n' ' ')"
   same "$dir/test-1.ttf" "$tmp/regular.ttf" && same "$dir/test-2.ttf" "$tmp/italic.ttf" && ok || bad "$s: a copied font is not the same"
   [ ! -e "$base/test-old" ] && [ ! -e "$base/test-1-2-3.999" ] && [ -d "$base/test-new" ] && [ -d "$base/other-old" ] && ok || bad "$s: the sweep is wrong ($(ls "$base" | tr '\n' ' '))"
@@ -85,6 +86,14 @@ for s in $shells; do
   wait $a; ca=$?; wait $b; cb=$?
   [ "$ca" = 0 ] && [ "$cb" = 0 ] && [ "$(cat "$tmp/a-$k")" = "$(cat "$tmp/b-$k")" ] && ok || bad "$s: two runs gave $ca/$cb, '$(cat "$tmp/a-$k")' and '$(cat "$tmp/b-$k")'"
   [ "$(ls -d "$base"/two-* | wc -l | tr -d ' ')" = 1 ] && [ "$(ls "$(cat "$tmp/a-$k")" | wc -l | tr -d ' ')" = 2 ] && ok || bad "$s: two runs left $(ls -d "$base"/two-* | tr '\n' ' ')"
+  # Another family of the same program: a key of its own.
+  out=$(run test "Other Font" term); code=$?
+  # (the copy ends at its last table: the file's padding after it is not copied)
+  [ "$code" = 0 ] && [ -n "$out" ] && [ "$out" != "$dir" ] && [ "$(ls "$out")" = test-1.ttf ] && head -c "$(wc -c < "$out/test-1.ttf")" "$tmp/other.ttf" | cmp -s - "$out/test-1.ttf" && ok || bad "$s: another family gave exit $code, '$out'"
+  # A write that fails (a file size limit): exit 1, no folder and no marker.
+  { head -c 3000 /dev/urandom; cat "$tmp/big.ttf"; } > "$bin/term3"; chmod 755 "$bin/term3"
+  (trap '' XFSZ; ulimit -f 2; run big "Big Mono" term3 >/dev/null); code=$?
+  [ "$code" = 1 ] && [ -z "$(ls -d "$base"/big-* 2>/dev/null)" ] && ok || bad "$s: a failed write gave exit $code, left $(ls -d "$base"/big-* 2>/dev/null | tr '\n' ' ')"
   # No program: exit 2.
   run test "Test Mono" nothing-here /nowhere/term > /dev/null; code=$?
   [ "$code" = 2 ] && ok || bad "$s: no program gave exit $code"

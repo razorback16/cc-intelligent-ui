@@ -171,7 +171,10 @@
 // term-bold=0: Typst has no bold face of the terminal font (Monaco, for
 // one), so its bold text would draw regular. As a terminal does, bold
 // text in that font gets a stroke of its own fill (0.04em: as thick as
-// Menlo's and DejaVu Sans Mono's bold). Text in other fonts stays.
+// Menlo's and DejaVu Sans Mono's bold). Text in other fonts stays. The
+// stroke goes on bold regions (strong, headings, table headers), never
+// on each text: a show text rule stops the long-word and probe rules
+// from matching across texts, and makes each compile slower.
 #let faux-bold = term-font != "" and inp.at("term-bold", default: "1") == "0"
 #let faux-stroke = 0.04em
 #let weight-num = (thin: 100, extralight: 200, light: 300, regular: 400, medium: 500, semibold: 600, bold: 700, extrabold: 800, black: 900)
@@ -182,16 +185,18 @@
   let x = if type(f) == array { f.at(0, default: "") } else { f }
   lower(if type(x) == dictionary { x.name } else { x })
 }
-#show: doc => if not faux-bold { doc } else {
-  let term = lower(term-font)
-  // strong adds its delta when it is shaped; as a weight, the text rule sees it.
-  show strong: it => context if first-font() != term { it } else {
-    text(weight: calc.min(weight-of(text.weight) + it.delta, 900), it.body)
+#let is-term() = first-font() == lower(term-font)
+// A bold region: the stroke in its fill, when it is in the terminal font
+// and has no stroke yet (a stroke that is set stays).
+#let faux(body) = if not faux-bold { body } else {
+  context if text.stroke != none or not is-term() { body } else { text(stroke: faux-stroke + text.fill, body) }
+}
+// strong as an explicit weight (its delta), with the stroke when bold.
+#show strong: it => if not faux-bold { it } else {
+  context if not is-term() { it } else {
+    let w = calc.min(weight-of(text.weight) + it.delta, 900)
+    if w >= 600 and text.stroke == none { text(weight: w, stroke: faux-stroke + text.fill, it.body) } else { text(weight: w, it.body) }
   }
-  show text: it => context if weight-of(text.weight) < 600 or first-font() != term { it } else {
-    text(stroke: faux-stroke + text.fill, it)
-  }
-  doc
 }
 
 // ---------- the row grid (grid=1) ----------
@@ -306,29 +311,33 @@
         show raw: set text(top-edge: g.top, bottom-edge: g.bottom)
         set par(leading: 0pt)
         heading-pad.update(pad)
+        let body = if weight-of(H.weight) >= 600 { faux(it.body) } else { it.body }
         block(
           width: 100%, above: calc.max(row, rows-near(above)), below: if pad > 0pt { row } else { calc.max(row, rows-near(below)) },
           sticky: true, inset: (y: pad), stroke: if pad == 0pt { rule },
-          if pad == 0pt { it.body } else { block(width: 100%, stroke: rule, it.body) },
+          if pad == 0pt { body } else { block(width: 100%, stroke: rule, body) },
         )
       }
     }
   }
   set text(size: size, weight: H.weight)
   set par(leading: H.leading-em * 1em)
+  let body = if weight-of(H.weight) >= 600 { faux(it.body) } else { it.body }
   if lvl <= H.rule-levels {
     block(
       width: 100%, above: above, below: below, sticky: true,
       inset: (bottom: H.rule-pad-em * 1em), stroke: (bottom: px + C.border),
-      it.body,
+      body,
     )
   } else {
-    block(width: 100%, above: above, below: below, sticky: true, it.body)
+    block(width: 100%, above: above, below: below, sticky: true, body)
   }
 }
 
 // ---------- links, emphasis ----------
 #show link: set text(fill: C.link)
+// In a fake bold region, the stroke takes the link's colour too.
+#show link: it => if not faux-bold { it } else { context if text.stroke == none { it } else { text(stroke: faux-stroke + C.link, it) } }
 #set strike(stroke: 0.06em)
 
 // ---------- lists ----------
@@ -365,6 +374,8 @@
 #show raw: set text(font: mono, top-edge: "ascender", bottom-edge: "descender")
 #show raw.where(block: false): set text(size: code-size(E.inline-code.size) / 0.8 * 1em)
 #show raw.where(block: true): set text(size: code-size(E.code-block.size) / 0.8 * 1em)
+// Code in a font that has a bold face gets no fake bold of the text around it.
+#show raw: it => if faux-bold and lower(mono.at(0)) != lower(term-font) { text(stroke: none, it) } else { it }
 // Inline code: like VS Code's `code { padding: 1px 3px; border-radius: 4px }`,
 // the background covers the code font's ascender to descender plus the
 // padding. highlight (not box) so long inline code can wrap across lines.
@@ -385,7 +396,7 @@
   highlight(
     fill: C.inline-code-bg, extent: pad-x, radius: IC.radius-px * px,
     top-edge: asc + pad-y, bottom-edge: -(desc + pad-y),
-    text(fill: C.inline-code-fg, it),
+    text(fill: C.inline-code-fg, ..if faux-bold and text.stroke != none { (stroke: faux-stroke + C.inline-code-fg) }, it),
   )
   h(pad-x)
 }
@@ -483,6 +494,7 @@
 // Live ```typst drawings (the only scale here) keep the "rules" look.
 #show scale: set table(inset: rules-inset, stroke: rules-stroke)
 #show table.cell.where(y: 0): set text(weight: E.table.header-weight)
+#show table.cell.where(y: 0): it => if weight-of(E.table.header-weight) >= 600 { faux(it) } else { it }
 #show table: set par(leading: 0.38em)
 
 // ---------- footnotes ----------

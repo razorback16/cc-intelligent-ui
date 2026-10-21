@@ -87,8 +87,15 @@ export function noNetworkEnv(cache: string): Record<string, string> {
     no_proxy: '',
     TYPST_PACKAGE_CACHE_PATH: `${cache}/pkg-cache`,
     // The user's own folders stay (':' is the separator on macOS and Linux).
-    ...(S.fontPaths ? { TYPST_FONT_PATHS: [S.userFontPaths, S.fontPaths].filter(Boolean).join(':') } : {}),
+    ...fontPathsEnv(cache),
   }
+}
+
+// TYPST_FONT_PATHS with no empty entries (Typst stops at one); a folder that
+// is not there when the user's value has only empty entries.
+function fontPathsEnv(cache: string): { TYPST_FONT_PATHS?: string } {
+  const paths = [...S.userFontPaths.split(':'), S.fontPaths].filter(Boolean).join(':')
+  return paths ? { TYPST_FONT_PATHS: paths } : S.userFontPaths ? { TYPST_FONT_PATHS: `${cache}/no-fonts` } : {}
 }
 
 // Width and height from a PNG's first 24 bytes (signature, then IHDR).

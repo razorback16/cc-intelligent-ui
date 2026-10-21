@@ -1075,6 +1075,14 @@ test('typst gets no network in either case of the proxy variables, and its packa
     // The user's own TYPST_FONT_PATHS stays, first.
     S.userFontPaths = '/u/fonts'
     expect(noNetworkEnv('/c').TYPST_FONT_PATHS).toBe('/u/fonts:/f1:/f2')
+    // Empty entries go (Typst stops at one), also with no copied font.
+    S.userFontPaths = '/a::/b:'
+    expect(noNetworkEnv('/c').TYPST_FONT_PATHS).toBe('/a:/b:/f1:/f2')
+    S.fontPaths = ''
+    expect(noNetworkEnv('/c').TYPST_FONT_PATHS).toBe('/a:/b')
+    // Only empty entries: a folder that is not there.
+    S.userFontPaths = ':'
+    expect(noNetworkEnv('/c').TYPST_FONT_PATHS).toBe('/c/no-fonts')
   } finally {
     S.fontPaths = saved
     S.userFontPaths = ''

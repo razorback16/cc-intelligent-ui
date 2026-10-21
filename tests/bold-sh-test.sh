@@ -2,7 +2,8 @@
 # Renders render/md.typ with the real Typst in a terminal font that has no
 # bold face (Monaco), with and without term-bold=0 (the fake bold): the
 # flag changes a page with bold text, and does not change a page with no
-# bold text or a page with no terminal font. It keeps the PNGs in
+# bold text or a page with no terminal font. A long bold word still wraps,
+# and the probe's marks do not change (a show text rule would split them). It keeps the PNGs in
 # $IUI_BOLD_OUT when that is set, to look at.
 # Usage: sh tests/bold-sh-test.sh   (exit 0 when all pass; skips with no
 # typst or no Monaco)
@@ -37,6 +38,20 @@ for theme in claude-code vscode; do
   same bold $theme && bad "$theme: the fake bold does not change bold text" || ok
   same plain $theme && ok || bad "$theme: the fake bold changes a page with no bold text"
 done
+# A long bold word (cmarker splits it at each \_) and smart quotes: the
+# probe's marks are the same with the flag (term-bold=0); with it the word
+# can wrap, and don't is one mark.
+printf 'A **aaaaaaaaaaaaaaaaaaaa\\_bbbbbbbbbbbbbbbbbbbbbbbb\\_cccccccccccccccccccccc**\n\n**Bold don'"'"'t a\\_b "q"**\n\n## Head don'"'"'t a\\_b\n' | doc long
+for b in 0 1; do
+  typst query --root / --input theme=dark --input width=300 --input term-font=Monaco --input "term-bold=$b" --input "theme-dir=$here/render/themes/claude-code" \
+    --input "doc=$tmp/long.json" --input probe=1 "$here/render/md.typ" '<mdpos>' --field value > "$tmp/marks-$b.json" 2> "$tmp/err" || bad "probe, term-bold=$b: $(head -3 "$tmp/err")"
+done
+cmp -s "$tmp/marks-0.json" "$tmp/marks-1.json" && ok || bad "the fake bold changes the probe's marks"
+# The long-word rule gives each letter of it a break chance (a mark of its own).
+n=$(grep -o '"t":"a"' "$tmp/marks-0.json" | wc -l | tr -d ' ')
+[ "$n" -ge 20 ] && ok || bad "the long bold word has no break chances ($n marks of its letters)"
+grep -q '"t":"don'"'"'t"' "$tmp/marks-0.json" && ok || bad "a mark of don't is split"
+
 # With no terminal font, the flag does nothing.
 for b in 0 1; do
   typst compile "$here/render/md.typ" "$tmp/bold-none-$b.png" --root / --ppi 144 --input theme=dark --input width=420 \
