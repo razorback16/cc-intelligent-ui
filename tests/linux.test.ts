@@ -468,8 +468,9 @@ test('the cache folder: TMPDIR, else /tmp (Linux often has no TMPDIR); the desig
   expect(CACHE_SH).toContain('d="${TMPDIR:-/tmp}"; d="${d%/}/cc-intelligent-ui-$(id -u)"')
   expect(CACHE_SH).toContain('g="${XDG_CACHE_HOME:-$HOME/.cache}/cc-intelligent-ui/designs"')
   expect(CACHE_SH).toContain('"$(uname -s)"')
-  // A folder that is not private: only the OS name. No shim or ask folder is swept.
+  // A folder that is not private is never used. No shim or ask folder is swept.
   expect(CACHE_SH).toContain('[ ! -L "$d" ] && [ -d "$d" ] && [ -O "$d" ] && chmod 700 "$d"')
-  expect(CACHE_SH).toContain(`|| printf '\\n%s\\n\\n' "$(uname -s)"`)
+  // A refused folder: no cache line, the OS, then that folder (for /iui details).
+  expect(CACHE_SH).toContain(`|| printf '\\n%s\\n\\n%s\\n' "$(uname -s)" "$d"`)
   expect(CACHE_SH).not.toMatch(/ask|shims/)
 })

@@ -92,18 +92,40 @@ function* framesFrom(img: Rgba, box: { columns: number; rows: number }, color: R
 // The bytes a page's Frames hold (the pixels and the pieces).
 export const bytesOf = (f: Frames) => f.img.data.length + [...f.plain, ...f.tint].reduce((n, p) => n + (p ? p.chunk.length + p.piece.bytes.length : 0), 0)
 
+// The time a frame makes tinted rows for (a hooks slice stays short): the
+// rows past it are drawn plain, and made by a later frame or the build.
+export const TINT_MS = 6
+
 // The frame PNG of a page with `rows` selected (cells x0 to x1, inclusive).
 export function frameOf(f: Frames, rows: readonly SelRow[]): Uint8Array {
+  return frameNow(f, rows, Infinity).png
+}
+
+// The same, making tinted rows for `budgetMs` at most (one at least);
+// `isWhole` false when a selected row is drawn plain for now.
+export function frameNow(f: Frames, rows: readonly SelRow[], budgetMs = TINT_MS, now = () => performance.now()): { png: Uint8Array; isWhole: boolean } {
   const line = f.img.width * 4 + 1
   const columns = f.xs.length - 1
   const at = new Map(rows.map(r => [r.row, r]))
+  const t0 = now()
+  let isWhole = true
+  let made = 0
   const parts = f.plain.map((plain, r) => {
     const sel = at.get(r)
     if (!sel || sel.x1 < sel.x0) return plain
     const [y0, y1] = [f.ys[r]!, f.ys[r + 1]!]
-    if (sel.x0 <= 0 && sel.x1 >= columns - 1) return (f.tint[r] ??= chunked(bandOf(f.img, y0, y1, 0, f.img.width, f.color), line))
+    if (sel.x0 <= 0 && sel.x1 >= columns - 1) {
+      const tint = f.tint[r]
+      if (tint) return tint
+      if (made && now() - t0 >= budgetMs) {
+        isWhole = false
+        return plain
+      }
+      made++
+      return (f.tint[r] = chunked(bandOf(f.img, y0, y1, 0, f.img.width, f.color), line))
+    }
     return chunked(bandOf(f.img, y0, y1, f.xs[Math.max(0, sel.x0)]!, f.xs[Math.min(columns, sel.x1 + 1)]!, f.color), line)
   })
-  return concat([f.head, ...parts.map(p => p.chunk), tailOf(parts.map(p => p.piece))])
+  return { png: concat([f.head, ...parts.map(p => p.chunk), tailOf(parts.map(p => p.piece))]), isWhole }
 }
 

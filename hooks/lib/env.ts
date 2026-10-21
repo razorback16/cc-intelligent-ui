@@ -29,8 +29,9 @@ const isOn = atom({ plugin: 'cc-intelligent-ui', key: 'isOn' } as const, true)
 // drops key folders not touched for 2 days, makes the designs folder
 // (outside the tmp cache) and drops design files not touched for
 // DESIGNS_KEPT_DAYS; prints the cache folder, the OS name and the designs
-// folder (the OS name alone when the cache folder can not be made private).
-export const CACHE_SH = `d="\${TMPDIR:-/tmp}"; d="\${d%/}/cc-intelligent-ui-$(id -u)"; g="\${XDG_CACHE_HOME:-$HOME/.cache}/cc-intelligent-ui/designs"; mkdir "$d" 2>/dev/null; [ ! -L "$d" ] && [ -d "$d" ] && [ -O "$d" ] && chmod 700 "$d" && { find "$d" -mindepth 1 -maxdepth 1 -type d -mtime +2 ! -name pkg-cache -exec rm -rf {} + 2>/dev/null; mkdir -p "$g" 2>/dev/null && find "$g" -type f -mtime +${DESIGNS_KEPT_DAYS} -delete 2>/dev/null; printf '%s\\n%s\\n%s\\n' "$d" "$(uname -s)" "$g"; } || printf '\\n%s\\n\\n' "$(uname -s)"`
+// folder (when the cache folder can not be made private: the OS name, then
+// that folder on the fourth line).
+export const CACHE_SH = `d="\${TMPDIR:-/tmp}"; d="\${d%/}/cc-intelligent-ui-$(id -u)"; g="\${XDG_CACHE_HOME:-$HOME/.cache}/cc-intelligent-ui/designs"; mkdir "$d" 2>/dev/null; [ ! -L "$d" ] && [ -d "$d" ] && [ -O "$d" ] && chmod 700 "$d" && { find "$d" -mindepth 1 -maxdepth 1 -type d -mtime +2 ! -name pkg-cache -exec rm -rf {} + 2>/dev/null; mkdir -p "$g" 2>/dev/null && find "$g" -type f -mtime +${DESIGNS_KEPT_DAYS} -delete 2>/dev/null; printf '%s\\n%s\\n%s\\n' "$d" "$(uname -s)" "$g"; } || printf '\\n%s\\n\\n%s\\n' "$(uname -s)" "$d"`
 
 // Once per load: the cache folder, Typst, the terminal and its font, the
 // theme, the cell. A failed setup is tried again on the next call.
@@ -38,15 +39,17 @@ export function setUp($: EngineInterface): Promise<Env> {
   S.envLoading ??= (async () => {
     await registerCommand($)
     const made = await processRun($, ['sh', '-c', CACHE_SH]).catch(() => null)
-    const [made1 = '', os = '', made3 = ''] = (made?.stdout ?? '').split('\n')
-    const cache = made1.trim() || '/tmp/cc-intelligent-ui'
+    const [made1 = '', os = '', made3 = '', refused = ''] = (made?.stdout ?? '').split('\n')
+    // No private cache folder: nothing is drawn (no shared folder instead).
+    const cache = made1.trim()
+    S.cacheProblem = cache ? '' : refused.trim() ? `the cache folder ${refused.trim()} is a link, not a folder, or not yours` : 'the cache folder could not be made'
     // The key folders on disk now: a key found here is read back at once.
-    const listed = await fsList($, cache).catch(() => [])
+    const listed = cache ? await fsList($, cache).catch(() => []) : []
     S.onDisk = new Set(listed.filter(entry => entry.kind === 'dir' && entry.name !== 'pkg-cache').map(entry => entry.name))
     const program = (await envGet($, 'TERM_PROGRAM')) ?? ''
     const term = (await envGet($, 'TERM')) ?? ''
     const ssh = !!(await envGet($, 'SSH_CONNECTION')) || !!(await envGet($, 'SSH_TTY'))
-    const canDraw = canDrawIn({
+    const terminalDraws = canDrawIn({
       program,
       term,
       kitty: !!(await envGet($, 'KITTY_WINDOW_ID')),
@@ -56,6 +59,7 @@ export function setUp($: EngineInterface): Promise<Env> {
       engineForced: isSet(await envGet($, 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES')),
       modForced: isSet(await envGet($, 'IUI_FORCE')),
     })
+    const canDraw = terminalDraws && !!cache
     const root = pluginRoot($)
     const template = await fsStat($, `${root}/render/md.typ`).catch(() => null)
     const rows = await configs($).catch(() => [])
@@ -75,7 +79,7 @@ export function setUp($: EngineInterface): Promise<Env> {
       session: (await envGet($, 'ITERM_SESSION_ID')) || undefined,
       lcTerminal: (await envGet($, 'LC_TERMINAL')) || undefined,
     })
-    S.setupNeeded = S.isIterm && !canDraw && !ssh && S.hostOs === 'Darwin' &&
+    S.setupNeeded = S.isIterm && !terminalDraws && !ssh && S.hostOs === 'Darwin' &&
       !(await envGet($, 'TMUX')) && !(await envGet($, 'STY')) && (await envGet($, 'CLAUDE_CODE_SESSION_KIND')) !== 'bg'
     if (S.setupNeeded) void offerSetup($).catch(() => undefined)
     S.isCmux = !!(await envGet($, 'CMUX_SURFACE_ID')) || !!(await envGet($, 'CMUX_WORKSPACE_ID')) || !!(await envGet($, 'CMUX_SOCKET_PATH'))
@@ -101,14 +105,18 @@ export function setUp($: EngineInterface): Promise<Env> {
     setFrame(await readFrame($))
     if (canDraw) watchFrame($)
     const typst = await findTypst($)
-    if (!typst) {
+    if (S.cacheProblem && terminalDraws) {
+      try {
+        uiToast($, `Intelligent UI: no pictures, ${S.cacheProblem} (see /iui details)`, { timeoutMs: 8000 })
+      } catch {}
+    } else if (!typst) {
       try {
         uiToast($, noTypstOf(isMac), { timeoutMs: 8000 })
       } catch {}
     }
     const termFont = await termFontOf($, isMac).catch(() => '')
     const home = (await envGet($, 'HOME')) ?? ''
-    const designs = made3.trim() || (home ? `${home}/.cache/cc-intelligent-ui/designs` : `${cache}/designs`)
+    const designs = made3.trim() || (home ? `${home}/.cache/cc-intelligent-ui/designs` : cache ? `${cache}/designs` : '')
     const stored = await storeGet($, 'theme-name').catch(() => undefined)
     const wanted = typeof stored === 'string' && stored ? stored : DEFAULT_THEME
     const applied = await applyTheme($, root, home, wanted).catch(() => null)
@@ -135,7 +143,7 @@ export function setUp($: EngineInterface): Promise<Env> {
       }),
       termFont,
       designs,
-      metrics: typst ? await measureFonts($, typst, root, cache, termFont, S.look?.dir ?? `${root}/render/themes/${BASE_THEME}`) : DEFAULT_METRICS,
+      metrics: typst && cache ? await measureFonts($, typst, root, cache, termFont, S.look?.dir ?? `${root}/render/themes/${BASE_THEME}`) : DEFAULT_METRICS,
     }
     refresh($)
     // The start is done: the update check now, and nothing waits for it.

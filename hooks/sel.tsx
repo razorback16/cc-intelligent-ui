@@ -3,6 +3,8 @@
 // whole (anchor, head, phase and order), never a bare event: posts of one
 // frame merge, the last one kept. A click with no drag posts `clear`. It
 // draws only an empty Box: anything drawn would blank the picture's cells.
+// It sets no key listener: with one, a click would give it the keys (the
+// prompt would get none until Escape), and Escape never reaches it.
 import type { ClientModule, JsonValue } from 'claude-code'
 
 type Props = { id: string; page: number }
@@ -28,6 +30,13 @@ const Select: ClientModule<Props, Drag> = (props, surface) => {
       return
     }
     if (!now?.isDown || (ev.type !== 'move' && ev.type !== 'up')) return
+    // A move with no button while down: its up was lost, so the drag ends where it was.
+    if (ev.type === 'move' && !ev.button) {
+      const ended = { ...now, isDown: false }
+      surface.setState(ended)
+      post(ended, ended.hx === ended.ax && ended.hy === ended.ay ? 'clear' : 'up')
+      return
+    }
     const next = { ...now, hx: ev.x, hy: ev.y, isDown: ev.type === 'move' }
     if (ev.type === 'move' && next.hx === now.hx && next.hy === now.hy) return
     surface.setState(next)

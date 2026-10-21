@@ -503,8 +503,12 @@ const inputsOf = (argv: readonly string[]) => Object.fromEntries(argv.flatMap((a
 // `tty`: the tty size line its read gives (none: no read), `version`
 // Claude Code's (picture select); `frames` the highlight's frame files
 // written, `blits` the blits asked (`deny`: each refused with it), `logs`
-// the debug log lines.
-function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Record<string, string>; tty?: string; version?: string; deny?: string } = {}) {
+// the debug log lines. `noPerl`: perl can not start; `beforeWrite` runs
+// before each frame write; `refused`: the cache folder sweep refuses that folder.
+function world(
+  on: any,
+  o: { failFirst?: boolean; noBridge?: boolean; env?: Record<string, string>; tty?: string; version?: string; deny?: string; noPerl?: boolean; beforeWrite?: () => Promise<void>; refused?: string } = {},
+) {
   forgetBlits()
   forgetRedraws()
   mock.store(on)
@@ -527,7 +531,7 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
     clock, files, compiles, queries, kills, watchers, vars, envSets,
     ran: [] as string[][], spawned: [] as string[][], reads: [] as string[],
     clipboard: 'nothing yet', count: 40, pastes: 0, copies: [] as string[], toasts: [] as string[], traces: [] as string[], logs: [] as string[],
-    frames: [] as { path: string; old: string[]; png: Uint8Array }[], blits: [] as any[],
+    frames: [] as { path: string; old: string[]; png: Uint8Array }[], blits: [] as any[], writes: 0, selectionReads: 0,
     selection: undefined as { text: string; requestId?: string } | undefined,
     selects: true,
     gate: null as Promise<void> | null, release: () => {},
@@ -598,9 +602,12 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
       killers.get(argv[1]!)?.()
       return ok('')
     }
-    if (/cc-intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
+    if (/cc-intelligent-ui-/.test(cmd)) return ok(o.refused ? `\nDarwin\n\n${o.refused}\n` : '/c\nDarwin\n')
     if (o.tty && argv[0] === 'sh' && cmd.includes('ioctl(T')) return ok(o.tty)
     if (argv[0] === '/usr/bin/perl' && argv[2] === WRITE_PL) {
+      w.writes++
+      if (o.noPerl) return { deny: 'spawn /usr/bin/perl ENOENT' }
+      await o.beforeWrite?.()
       w.frames.push({ path: argv[3]!, old: argv.slice(4), png: fromBase64(e.init?.stdin ?? '') })
       return ok('')
     }
@@ -639,7 +646,10 @@ function world(on: any, o: { failFirst?: boolean; noBridge?: boolean; env?: Reco
     w.foreign(e.text)
     return { value: { isCopied: true } }
   })
-  on('ui.selection', async () => ({ value: w.selection }))
+  on('ui.selection', async () => {
+    w.selectionReads++
+    return { value: w.selection }
+  })
   on('ui.blit', async ($: any, e: any) => {
     w.blits.push(e)
     return { value: o.deny ? { deny: o.deny } : {} }
@@ -1464,4 +1474,214 @@ test('picture select: /iui select off takes the Client away', async ($, on) => {
   await ui.redraw(props(SMALL_MD))
   await w.clock.settle()
   expect(tree(await ui.drawn()).some(n => n.type === 'Client')).toBe(false)
+})
+
+// A drag over rows 1 to 3 (to column 21): COPIED.
+const drag = async (ui: any) => {
+  await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'move', x: 10, y: 2, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'up', x: 21, y: 3, button: 'left', in: 'sel0' })
+}
+// The last blit: the page's own PNG, or its newest frame.
+const isPlain = (w: ReturnType<typeof world>) => /^\/c\/[0-9a-f]+\/a-1\.png$/.test(w.blits.at(-1)?.source.file ?? '')
+const isFrame = (w: ReturnType<typeof world>) => !!w.frames.length && w.blits.at(-1)?.source.file === w.frames.at(-1)!.path
+const hasClient = async (ui: any) => tree(await ui.drawn()).some(n => n.type === 'Client')
+
+test('picture select: typing in the prompt takes the selection down; a bare cursor move and another plugin\'s fill do not', async ($, on) => {
+  const w = world(on, { tty: TTY })
+  on('prompt.edit', async ($: any, e: any) => ({ text: e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end), cursor: e.start + e.inputText.length }))
+  on('prompt.change', async ($: any, e: any) => ({ text: e.text }))
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const prompt = ($ as any).prompt
+  const ui = await drawAnswer($, w)
+  await drag(ui)
+  await settle(w)
+  expect(isFrame(w)).toBe(true)
+  const blits = w.blits.length
+  await prompt.edit({ origin: { kind: 'composer' }, text: 'ab', cursor: 2, start: 1, end: 1, inputText: '' } as any)
+  await prompt.change({ text: 'x', cursor: 1, origin: { kind: 'plugin', name: 'other' } })
+  await settle(w)
+  expect(w.blits.length).toBe(blits)
+  // A key typed: the page's own PNG back; the edit is the engine's as it was.
+  const edited = await prompt.edit({ origin: { kind: 'composer' }, text: 'ab', cursor: 2, start: 2, end: 2, inputText: 'c' })
+  expect(edited).toMatchObject({ text: 'abc', cursor: 3 })
+  await settle(w)
+  expect(isPlain(w)).toBe(true)
+  // A recalled history entry: the same.
+  await drag(ui)
+  await settle(w)
+  expect(isFrame(w)).toBe(true)
+  await prompt.change({ text: 'old', cursor: 3, origin: { kind: 'history' } })
+  await settle(w)
+  expect(isPlain(w)).toBe(true)
+})
+
+test('picture select: a new native selection takes it down (read every 250 ms while it shows); one made before it does not; no reads with none shown', async ($, on) => {
+  const w = world(on, { tty: TTY })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await drawAnswer($, w)
+  w.selection = { text: 'made before' }
+  await drag(ui)
+  await settle(w)
+  await w.clock.advance(600)
+  await settle(w)
+  expect(isFrame(w)).toBe(true)
+  expect(w.selectionReads).toBeGreaterThan(1)
+  w.selection = { text: 'a new one', requestId: 'ans-0' }
+  await w.clock.advance(300)
+  await settle(w)
+  expect(isPlain(w)).toBe(true)
+  // None shows now: the timer is gone.
+  const reads = w.selectionReads
+  await w.clock.advance(2000)
+  await settle(w)
+  expect(w.selectionReads).toBe(reads)
+})
+
+test('picture select: a move with no button while the button is down (its up lost) ends the drag where it was: copied, not extended', async ($, on) => {
+  const w = world(on, { tty: TTY })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await drawAnswer($, w)
+  await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'move', x: 10, y: 2, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'move', x: 21, y: 3, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'move', x: 40, y: 8, in: 'sel0' })
+  await settle(w)
+  expect(w.copies).toEqual([COPIED])
+  const frames = w.frames.length
+  await ui.pointer({ type: 'move', x: 50, y: 9, in: 'sel0' })
+  await settle(w)
+  expect(w.frames.length).toBe(frames)
+  expect(cellOf(w.frames.at(-1)!.png, 3, 22)).toBe('page')
+})
+
+test('picture select: a down is taken whatever its order (a reloaded Client counts from 0 again)', async ($, on) => {
+  const w = world(on, { tty: TTY })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await drawAnswer($, w)
+  await drag(ui)
+  await settle(w)
+  const post = (phase: string, seq: number, head: { x: number; y: number }) => ui.post({ id: 'ans-1', page: 0, anchor: { x: 0, y: 1 }, head, phase, seq }, { in: 'sel0' })
+  await post('down', 1, { x: 0, y: 1 })
+  await post('move', 2, { x: 10, y: 2 })
+  await settle(w)
+  const png = w.frames.at(-1)!.png
+  expect([cellOf(png, 2, 10), cellOf(png, 2, 11), cellOf(png, 3, 0)]).toEqual(['selected', 'page', 'page'])
+})
+
+test('picture select: a slow copy never lands after a newer one: only the last up copies', async ($, on) => {
+  const w = world(on, { tty: TTY })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  w.hold()
+  const ui = await drawAnswer($, w)
+  await drag(ui)
+  await settle(w)
+  await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'up', x: 8, y: 1, button: 'left', in: 'sel0' })
+  await settle(w)
+  expect(w.copies).toEqual([])
+  w.release()
+  await settle(w)
+  expect(w.copies.length).toBe(1)
+  expect(w.copies[0]).not.toBe(COPIED)
+  expect(COPIED.startsWith(w.copies[0]!)).toBe(true)
+})
+
+test('picture select: the same row drawn on the main screen, then in fullscreen, gets its Client (no memo hit)', async ($, on) => {
+  const w = world(on, { tty: TTY })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const main = await drawAnswer($, w, 'ans-1', SMALL_MD, false)
+  expect(await hasClient(main)).toBe(false)
+  await main.unmount()
+  const full = await drawAnswer($, w, 'ans-1', SMALL_MD, true)
+  expect(await hasClient(full)).toBe(true)
+})
+
+test('picture select: /iui select off and /iui off let the page cache go', async ($, on) => {
+  const w = world(on, { tty: TTY })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const pngReads = () => w.reads.filter(r => r.endsWith('/a-1.png')).length
+  const ui = await drawAnswer($, w)
+  expect(pngReads()).toBe(1)
+  // Off, then on: the page is built again (read again) at the next draw.
+  await $.command.run({ command: 'iui', args: 'select off' } as any)
+  await $.command.run({ command: 'iui', args: 'select on' } as any)
+  await w.clock.settle()
+  await ui.redraw(props(SMALL_MD))
+  await settle(w)
+  expect(pngReads()).toBe(2)
+  await $.command.run({ command: 'iui', args: 'off' } as any)
+  await $.command.run({ command: 'iui', args: 'on' } as any)
+  await w.clock.settle()
+  await ui.redraw(props(SMALL_MD))
+  await settle(w)
+  expect(pngReads()).toBe(3)
+  // The drag still works on the page built again.
+  await drag(ui)
+  await settle(w)
+  expect(w.copies).toEqual([COPIED])
+  expect(isFrame(w)).toBe(true)
+})
+
+test('picture select: a frame of a page file the row no longer draws is not blitted; the new file gets its own frame', async ($, on) => {
+  let redraw: (() => Promise<void>) | null = null
+  const w = world(on, {
+    tty: TTY,
+    // The row is drawn again with a new page file while the first frame is written.
+    beforeWrite: async () => {
+      const r = redraw
+      redraw = null
+      await r?.()
+    },
+  })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await drawAnswer($, w)
+  const other = `${SMALL_MD}\n\nOne more line.`
+  redraw = async () => {
+    await ui.redraw(props(other))
+    await w.clock.settle()
+    await w.clock.advance(1000)
+    await w.clock.settle()
+    await ui.redraw(props(other))
+    await w.clock.settle()
+  }
+  await drag(ui)
+  await settle(w)
+  expect(w.compiles.length).toBe(2)
+  const stale = w.frames[0]!.path
+  expect(w.blits.some(b => b.source.file === stale)).toBe(false)
+  expect(new Set(w.reads.filter(r => r.endsWith('/a-1.png'))).size).toBe(2)
+  expect(isFrame(w)).toBe(true)
+})
+
+test('picture select: with no perl the first frame write fails, is logged once and none is tried again; the copy still works', async ($, on) => {
+  const w = world(on, { tty: TTY, noPerl: true })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await drawAnswer($, w)
+  await drag(ui)
+  await settle(w)
+  await drag(ui)
+  await settle(w)
+  expect(w.writes).toBe(1)
+  expect(w.logs.filter(l => l.includes('could not be written')).length).toBe(1)
+  expect(w.copies).toEqual([COPIED, COPIED])
+})
+
+test('no private cache folder: nothing is drawn (no shared folder instead); /iui, its details and a toast say why', async ($, on) => {
+  const refused = '/t/cc-intelligent-ui-501'
+  const w = world(on, { tty: TTY, refused })
+  const why = `the cache folder ${refused} is a link, not a folder, or not yours`
+  expect((await $.command.run({ command: 'iui', args: '' } as any)).text).toContain(`No pictures: ${why}. See /iui details.`)
+  const ui = await $.ui.mount(message('ans-1', SMALL_MD))
+  await settle(w)
+  await ui.redraw(props(SMALL_MD))
+  await settle(w)
+  expect(tree(await ui.drawn()).some(n => n.type === 'Image' || n.type === 'Client')).toBe(false)
+  expect(w.compiles).toEqual([])
+  const details = (await $.command.run({ command: 'iui', args: 'details' } as any)).text ?? ''
+  expect(details).toContain(`Intelligent UI draws no pictures: ${why}`)
+  expect((await detailLines($))[0]).toBe(`Picture select: off (${why})`)
+  expect(w.toasts).toContain(`Intelligent UI: no pictures, ${why} (see /iui details)`)
+  // The old shared folder is never used.
+  expect([...w.ran.flat(), ...w.reads, ...w.files.keys()].some(t => t.includes('/tmp/cc-intelligent-ui'))).toBe(false)
 })

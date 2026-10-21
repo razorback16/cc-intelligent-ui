@@ -5,6 +5,7 @@ import { S } from './state'
 import { processRun } from './api'
 
 export async function logDebug($: EngineInterface, cache: string, text: string) {
+  if (!cache) return
   const stamp = new Date().toISOString()
   await processRun($, ['sh', '-c', 'cat >> "$1"', 'sh', `${cache}/debug.log`], { stdin: `[${stamp}] ${text.trimEnd()}\n` }).catch(() => undefined)
 }

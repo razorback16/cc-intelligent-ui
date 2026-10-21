@@ -12,7 +12,7 @@ import { drawnAnswers, S } from './state'
 import { compareVersions } from './updates'
 import { joinSegments, pageTopsOf, textOfRun, type Drawn, type Item, type RunLine, type TextBlock } from './copy'
 import { endFold, foldNew, FRAME_MS, pokeFold, showSelection, startFold } from './blit'
-import { clockAfter } from './api'
+import { clockAfter, clockEvery, uiSelection } from './api'
 
 export type Point = { x: number; y: number }
 export type SelectPhase = 'down' | 'move' | 'up' | 'clear'
@@ -43,10 +43,12 @@ export function redrawSelection($: EngineInterface) {
   else if (next.kind === 'run') void runSelection($)
 }
 
+// A page shown in part (its tinted rows not all made) or drawn again
+// meanwhile: one more run, a frame later.
 async function runSelection($: EngineInterface) {
   startFold(fold, performance.now())
-  await showSelection($, selectedNow()).catch(() => undefined)
-  if (endFold(fold)) redrawSelection($)
+  const again = await showSelection($, selectedNow()).catch(() => false)
+  if (endFold(fold) || again) redrawSelection($)
 }
 
 // The selection's drawing, its pages and their selected rows (none: null).
@@ -56,9 +58,51 @@ function selectedNow() {
   return sel && d ? { id: sel.id, pages: d.pages, rows: selectedRows(sel, d.pages) } : null
 }
 
-// Forgets the fold (for tests).
+// Forgets the fold, the selection and the native watch (for tests).
 export function forgetRedraws() {
   fold = foldNew()
+  stopNative()
+  picked.now = null
+  picked.seq = 0
+  picked.isBroken = false
+}
+
+// A native selection (Claude Code's own) made while a picture selection
+// shows takes ours down (`clear`): no event says so, so `$.ui.selection()`
+// is read every NATIVE_POLL_MS while ours shows, one timer at most. Its
+// answer stays the last one made, so only a new one counts (one there
+// before ours stays as it is).
+export const NATIVE_POLL_MS = 250
+const UNREAD = '\0'
+const native = { timer: null as { cancel: () => void } | null, last: UNREAD as string | undefined }
+const nativeOf = (s: { text: string; requestId?: string } | undefined) => (s ? `${s.requestId ?? ''}|${s.text}` : undefined)
+
+export function watchNative($: EngineInterface, clear: () => void) {
+  if (!picked.now) return stopNative()
+  if (native.timer) return
+  native.last = UNREAD
+  try {
+    native.timer = clockEvery($, NATIVE_POLL_MS, () => void pollNative($, clear).catch(() => undefined))
+  } catch {
+    native.timer = null
+    return
+  }
+  void Promise.resolve(uiSelection($)).then(got => {
+    if (native.last === UNREAD) native.last = nativeOf(got)
+  }, () => undefined)
+}
+
+async function pollNative($: EngineInterface, clear: () => void) {
+  const now = nativeOf(await uiSelection($).catch(() => undefined))
+  if (!native.timer) return
+  const was = native.last
+  native.last = now
+  if (now !== undefined && was !== UNREAD && now !== was) clear()
+}
+
+export function stopNative() {
+  native.timer?.cancel()
+  native.timer = null
 }
 
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v)

@@ -100,7 +100,7 @@ Picture select works in fullscreen mode only. It is on by default. `/iui select 
 
 1. Drag over a picture with the left button. Start the drag on the picture. The selected cells show on a blue background (VS Code's selection colour), in the order of the text: the first row from where you started, the rows between, and the last row to the pointer. The layout does not change.
 2. Release the button. The mod copies the text of the selected cells (the same words that a copy of these cells gives) and shows the toast "copied N chars of text". Then paste.
-3. A click with no drag, a new selection in a different picture, or your next prompt removes the selection.
+3. These remove the selection: a click with no drag in a picture, a new selection in a picture, a key typed in the prompt, a new selection of Claude Code (normal text), your next prompt, and `/iui off` or `/iui select off`. A single click on normal text does not (refer to [Limitations](limitations.md)).
 
 A selection can go on into the next page of the same answer.
 

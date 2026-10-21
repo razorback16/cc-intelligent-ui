@@ -24,7 +24,7 @@ import {
   DEFAULT_THEME, gridText, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_WIDTH, MIN_HEIGHT, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
   SELECT_SINCE, selectText, typstHintOf, widthText,
 } from './lib/settings'
-import { clip, drawnAnswers, editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env, type Job, type Result } from './lib/state'
+import { clip, drawnAnswers, editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env, type Job } from './lib/state'
 import { beginEpoch } from './lib/epoch'
 import { escapeControls, luminanceOf, modeLine, modeOfLuminance, parseOsc11, settingOf } from './lib/mode'
 import { applyTheme, themeListing, userThemesOf } from './lib/themes'
@@ -33,9 +33,11 @@ import { runSetup } from './lib/setup'
 import { pollHost, PROBE_RUNS, probeOsc11, showMode, USE_OSC11, watchHost } from './lib/host'
 import { measureFonts } from './lib/typst'
 import { drawPages, linksFor, type ShownLink } from './lib/draw'
-import { needsSelect, picked, postOf, redrawSelection, runsOf, selectedRows, selectionAfter, selectTrace, textOfRuns, topsOf, type SelectPost, type Selection } from './lib/select'
+import {
+  needsSelect, picked, postOf, redrawSelection, runsOf, selectedRows, selectionAfter, selectTrace, stopNative, textOfRuns, topsOf, watchNative, type SelectPost, type Selection,
+} from './lib/select'
 import { blits, selectColor } from './lib/blit'
-import { needFrames, notePages } from './lib/pagecache'
+import { forgetPages, needFrames, notePages } from './lib/pagecache'
 import { traceDebug } from './lib/log'
 import { finalizeAll } from './lib/stream'
 import { knownWords, noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf, type PageWords } from './lib/probe'
@@ -147,9 +149,11 @@ async function answerEnv($: EngineInterface, e: { viewport?: RenderViewport }): 
 // (the target and shown Frames change only with them, but at setFrame and
 // at the first viewport noted, both before a row is kept), the env, and the
 // viewport's columns (the room: the engine draws every row again once a
-// width change settles; a scroll keeps them).
+// width change settles; a scroll keeps them), and picture select's state
+// (a Client failed, fullscreen or not: its Client is there or not).
 const stampOf = (ready: { env: Env; done: number }, view?: RenderViewport) =>
-  `${ready.done}|${S.epoch}|${S.shownEpoch}|${ready.env.inline ? 1 : 0}|${view?.columns ?? ''}|${roomColumns(view)}`
+  `${ready.done}|${S.epoch}|${S.shownEpoch}|${ready.env.inline ? 1 : 0}|${view?.columns ?? ''}|${roomColumns(view)}|` +
+  `${S.select ? 1 : 0}${picked.isBroken ? 1 : 0}${view?.isFullscreen === true ? 1 : 0}`
 
 // Each row's last drawing, by its requestId: a redraw with the same inputs
 // and the same stamp (a scroll step, a new onScreen) returns the same thing,
@@ -159,8 +163,8 @@ const stampOf = (ready: { env: Env; done: number }, view?: RenderViewport) =>
 // one pointer), `extra` its other inputs.
 type Memo<T> = { text: string; extra: string; stamp: string; onScreen: boolean | undefined; value: T }
 // An answer's tree is kept with its link rows (the copy counts them under
-// its pages) and its pages, a plan's drawing with its link rows.
-type AnswerMemo = { tree: RenderElement; links: readonly ShownLink[]; pages: { result: Result; bytes?: readonly string[] } }
+// its pages), a plan's drawing with its link rows.
+type AnswerMemo = { tree: RenderElement; links: readonly ShownLink[] }
 const answers = new Map<string, Memo<AnswerMemo>>()
 const plans = new Map<string, Memo<{ drawing: Drawing; links: ShownLink[] }>>()
 const unders = new Map<string, Memo<Under[]>>()
@@ -228,7 +232,8 @@ async function planEnv($: EngineInterface): Promise<Env | null> {
 // that fit a page drawn here get a toast that names /iui grab, which reads
 // them (see lib/copy.ts; the drawn pages and the words of a page are in
 // lib/probe.ts). The clipboard is never written but by a copy the person
-// asked for. No timer reads the clipboard or the selection.
+// asked for. No timer reads the clipboard; the selection is read every
+// 250 ms only while a picture selection shows (watchNative).
 
 // Notes a drawing for a copy (noteDrawn, noteDrawnAgain), turns on the
 // watcher's clipboard part and queues its pages for picture select's
@@ -435,9 +440,10 @@ async function dump($: EngineInterface, on: boolean): Promise<string> {
 // A Client's post: the selection after it, shown (once a frame at most, the
 // newest selection). A down puts its page first in the cache (lib/pagecache.ts)
 // and probes its words if they are not there, for the drag's frames and the
-// copy at the up, and lets a page whose blit was refused try again.
+// copy at the up, and lets a page whose blit was refused try again. A down
+// is always taken (a reloaded sel.tsx counts from 0 again).
 function onSelect($: EngineInterface, post: SelectPost, surface: RenderSurface) {
-  if (post.seq <= picked.seq) return
+  if (post.seq <= picked.seq && post.phase !== 'down') return
   picked.seq = post.seq
   const d = drawnAnswers.get(post.id)
   const was = picked.now
@@ -452,6 +458,7 @@ function onSelect($: EngineInterface, post: SelectPost, surface: RenderSurface) 
     }
   }
   if (was || picked.now) redrawSelection($)
+  watchNative($, () => clearSelection($))
   // The copy waits for the page's words when they are not there: the next posts do not.
   if (post.phase === 'up' && d && picked.now) void copySelection($, d, picked.now, surface).catch(() => undefined)
 }
@@ -471,11 +478,15 @@ async function selectionText($: EngineInterface, d: Drawn & { job?: Job }, sel: 
 }
 
 // The button came up: the selection's text on the clipboard, with the
-// toast of a copy. No text under it: nothing is copied.
+// toast of a copy. No text under it: nothing is copied; a newer up while
+// its words are read: the newer one copies.
+let copies = 0
 async function copySelection($: EngineInterface, d: Drawn & { job?: Job }, sel: Selection, surface: RenderSurface) {
   const t = performance.now()
+  const mine = ++copies
   const probed: number[] = []
   const text = await selectionText($, d, sel, probed)
+  if (mine !== copies) return
   const read = performance.now() - t
   if (text === null) {
     uiToast($, 'Intelligent UI: could not read the selected picture')
@@ -502,6 +513,7 @@ async function traceCopy($: EngineInterface, text: string, total: number, read: 
 
 // Picture select now, for /iui details: on, or why it is off.
 function selectState(): string {
+  if (S.cacheProblem) return `off (${S.cacheProblem})`
   if (!S.select) return 'off (/iui select off)'
   if (picked.isBroken) return 'off until a reload (its Client failed: see the debug log)'
   if (!needsSelect(S.engine)) return `off (Claude Code ${S.engine || 'of an unknown version'}; it needs ${SELECT_SINCE} or newer)`
@@ -510,11 +522,20 @@ function selectState(): string {
   return S.isFullscreen === null ? 'on in fullscreen (the screen is not known yet)' : 'on'
 }
 
-// No selection drawn (a new turn, Intelligent UI or select off).
+// No selection drawn (a new turn, typing in the prompt, a native
+// selection, Intelligent UI or select off).
 function clearSelection($: EngineInterface) {
+  stopNative()
   if (!picked.now) return
   picked.now = null
   redrawSelection($)
+}
+
+// Intelligent UI or picture select off: no selection, and the page cache
+// let go (its pages, its build, its pump).
+function releaseSelect($: EngineInterface) {
+  clearSelection($)
+  forgetPages()
 }
 
 // ---- Hooks ----------------------------------------------------------------
@@ -567,9 +588,25 @@ export const register: Register = on => {
   on('ui.fault', async ($, e, next) => {
     if (e.module.endsWith('sel.tsx')) {
       picked.isBroken = true
-      picked.now = null
+      releaseSelect($)
+      // The rows drawn again with no Client.
+      refresh($)
       void Promise.resolve(uiLog($, `Intelligent UI: picture select is off (${e.phase}: ${e.reason})`, { to: 'debug' })).catch(() => undefined)
     }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // Typing in the main prompt takes a picture selection down (a key that
+  // edits, not a bare cursor move); the edit passes on as it is.
+  on('prompt.edit', async ($, e, next) => {
+    if (picked.now && (e.inputText || e.end > e.start)) clearSelection($)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // A change of the prompt box no edit carried (a recalled entry, an undo, a
+  // clear): the same, but not another plugin's fill. Observe only.
+  on('prompt.change', async ($, e, next) => {
+    if (picked.now && e.origin.kind !== 'plugin' && e.origin.kind !== 'app') clearSelection($)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -594,7 +631,7 @@ export const register: Register = on => {
       // On: the clipboard part starts with the next picture drawn.
       if (asked.kind === 'off') {
         stopClipboard($)
-        clearSelection($)
+        releaseSelect($)
       }
       await storeSet($, 'enabled', asked.kind === 'on')
       return { text: `Intelligent UI is ${asked.kind}.` }
@@ -642,7 +679,7 @@ export const register: Register = on => {
       if (asked.on === undefined) await setUp($).catch(() => null)
       else {
         S.select = asked.on
-        if (!S.select) clearSelection($)
+        if (!S.select) releaseSelect($)
         refresh($)
         await storeSet($, 'select', S.select)
       }
@@ -701,7 +738,9 @@ export const register: Register = on => {
     if (asked.kind === 'details') {
       const font = ready.termFont ? `terminal font ${ready.termFont}` : `terminal font not known (${ready.isMac ? 'Menlo' : "the theme's code font"} assumed)`
       const typst = ready.typst ? `Typst: ${ready.typst}` : `Typst: not found (${typstHintOf(ready.isMac)})`
-      const terminal = ready.canDraw
+      const terminal = S.cacheProblem
+        ? `Intelligent UI draws no pictures: ${S.cacheProblem} (it never uses a shared folder instead)`
+        : ready.canDraw
         ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
         : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+ and Rio 0.5.27+ with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
       await clipWayReady()
@@ -712,7 +751,8 @@ export const register: Register = on => {
     // The short state: what is set, and only the problems that keep pictures away.
     const sized = (v: number | 'full' | 'half', unit: string) => (typeof v === 'number' ? `${v} ${unit}` : v)
     const lines = [`Intelligent UI is ${state}: theme ${theme}, ${S.theme}, text ${S.size}%, width ${sized(S.width, 'columns')}, height ${sized(S.height, 'rows')}, grid ${S.grid ? 'on' : 'off'}.`]
-    if (S.setupNeeded) lines.push('In iTerm2, run /iui setup once to show pictures.')
+    if (S.cacheProblem) lines.push(`No pictures: ${S.cacheProblem}. See /iui details.`)
+    else if (S.setupNeeded) lines.push('In iTerm2, run /iui setup once to show pictures.')
     else if (!ready.canDraw) {
       const where = ready.isMac ? 'kitty, Ghostty and iTerm2 3.6+' : 'kitty and Ghostty, and in Rio with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1'
       lines.push(`This terminal shows no pictures, so answers stay text. Pictures show in ${where}.`)
@@ -824,7 +864,7 @@ export const register: Register = on => {
         noteDrawn(e.requestId, result, roomColumns(e.viewport), { top: MARGIN_TOP, after: links.length })
         noteOnScreen(e.requestId, e.props.onScreen)
       })
-      memoSet(answers, e.requestId, k, { tree, links, pages: { result, ...(drawing.bytes ? { bytes: drawing.bytes } : {}) } })
+      memoSet(answers, e.requestId, k, { tree, links })
       return tree
     }
     answers.delete(e.requestId)

@@ -8,11 +8,22 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 - **Picture select.** In fullscreen mode, with Claude Code 2.1.298 or newer, the mod selects the text of a picture itself. Drag over the picture: the selected cells show on a blue background (VS Code's selection colour), and when you release the button, the mod copies their text and shows the toast "copied N chars of text". A click with no drag removes the selection. A selection can go on into the next page of the same answer. The highlight swaps the page's picture with `$.ui.blit` (a frame with the selected cells tinted), so the layout never changes. `/iui select off` turns it off. Refer to [Picture select](docs/usage.md#picture-select-claude-code-21298-or-newer).
 - **Pages ready in the background.** When a page is drawn or comes on the screen, the mod decodes it and finds its words in the background, in short slices, so scrolling and drawing continue. Thus the first highlight and the copy at the button's up do not wait. Refer to [The page cache](docs/how-it-works.md#the-page-cache).
+- **More ways to remove a picture selection:** a key typed in the prompt, and a new selection of Claude Code (normal text). A single click on normal text does not remove it (Claude Code tells a mod nothing about it), and Escape does not either. Refer to [Limitations](docs/limitations.md).
 
 ### Changed
 
 - The automatic copy of 0.3.0 is gone: the mod does not write the clipboard after a copy of picture cells in fullscreen mode. Picture select copies the text of pictures. A copy that still gives picture cells (the main screen, a selection of Claude Code that starts outside a picture) gets a toast that names `/iui grab`, and the clipboard does not change.
 - `/iui details` shows the lines `Picture select:` and `/iui grab hint:` in place of `Auto copy:`.
+- If the private cache folder cannot be used (a link, not a folder, or not yours), the mod draws nothing and tells you why in `/iui`, `/iui details` and a toast. Before, it used the shared folder `/tmp/cc-intelligent-ui`.
+
+### Fixed
+
+- Picture select: a push of the button on a page that had just gone off the screen no longer waits for ever (no highlight until a reload).
+- Picture select: two tall pages on the screen no longer make each other ready again and again (the page cache keeps the pages on the screen, and the page of the selection).
+- Picture select: a drawing drawn again with new page files (a stream, a resize, a theme or size change) no longer keeps its old pages in the queue.
+- Picture select: a slow copy no longer writes the clipboard after a newer copy.
+- Picture select: a selection of many full rows no longer stops the hooks for up to 0.16 s; the tinted rows are made in the background, and a frame makes them for 6 ms at most.
+- Picture select: a lost button up ends the drag; a reloaded Client is not ignored; a Client fault or a change to fullscreen mode takes effect at the next draw; `/iui off` and `/iui select off` let the page cache go; with no `perl`, the mod tries to write a frame one time only.
 
 ## 0.3.0 (2026-10-20)
 

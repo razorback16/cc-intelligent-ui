@@ -132,6 +132,8 @@ export const S = {
   isFullscreen: null as boolean | null,
   // The fullscreen advice was shown (once, on the main screen).
   fullscreenTold: false,
+  // Why there is no cache folder ('' when there is one): nothing is drawn.
+  cacheProblem: '',
   // The key folders in the cache at setUp: a key found there is read back
   // at once (a reopened session), with no queue and no blank.
   onDisk: new Set<string>(),

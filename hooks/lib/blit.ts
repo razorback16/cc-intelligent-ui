@@ -7,17 +7,18 @@
 //
 // The page is decoded once, in the background when it is drawn or comes on
 // screen (pagecache.ts; png.ts: the hooks have no zlib), and kept in memory.
-// Its rows are deflate pieces made once (plain, and tinted the first time a
-// whole row is selected); a frame makes only the selection's first and last
-// rows (partly selected) and joins the pieces: about 1.5 MB for a page of
-// 3392 x 4284. The hooks can write only text, so perl writes the frame
-// (base64 on its stdin) to a file of its own, which the terminal reads.
+// Its rows are deflate pieces made once (plain, and tinted in the
+// background or the first time a whole row is selected, TINT_MS of them a
+// frame); a frame makes only the selection's first and last rows (partly
+// selected) and joins the pieces: up to about 3 MB for a tall page. The
+// hooks can write only text, so perl writes the frame (base64 on its
+// stdin) to a file of its own, which the terminal reads.
 import type { EngineInterface } from 'claude-code'
 
 import { drawnAnswers, S } from './state'
 import { toBase64 } from './png'
-import { frameOf, selectColor } from './frames'
-import { forgetPages, needFrames } from './pagecache'
+import { frameNow, selectColor } from './frames'
+import { forgetPages, holdPages, keyOf, needFrames } from './pagecache'
 import type { DrawnPage } from './copy'
 import type { SelRow } from './select'
 import { perlFor } from './host'
@@ -76,7 +77,8 @@ export const WRITE_PL = 'use MIME::Base64; local $/; my $b = <STDIN>; my ($f, @o
 // Each drawing's site (the requestId its Images are drawn under) and its
 // Images' key prefix, noted by drawPages; what each page shows now (sigOf,
 // by `<id>#<page>`); the frame files written; the reasons logged; pages
-// whose blit was refused (none until the next down).
+// whose blit was refused (none until the next down); `noWriter`: perl
+// could not start (no frame is tried again; the copy still works).
 export const blits = {
   sites: new Map<string, { requestId: string; keys: string }>(),
   shown: new Map<string, string>(),
@@ -85,6 +87,7 @@ export const blits = {
   refused: new Set<string>(),
   seq: 0,
   dir: '',
+  noWriter: false,
 }
 
 // A drawing's site, at each draw of its pages.
@@ -102,6 +105,7 @@ export function forgetBlits() {
   blits.files = []
   blits.seq = 0
   blits.dir = ''
+  blits.noWriter = false
 }
 
 const ms = (t: number) => `${Math.round(t)}ms`
@@ -125,36 +129,45 @@ function nextFile(cache: string, now: number): { path: string; old: string[] } {
   return { path, old: old.map(f => f.path) }
 }
 
-// Shows one page: its own PNG back, or a frame of `rows`.
-async function showPage($: EngineInterface, id: string, i: number, page: DrawnPage, rows: readonly SelRow[], sig: string): Promise<void> {
+// Shows one page: its own PNG back, or a frame of `rows`. True when it
+// should be shown again: a frame with rows drawn plain for now, or one
+// dropped as its row was drawn again meanwhile.
+async function showPage($: EngineInterface, id: string, i: number, page: DrawnPage, rows: readonly SelRow[], sig: string): Promise<boolean> {
   const k = `${id}#${i}`
   const site = blits.sites.get(id)
   const env = S.env
-  if (!site || !env) return
+  if (!site || !env || (rows.length && blits.noWriter)) return false
   const key = `${site.keys}p${i}`
   const rowsText = rows.length ? `rows ${rows[0]!.row}..${rows[rows.length - 1]!.row} (${rows.length})` : 'plain'
   let source: { file: string; format: 'png' } = { file: page.file, format: 'png' }
   let timing = ''
+  let isWhole = true
   if (rows.length) {
     const d = drawnAnswers.get(id)
     const got = await needFrames($, page, selectColor(S.theme), { id, index: i, seq: d?.seq ?? 0 })
     if (!got.frames) {
       blits.shown.set(k, sig)
-      return
+      return false
     }
     const now = await clockNow($).catch(() => Date.now())
     const t1 = performance.now()
-    const png = frameOf(got.frames, rows)
+    const made = frameNow(got.frames, rows)
+    const png = made.png
+    isWhole = made.isWhole
     const t2 = performance.now()
     const { path, old } = nextFile(env.cache, now)
-    const ran = await processRun($, [perlFor(env.isMac), '-e', WRITE_PL, path, ...old], { stdin: toBase64(png) }).catch(err => ({ exitCode: 1, stderr: String(err) }))
+    const ran = await processRun($, [perlFor(env.isMac), '-e', WRITE_PL, path, ...old], { stdin: toBase64(png) }).catch(err => ({ exitCode: -1, stderr: String(err) }))
     const t3 = performance.now()
     if (ran.exitCode !== 0) {
+      // No perl: no frame is tried again.
+      if (ran.exitCode === -1 && /ENOENT|not found/i.test(ran.stderr)) blits.noWriter = true
       logOnce($, `the frame could not be written: ${ran.stderr.trim()}`)
-      return
+      return false
     }
+    // The row was drawn again meanwhile (a new page file, or a new site): this frame is of the old one.
+    if (drawnAnswers.get(id)?.pages[i]?.file !== page.file || blits.sites.get(id) !== site) return true
     source = { file: path, format: 'png' }
-    timing = `wait ${ms(got.waitMs)} frame ${ms(t2 - t1)} write ${ms(t3 - t2)} ${png.length} bytes`
+    timing = `wait ${ms(got.waitMs)} frame ${ms(t2 - t1)}${isWhole ? '' : ' (part)'} write ${ms(t3 - t2)} ${png.length} bytes`
   }
   const t4 = performance.now()
   const res = await uiBlit($, { requestId: site.requestId, key, source }).catch(err => ({ deny: String(err) }))
@@ -163,17 +176,21 @@ async function showPage($: EngineInterface, id: string, i: number, page: DrawnPa
     blits.shown.delete(k)
     blits.refused.add(k)
     logOnce($, `the engine refused the highlight's blit (${res.deny})`)
-    return
+    return false
   }
-  blits.shown.set(k, sig)
+  // A part frame is not what the page is to show: the next run makes the rest.
+  blits.shown.set(k, isWhole ? sig : `${sig}~`)
   traceDebug($, `select: blit ${id} page ${i} ${rowsText} ${timing ? `${timing} ` : ''}${blit}`)
+  return !isWhole
 }
 
 // Brings every page to the selection now: the selected ones to their
 // frames, the ones no longer selected back to their PNG. `selected` gives
-// a drawing's pages and rows (or none).
-export async function showSelection($: EngineInterface, selected: { id: string; pages: readonly DrawnPage[]; rows: readonly (readonly SelRow[])[] } | null) {
+// a drawing's pages and rows (or none). True when a page is to be shown
+// again (showPage).
+export async function showSelection($: EngineInterface, selected: { id: string; pages: readonly DrawnPage[]; rows: readonly (readonly SelRow[])[] } | null): Promise<boolean> {
   const color = selectColor(S.theme)
+  holdPages(selected ? selected.pages.filter((_, i) => selected.rows[i]?.length).map(page => keyOf(page, color)) : [])
   const want = new Map<string, { id: string; i: number; page: DrawnPage; rows: readonly SelRow[] }>()
   if (selected) selected.pages.forEach((page, i) => want.set(`${selected.id}#${i}`, { id: selected.id, i, page, rows: selected.rows[i] ?? [] }))
   // Pages shown with a highlight before, of this drawing or another.
@@ -184,10 +201,13 @@ export async function showSelection($: EngineInterface, selected: { id: string; 
     if (page) want.set(k, { id, i: n, page, rows: [] })
     else blits.shown.delete(k)
   }
+  let again = false
   for (const [k, w] of want) {
-    const sig = sigOf(w.rows, color)
+    // Its page file too: a row drawn again with a new file is shown again.
+    const sig = w.rows.length ? `${sigOf(w.rows, color)}|${w.page.file}` : ''
     if ((blits.shown.get(k) ?? '') === sig || blits.refused.has(k)) continue
-    await showPage($, w.id, w.i, w.page, w.rows, sig)
+    if (await showPage($, w.id, w.i, w.page, w.rows, sig)) again = true
   }
+  return again
 }
 
