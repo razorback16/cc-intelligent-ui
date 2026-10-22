@@ -75,7 +75,7 @@ In other terminals, the mod shows the normal text. Refer to [Install](docs/insta
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="outcomes/out/2-math-dark.png">
         <source media="(prefers-color-scheme: light)" srcset="outcomes/out/2-math-light.png">
-        <img alt="Typeset LaTeX math in Claude Code: the Gaussian integral, Maxwell's equations, a rotation matrix and a piecewise function" src="outcomes/out/2-math-light.png" width="100%">
+        <img alt="Typeset LaTeX math in Claude Code: the Gaussian integral, Maxwell's equations, a rotation matrix, a piecewise function, the Fourier transform and the Schrödinger equation" src="outcomes/out/2-math-light.png" width="100%">
       </picture>
     </td>
   </tr>

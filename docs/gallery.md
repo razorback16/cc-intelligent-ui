@@ -24,12 +24,12 @@ Headings, an image, a table, inline math, a code block with syntax colours, a ta
 
 ## LaTeX math that reads like a paper
 
-Euler's identity, the Gaussian integral, Maxwell's equations, a matrix and a piecewise function.
+Euler's identity, the Gaussian integral, Maxwell's equations, a matrix, a piecewise function, the Fourier transform and the Schrödinger equation.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../outcomes/out/2-math-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../outcomes/out/2-math-light.png">
-  <img alt="Typeset LaTeX math in Claude Code: the Gaussian integral, Maxwell's equations, a rotation matrix and a piecewise function" src="../outcomes/out/2-math-light.png" width="800">
+  <img alt="Typeset LaTeX math in Claude Code: the Gaussian integral, Maxwell's equations, a rotation matrix, a piecewise function, the Fourier transform and the Schrödinger equation" src="../outcomes/out/2-math-light.png" width="800">
 </picture>
 
 ## A fractal, calculated as it draws

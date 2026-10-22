@@ -6,9 +6,9 @@ window.IUI_ANSWERS = [
   "label": "Markdown",
   "ask": "show me what Markdown you can draw",
   "brew": 6,
-  "v": "73f9e536",
+  "v": "2d3feb58",
   "frame": 600,
-  "ratio": 0.94563,
+  "ratio": 0.96625,
   "bullet": 0.00847
  },
  {
@@ -50,9 +50,9 @@ window.IUI_ANSWERS = [
   "label": "LaTeX math",
   "ask": "write out Maxwell's equations",
   "brew": 3,
-  "v": "960ea72a",
+  "v": "b81fd5bb",
   "frame": 600,
-  "ratio": 0.31833,
+  "ratio": 0.415,
   "bullet": 0.02542
  },
  {

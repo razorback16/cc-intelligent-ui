@@ -27,9 +27,9 @@ const page = `<!doctype html><html data-theme="${theme}"><head><meta charset="ut
   #box { padding: ${PAD}px; width: ${W}px; }
   /* The timeline sets every state itself. */
   *, *::before, *::after { transition: none !important; animation: none !important; }
-  /* The raw render is taller than the site's (empty room under the answer): cut at the box. */
-  .t-pic { overflow: hidden; }
-  .t-pic img { height: auto; bottom: auto; }
+  /* The picture at its own pixels (see pic.png below); the clip-path cuts it at the box's
+     bottom (the raw render is taller: room under the answer), not at its other edges. */
+  .t-pic img { height: auto; bottom: auto; right: auto; }
   /* No empty room between the answer and the input box. */
   .t-status { padding-top: calc(var(--pt) * 10); }
   :root[data-theme="dark"] { --shadow: 0 18px 40px -18px rgba(0,0,0,.8); }
@@ -91,7 +91,7 @@ const length = await tab.evaluate(({ a, pic, scale }) => {
     secs.textContent = `(${1 + Math.floor(Math.max(0, step) / 9)}s · esc to interrupt)`;
     dot.style.opacity = now < drawn ? 0 : fade(drawn, 300, now);
     picEl.style.opacity = now < drawn ? 0 : fade(drawn, 350, now);
-    picEl.style.clipPath = now < drawn ? "inset(0 0 100% 0)" : `inset(0 0 ${(1 - ease(Math.min((now - drawn) / ms, 1))) * 100}% 0)`;
+    picEl.style.clipPath = now < drawn ? "inset(0 0 100% 0)" : `inset(-4px -4px ${(1 - ease(Math.min((now - drawn) / ms, 1))) * 100}% -4px)`;
     brew.style.opacity = now < done ? 0 : fade(done, 300, now);
   };
   // One height: the finished answer's, so the window never moves.
@@ -100,11 +100,19 @@ const length = await tab.evaluate(({ a, pic, scale }) => {
   return done + HOLD;
 }, { a, pic, scale });
 
-// The picture made as wide as its box in pixels (Lanczos), as Chrome's own downscale
-// of a large render loses the top rows of its first line.
+// The picture made as wide as its box in pixels (Lanczos), and drawn at whole pixels:
+// Chrome resamples a picture at a fraction of a pixel, which loses its thin edge lines
+// (a code block's left border is one column at x 0).
 const px = await tab.evaluate((dsf) => Math.round(document.querySelector(".t-pic").getBoundingClientRect().width * dsf), dsf);
 await sharp(new URL(pic).pathname).resize({ width: px, kernel: "lanczos3" }).png().toFile(`${out}/pic.png`);
-await tab.evaluate((src) => { document.querySelector(".t-pic img").src = src; }, `file://${out}/pic.png`);
+await tab.evaluate(({ src, px, dsf }) => {
+  const img = document.querySelector(".t-pic img");
+  img.src = src;
+  img.style.width = `${px / dsf}px`;
+  const r = img.getBoundingClientRect();
+  const snap = (v) => (Math.round(v * dsf) - v * dsf) / dsf;
+  img.style.transform = `translate(${snap(r.left)}px, ${snap(r.top)}px)`;
+}, { src: `file://${out}/pic.png`, px, dsf });
 await tab.waitForFunction(() => document.querySelector(".t-pic img").complete);
 await tab.evaluate(() => document.fonts.ready);
 mkdirSync(out, { recursive: true });

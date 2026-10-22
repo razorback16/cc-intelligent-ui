@@ -85,17 +85,28 @@ ls "$out/raw"
 # The bullet offset of a sample (pt), from sizes().
 bullet() { cut -d' ' -f2 "$work/$1.top"; }
 
-# Frames: headline and the prompt for each sample.
-frame() { # name title ask
+# The room (pt) that makes the window of sample $1 as tall as that of $2: the
+# README shows them side by side (0 when $1 is the taller).
+pad() {
+  python3 - "$out/raw/$1-dark-1.png" "$out/raw/$2-dark-1.png" "$img_w" <<'EOF'
+import struct, sys
+size = lambda f: struct.unpack(">II", open(f, "rb").read(24)[16:24])
+(w1, h1), (w2, h2) = size(sys.argv[1]), size(sys.argv[2])
+print(round(max(0, h2 / w2 - h1 / w1) * float(sys.argv[3]), 2))
+EOF
+}
+
+# Frames: headline and the prompt for each sample (and its pad).
+frame() { # name title ask [pad]
   for mode in dark light; do
     typst compile --root / --ppi 216 --input img="$out/raw/$1-$mode-1.png" --input mode=$mode --input bullet="$(bullet "$1")" \
-      --input img-w="$img_w" --input title="$2" --input ask="$3" "$here/frame.typ" "$out/$1-$mode.png" 2>/dev/null
+      --input img-w="$img_w" --input title="$2" --input ask="$3" --input pad="${4:-0}" "$here/frame.typ" "$out/$1-$mode.png" 2>/dev/null
   done
 }
 frame 1-overview "Real Markdown, right in the terminal" \
   "show me what Markdown you can draw"
 frame 2-math "LaTeX math that reads like a paper" \
-  "write out Maxwell's equations"
+  "write out Maxwell's equations" "$(pad 2-math 6-diagrams)"
 frame 3-mandelbrot "A fractal, calculated as it draws" \
   "draw the Mandelbrot set"
 frame 4-fractal "Recursion and colour, live" \
@@ -103,7 +114,7 @@ frame 4-fractal "Recursion and colour, live" \
 frame 5-plot "Plots with axes and a legend" \
   "plot a damped oscillator"
 frame 6-diagrams "Flow charts and commutative diagrams" \
-  "diagram the agent loop and the first isomorphism theorem"
+  "diagram the agent loop and the first isomorphism theorem" "$(pad 6-diagrams 2-math)"
 ls "$out"
 
 # Heroes: each answer in a dark and a light terminal.

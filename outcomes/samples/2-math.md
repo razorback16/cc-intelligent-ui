@@ -20,3 +20,11 @@ R(\theta) = \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta 
 \qquad
 \lvert x \rvert = \begin{cases} x & x \ge 0 \\ -x & x < 0 \end{cases}
 $$
+
+The Fourier transform and the Schrödinger equation:
+
+$$
+\hat{f}(\xi) = \int_{-\infty}^{\infty} f(x)\, e^{-2\pi i x \xi}\,dx,
+\qquad
+i\hbar \frac{\partial}{\partial t} \Psi(x, t) = \hat{H}\, \Psi(x, t)
+$$

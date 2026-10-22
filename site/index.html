@@ -206,8 +206,12 @@
   /* ---------- Gallery ---------- */
   .gallery { padding: clamp(96px, 14vw, 160px) 0 40px; }
   .gallery .kicker { text-align: center; margin: 0 0 44px; font: italic 400 clamp(30px, 4vw, 44px)/1 var(--serif); color: var(--muted); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 32px 28px; align-items: start; }
-  .card { margin: 0; }
+  /* All the cards have one height (the tallest's); a shorter answer leaves room under it, as a terminal does. */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); grid-auto-rows: 1fr; gap: 32px 28px; }
+  .card { margin: 0; display: flex; flex-direction: column; }
+  .card > .t-wrap { flex: 1; display: flex; flex-direction: column; }
+  .card .term { flex: 1; display: flex; flex-direction: column; }
+  .card .t-body { flex: 1; }
   .card figcaption {
     margin-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 12px;
     font: 500 12px/1 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
@@ -289,7 +293,7 @@
   </div>
 </footer>
 
-<script src="assets/answers.js?v=79feb452"></script>
+<script src="assets/answers.js?v=c207e323"></script>
 <script>
 (() => {
   const answers = window.IUI_ANSWERS;

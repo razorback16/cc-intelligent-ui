@@ -1,5 +1,5 @@
 // Outcome frame: Intelligent UI renders in terminal windows, with a headline.
-// One window:  --input img=<abs png> --input mode=dark|light --input ask=..
+// One window:  --input img=<abs png> --input mode=dark|light --input ask=.. [--input pad=<pt>]
 // Hero (two):  --input layout=hero --input img-dark=.. --input img-light=.. --input ask=..
 // Both:        --input title=..   (typst compile --root / frame.typ out.png)
 #let inp = sys.inputs
@@ -57,7 +57,8 @@
         image(img, width: img-w))
       #v(10pt)
       #text(fill: c.dim)[✻ Brewed for 6s]
-      #v(26pt)
+      // `pad` (pt): more empty room, so two windows side by side have one height.
+      #v(26pt + float(inp.at("pad", default: "0")) * 1pt)
       #align(right, text(fill: c.dim)[● high · /effort])
       #v(-4pt)
       #rule
