@@ -16,7 +16,7 @@ import { clip, drawnAnswers, lastKey, results, type Job, type Result } from '../
 import { forgetBlits, over, rgbOf, WRITE_PL } from '../hooks/lib/blit'
 import { forgetRedraws } from '../hooks/lib/select'
 import { chunk, concat, decodePng, deflatePiece, fromBase64, headOf, tailOf, toBase64 } from '../hooks/lib/png'
-import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI, TARGETS_MARKS, TARGETS_MD, TARGETS_PAGE } from './copy-fixture'
+import { LONG_MARKS, LONG_MD, LONG_PAGE, MATH_MARKS, MATH_MD, MATH_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI, TARGETS_MARKS, TARGETS_MD, TARGETS_PAGE } from './copy-fixture'
 
 // One screen row of a picture as Claude Code draws it: `lead` (the gutter),
 // then the cells of `row` from `from` to `to`.
@@ -397,6 +397,17 @@ test('a real probe: a long path, a long URL that wraps and CJK text are on their
   expect(longRows([6])).toMatch(/^a+\/x$/)
   // Every box is inside the page.
   expect(LONG.pages[0]!.every(i => i.x1 <= LONG_PAGE.width && i.y1 <= LONG_PAGE.height)).toBe(true)
+})
+
+const MATH = positionsOf(MATH_MARKS as unknown as Mark[], SMALL_PPI)
+
+test('a real probe: inline math copies as its LaTeX source; display math copies nothing', () => {
+  // Rows: the paragraph's lines 0 and 2, the display math 4-6.
+  const all = Array.from({ length: MATH_PAGE.rows }, (_, row) => ALL_COLUMNS(row))
+  expect(textOfRun(all, MATH.pages[0]!, MATH.blocks, MATH_PAGE)).toBe(MATH_MD.split('\n\n')[0])
+  // The first equation is columns 9-19, its centre in column 14.
+  expect(textOfRun([{ row: 0, colStart: 14, colEnd: 30 }], MATH.pages[0]!, MATH.blocks, MATH_PAGE)).toBe('$e^{i\\pi} + 1 = 0$ and the area')
+  expect(textOfRun([{ row: 0, colStart: 15, colEnd: 30 }], MATH.pages[0]!, MATH.blocks, MATH_PAGE)).toBe('and the area')
 })
 
 test('invisible marks and list markers of other themes are dropped', () => {

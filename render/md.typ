@@ -61,9 +61,9 @@
 #let only = int(inp.at("page", default: "0"))
 // The probe (probe=1) and its marks: see the probe section below.
 #let probe = inp.at("probe", default: "0") not in ("", "0", "false", "no", "off")
-#let mark(kind, ..extra) = context {
+#let mark(kind, dy: 0pt, ..extra) = context {
   let at = here().position()
-  [#metadata((k: kind, p: at.page + calc.max(0, only - 1), x: at.x / 1pt, y: at.y / 1pt, s: text.size.to-absolute() / 1pt, ..extra.named()))<mdpos>]
+  [#metadata((k: kind, p: at.page + calc.max(0, only - 1), x: at.x / 1pt, y: (at.y + dy) / 1pt, s: text.size.to-absolute() / 1pt, ..extra.named()))<mdpos>]
 }
 // Block code sets this so the word rule leaves its text to the line marks;
 // math and live drawings set no-marks. The orphan cost changes nothing
@@ -568,6 +568,8 @@
 //      A word of inline code has `pad`, the theme's padding beside the
 //      code, when it is not 0, and `code`, the whole text of that code.
 //      A word in a link to a URL (a string) has `href`, the URL.
+//      Inline math is one word, its LaTeX source in dollars, boxed as a
+//      word of the text's line (`s` is the math's size); see md-math.
 //   c: a block code line: x its start, y its baseline, a and d the code
 //      font's ascender and descender, w its width, n its characters.
 //   b: a block starts: paragraph, heading, code block, quote, table cell
@@ -576,8 +578,8 @@
 //      its `b`, before its lines), boxed; x, y the top-left of its box, w
 //      and h its size, `code` the block's whole text, `lang` its language
 //      (when the fence has one).
-// Math and live ```typst drawings have no marks (a drawing is scaled, so
-// its marks would not be where it is drawn).
+// Display math, and the text in math and in live ```typst drawings, have no
+// marks (a drawing is scaled, so its marks would not be where it is drawn).
 // With page=<n>, only that segment is laid out, as in the whole document
 // (each segment is a page of its own: its own margins and labels), so a
 // copy probes only the pages it reads; `p` is still the PNG's page.
@@ -1082,9 +1084,20 @@
   (src, block: false) => if block { raw(src, block: true, lang: "latex") } else { raw(src) }
 } else {
   (src, block: false) => {
-    let typ = mitex-convert(latex-bars(if type(src) == str { src } else { src.text }))
-    set text(size: (if block { display-scale } else { inline-scale }) * 1em)
-    math.equation(block: block, eval("$" + typ + "$", scope: latex-scope))
+    let src = if type(src) == str { src } else { src.text }
+    let typ = mitex-convert(latex-bars(src))
+    let body = eval("$" + typ + "$", scope: latex-scope)
+    let scaled(it) = { set text(size: (if block { display-scale } else { inline-scale }) * 1em); it }
+    // The probe: inline math is one word, its LaTeX source, boxed as the
+    // text's line (see the probe). The mark is in the equation, so it is
+    // where the equation starts, also at the start of a wrapped line.
+    if probe and not block { context {
+      let asc = measure(text(bottom-edge: "baseline", "x")).height
+      let h = measure(text("x")).height
+      let w = measure(scaled(math.equation(block: false, body))).width
+      let word = mark("w", dy: -asc, t: "$" + src + "$", w: w / 1pt, h: h / 1pt)
+      scaled(math.equation(block: false, [#word#body]))
+    } } else { scaled(math.equation(block: block, body)) }
   }
 }
 

@@ -7,6 +7,7 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 ### New
 
 - **Links, file paths and commands in the pictures are live** (picture select, fullscreen mode). Move the pointer over one: its cells show on the selection colour. A click copies it: a web link its URL, a file path its full path, a command the full command (toasts "copied the link", "copied the path", "copied the command"). A command is any inline code (for example `` `git status` ``; `` `! cmd` `` copies only `cmd`); a code block is not a target. A drag that starts on one still selects text. Refer to [Click a link, a file or a command](docs/usage.md#click-a-link-a-file-or-a-command).
+- **A copy includes inline math** as its LaTeX source, for example `$A = \pi r^2$`. The mod copies the full equation when the selection covers its middle. Display math is not copied.
 - `IUI_DEBUG=1` writes a `select: click` line with the target of each click, and a `select: hover` line when the target under the pointer changes.
 
 ### Changed
