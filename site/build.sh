@@ -11,7 +11,7 @@ root=$(dirname "$here")
 mkdir -p "$here/assets/render"
 
 python3 - "$root/outcomes" "$here/assets" <<'EOF'
-import json, sys
+import hashlib, json, sys
 from PIL import Image
 outcomes, assets = sys.argv[1:]
 
@@ -27,6 +27,7 @@ answers = [
   ("4-fractal",        "gallery", "CeTZ",           "draw a fractal tree next to a Lissajous curve", 5),
   ("5-plot",           "gallery", "cetz-plot",      "plot a damped oscillator", 4),
   ("6-diagrams",       "gallery", "fletcher",       "diagram the agent loop and the first isomorphism theorem", 5),
+  ("7-candles",        "gallery", "Charts",         "chart two weeks of a stock as candlesticks", 4),
 ]
 
 out = []
@@ -43,10 +44,16 @@ for name, group, label, ask, brew in answers:
     # The bullet's centre, as a part of the picture width (sizes() in outcomes/build.sh, IMG_W 600).
     bullet = float(open(f"{outcomes}/.work/{name}.top").read().split()[1])
     frame = 520 if name.startswith("hero-") else 600
-    out.append(dict(name=name, group=group, label=label, ask=ask, brew=brew,
+    # A version from the pictures' bytes: a new picture gets a new URL.
+    v = hashlib.sha1(b"".join(open(f"{assets}/render/{name}-{m}.webp", "rb").read() for m in ("dark", "light"))).hexdigest()[:8]
+    out.append(dict(name=name, group=group, label=label, ask=ask, brew=brew, v=v,
                     frame=frame, ratio=round(h / px, 5), bullet=round((bullet + 4.2) / 600, 5)))
     print(f"{name}: {px}x{h}")
 
 with open(f"{assets}/answers.js", "w") as f:
     f.write("// Made by site/build.sh. Do not edit.\nwindow.IUI_ANSWERS = " + json.dumps(out, indent=1) + ";\n")
 EOF
+
+# A new answers.js gets a new URL, so no browser keeps the old one.
+v=$(shasum "$here/assets/answers.js" | cut -c1-8)
+perl -pi -e "s#assets/answers\.js\?v=[0-9a-f]*#assets/answers.js?v=$v#" "$here/index.html"

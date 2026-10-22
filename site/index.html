@@ -6,9 +6,11 @@
 <title>Intelligent UI for Claude Code</title>
 <meta name="description" content="Claude's answers, rendered. Real Markdown, LaTeX math, charts and diagrams, right in your terminal.">
 <meta property="og:type" content="website">
+<meta property="og:url" content="https://intelligentui.art/">
+<link rel="canonical" href="https://intelligentui.art/">
 <meta property="og:title" content="Intelligent UI for Claude Code">
 <meta property="og:description" content="Claude's answers, rendered. Real Markdown, math, charts and diagrams, right in your terminal.">
-<meta property="og:image" content="https://razorback16.github.io/cc-intelligent-ui/assets/og.jpg">
+<meta property="og:image" content="https://intelligentui.art/assets/og.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23d97757'/%3E%3Cpath d='M9 11l6 5-6 5' stroke='%2314161f' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='17' y='19' width='7' height='3' rx='1.5' fill='%2314161f'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,7 +26,7 @@
   })();
 </script>
 <style>
-  /* ---------- Page colours (the outcome frames' gradients) ---------- */
+  /* ---------- Page colours: flat, no gradient ---------- */
   :root {
     --serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
     --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -36,13 +38,12 @@
   :root[data-theme="dark"] {
     color-scheme: dark;
     --bg: #14161f;
-    --wash: linear-gradient(35deg, #14161f 0%, #2a1f3d 55%, #3b2416 100%);
     --ink: #f3ece2;
     --muted: #9b948c;
     --line: rgba(243, 236, 226, 0.12);
     --chip: rgba(243, 236, 226, 0.06);
     --accent: #f0a07f;
-    --shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.75), 0 0 140px -30px rgba(217, 119, 87, 0.28);
+    --shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.7);
     /* Claude Code 2.1.301, dark (outcomes/frame.typ) */
     --t-bg: #283237; --t-fg: #ffffff; --t-dim: #a7a5a5; --t-bar: #21211f; --t-title: #b6b6b4;
     --t-edge: #3c4448; --t-sep: #7a7b7c; --t-ask: #343e43; --t-green: #52c96a; --t-mode: #ffd301;
@@ -50,13 +51,12 @@
   :root[data-theme="light"] {
     color-scheme: light;
     --bg: #fdf6ee;
-    --wash: linear-gradient(35deg, #fdf6ee 0%, #efe8fb 55%, #e6f1fb 100%);
     --ink: #1d1d1f;
     --muted: #6d6863;
     --line: rgba(29, 29, 31, 0.12);
     --chip: rgba(29, 29, 31, 0.05);
     --accent: #c25a38;
-    --shadow: 0 40px 90px -30px rgba(60, 40, 90, 0.35), 0 0 140px -40px rgba(217, 119, 87, 0.25);
+    --shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.22);
     /* Claude Code 2.1.301, light (outcomes/frame.typ) */
     --t-bg: #ffffff; --t-fg: #1f1f1f; --t-dim: #6e6e6e; --t-bar: #ececec; --t-title: #4d4d4d;
     --t-edge: #d4d4d4; --t-sep: #b5b5b5; --t-ask: #f0f0f0; --t-green: #2f9e4b; --t-mode: #a07400;
@@ -70,7 +70,6 @@
     font: 400 16px/1.55 var(--sans);
     -webkit-font-smoothing: antialiased;
   }
-  body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: var(--wash); }
   a { color: inherit; }
   img { display: block; }
   :focus-visible { outline: 2px solid var(--clay); outline-offset: 3px; border-radius: 6px; }
@@ -96,13 +95,9 @@
   :root[data-theme="dark"] .sun, :root[data-theme="light"] .moon { display: none; }
 
   /* ---------- Hero ---------- */
-  .hero { padding: 100px 0 0; text-align: center; }
-  h1 { margin: 0 0 clamp(24px, 3vw, 36px); font: 400 clamp(44px, 7.4vw, 92px)/0.95 var(--serif); letter-spacing: -0.025em; }
-  h1 em {
-    font-style: italic; padding-right: 0.05em;
-    background: linear-gradient(100deg, #f2c230, var(--clay) 55%, #b98ae0);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-  }
+  .hero { padding: 64px 0 0; text-align: center; }
+  h1 { margin: 0 0 clamp(14px, 1.8vw, 22px); font: 400 clamp(34px, 4.8vw, 60px)/0.95 var(--serif); letter-spacing: -0.025em; }
+  h1 em { font-style: italic; padding-right: 0.05em; color: var(--clay); }
   .cmd {
     display: inline-flex; align-items: center; gap: 10px; max-width: 100%;
     margin-top: 22px; padding: 6px 6px 6px 16px; border-radius: 12px;
@@ -119,24 +114,21 @@
   .copy:hover { border-color: var(--muted); }
   .copy.done { color: #52c96a; }
 
-  .dock { position: sticky; bottom: 16px; z-index: 5; margin-top: 26px; }
-  .tabs {
-    display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; max-width: 100%;
-    background: color-mix(in srgb, var(--bg) 78%, transparent); border: 1px solid var(--line);
-    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
-    box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.35);
+  /* Four dots: one per answer; the one on shows its time left. Under the window when
+     the screen is tall; in the middle of the window's last line when it is wide. */
+  .hero-box { position: relative; }
+  .dock { margin: 12px 0 0; }
+  @media (orientation: landscape) {
+    .dock { position: absolute; left: 50%; top: var(--dock-y, auto); bottom: auto; margin: 0; z-index: 5; transform: translate(-50%, -50%); }
   }
-  .tab {
-    position: relative; overflow: hidden; cursor: pointer; border: 0; border-radius: 999px;
-    padding: 9px 16px; background: none; color: var(--muted);
-    font: 500 14px/1 var(--sans); white-space: nowrap; transition: color 0.2s, background 0.2s;
-  }
-  .tab:hover { color: var(--ink); }
-  .tab[aria-selected="true"] { background: var(--ink); color: var(--bg); }
-  .tab .bar { position: absolute; left: 14px; right: 14px; bottom: 4px; height: 2px; border-radius: 2px; overflow: hidden; }
+  .tabs { display: inline-flex; gap: 2px; }
+  .tab { position: relative; cursor: pointer; border: 0; padding: 8px 4px; background: none; }
+  .tab .bar { display: block; width: 8px; height: 8px; border-radius: 999px; overflow: hidden; background: var(--line); transition: width 0.3s, background 0.2s; }
+  .tab:hover .bar { background: var(--muted); }
+  .tab[aria-selected="true"] .bar { width: 28px; background: color-mix(in srgb, var(--clay) 30%, var(--line)); }
   .tab .bar i { display: block; height: 100%; width: calc(var(--p, 0) * 100%); background: var(--clay); }
-  .tab:not([aria-selected="true"]) .bar { display: none; }
-  @media (max-width: 520px) { .tab { padding: 9px 11px; font-size: 13px; } }
+  .tab:not([aria-selected="true"]) .bar i { display: none; }
+  .tab:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; border-radius: 999px; }
 
   .stage { position: relative; width: min(100%, 860px); margin: 0 auto; }
   .stage > .t-wrap {
@@ -215,13 +207,16 @@
   .gallery { padding: clamp(96px, 14vw, 160px) 0 40px; }
   .gallery .kicker { text-align: center; margin: 0 0 44px; font: italic 400 clamp(30px, 4vw, 44px)/1 var(--serif); color: var(--muted); }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 32px 28px; align-items: start; }
-  .card { margin: 0; cursor: pointer; }
+  .card { margin: 0; }
   .card figcaption {
-    margin-top: 12px; display: flex; justify-content: space-between; gap: 12px;
+    margin-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 12px;
     font: 500 12px/1 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
   }
-  .card figcaption span:last-child { opacity: 0; transition: opacity 0.2s; }
-  .card:hover figcaption span:last-child, .card:focus-visible figcaption span:last-child { opacity: 1; }
+  .replay {
+    cursor: pointer; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--chip); color: var(--ink); font: inherit; letter-spacing: inherit; text-transform: inherit;
+  }
+  .replay:hover { border-color: var(--muted); }
 
   /* ---------- Footer ---------- */
   footer { padding: 72px 0 56px; text-align: center; }
@@ -260,8 +255,10 @@
   <section class="hero">
     <div class="wrap">
       <h1>Claude’s answers, <em>rendered.</em></h1>
-      <div class="stage" id="stage"></div>
-      <div class="dock"><div class="tabs" role="tablist" aria-label="Example answers" id="tabs"></div></div>
+      <div class="hero-box" id="hero-box">
+        <div class="stage" id="stage"></div>
+        <div class="dock" id="dock"><div class="tabs" role="tablist" aria-label="Example answers" id="tabs"></div></div>
+      </div>
       <div><div class="cmd">
         <code><b>/</b>plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui</code>
         <button class="copy" type="button" data-copy="/plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui">Copy</button>
@@ -292,14 +289,14 @@
   </div>
 </footer>
 
-<script src="assets/answers.js"></script>
+<script src="assets/answers.js?v=79feb452"></script>
 <script>
 (() => {
   const answers = window.IUI_ANSWERS;
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const root = document.documentElement;
   const theme = () => root.dataset.theme;
-  const src = (a, t = theme()) => `assets/render/${a.name}-${t}.webp`;
+  const src = (a, t = theme()) => `assets/render/${a.name}-${t}.webp?v=${a.v}`;
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   // The Claude Code mascot and the mode line's triangle (outcomes/frame.typ).
@@ -392,7 +389,8 @@
     const b = document.createElement("button");
     b.className = "tab"; b.type = "button"; b.id = `tab-${i}`;
     b.setAttribute("role", "tab");
-    b.innerHTML = `${esc(h.a.label)}<span class="bar" aria-hidden="true"><i></i></span>`;
+    b.innerHTML = `<span class="bar" aria-hidden="true"><i></i></span>`;
+    b.setAttribute("aria-label", h.a.label); b.title = h.a.label;
     h.el.id = `panel-${i}`;
     h.el.setAttribute("role", "tabpanel");
     h.el.setAttribute("aria-labelledby", b.id);
@@ -402,15 +400,27 @@
   });
 
   // All four windows have one height, so nothing moves when the tab changes: the tallest
-  // answer's, but no more than fits on the screen with the tabs, so the input box shows.
+  // answer's, but no more than fits on the screen (and the dots, when under it), so the input box shows.
+  const wide = matchMedia("(orientation: landscape)");
+  const box = document.getElementById("hero-box"), dock = document.getElementById("dock");
+  // On a wide screen the dots sit on the middle of the last line ("auto mode on").
+  const placeDock = () => {
+    if (!wide.matches) return;
+    const r = heroes[Math.max(at, 0)].el.querySelector(".t-mode").getBoundingClientRect();
+    dock.style.setProperty("--dock-y", `${r.top + r.height / 2 - box.getBoundingClientRect().top}px`);
+  };
   const level = () => {
     heroes.forEach((h) => { h.term.style.height = ""; });
     const tallest = Math.max(...heroes.map((h) => h.term.offsetHeight));
-    const room = innerHeight - (stage.getBoundingClientRect().top + scrollY) - 96;
+    const room = innerHeight - (stage.getBoundingClientRect().top + scrollY) - (wide.matches ? 24 : 60);
     const px = Math.min(tallest, Math.max(380, room));
     heroes.forEach((h) => { h.term.style.height = px + "px"; });
+    placeDock();
   };
+  let at = -1;
   level();
+  wide.addEventListener("change", level);
+  document.fonts?.ready.then(placeDock);
   // Not for the small height changes of a phone's address bar, which would make it jump.
   let size = [innerWidth, innerHeight];
   addEventListener("resize", () => {
@@ -419,8 +429,8 @@
     level();
   });
 
-  const HOLD = 4000; // the finished answer stays this long
-  let at = -1, elapsed = 0, hover = false;
+  const HOLD = 3000; // the finished answer stays this long
+  let elapsed = 0, hover = false;
   // Take turns only while the hero is on screen.
   let seen = true;
   if ("IntersectionObserver" in window) new IntersectionObserver(([e]) => { seen = e.isIntersecting; }, { threshold: 0.2 }).observe(stage);
@@ -473,30 +483,20 @@
   select(0);
   requestAnimationFrame((t) => { last = t; tick(t); });
 
-  /* ---------- Gallery: each answer plays when it comes into view ---------- */
+  /* ---------- Gallery: each answer shows finished; Replay plays it again ---------- */
   const grid = document.getElementById("grid");
   const cards = answers.filter((a) => a.group === "gallery").map((a) => {
     const t = terminal(a, false);
     t.img.loading = "lazy";
     const fig = document.createElement("figure");
-    fig.className = "card"; fig.tabIndex = 0;
-    fig.setAttribute("aria-label", `${a.label}: ${a.ask}. Press to play again.`);
+    fig.className = "card";
     fig.append(t.el);
-    fig.insertAdjacentHTML("beforeend", `<figcaption><span>${esc(a.label)}</span><span>↻ Play again</span></figcaption>`);
-    fig.addEventListener("click", () => t.play());
-    fig.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); t.play(); } });
-    t.reset();
+    fig.insertAdjacentHTML("beforeend", `<figcaption><span>${esc(a.label)}</span><button class="replay" type="button" aria-label="Replay ${esc(a.label)}">↻ Replay</button></figcaption>`);
+    fig.querySelector(".replay").addEventListener("click", () => t.play());
+    t.final();
     grid.append(fig);
     return { fig, t };
   });
-  if ("IntersectionObserver" in window && !reduce) {
-    const io = new IntersectionObserver((es) => es.forEach((e) => {
-      if (!e.isIntersecting) return;
-      io.unobserve(e.target);
-      cards.find((c) => c.fig === e.target).t.play();
-    }), { threshold: 0.45 });
-    cards.forEach((c) => io.observe(c.fig));
-  } else cards.forEach((c) => c.t.final());
 
   /* ---------- Light or dark: the page, the terminals and the pictures ---------- */
   const all = [...heroes, ...cards.map((c) => c.t)];
