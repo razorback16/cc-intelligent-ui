@@ -40,7 +40,7 @@ const EXTS = new Set(
 )
 
 // A path and its label (the path with its `:line:col`), or null.
-function fileOf(token: string, bare = false): { path: string; label: string } | null {
+export function fileOf(token: string, bare = false): { path: string; label: string } | null {
   const m = FILE.exec(token)
   if (!m || token.includes('://')) return null
   const path = m[1]!
@@ -77,7 +77,7 @@ const labelOf = (md: string) =>
 
 // A bare URL less the punctuation after it: `.,;:!?'"*` and a `)` or `]`
 // that closes nothing in the URL.
-function trimUrl(url: string): string {
+export function trimUrl(url: string): string {
   const count = (c: string) => url.split(c).length - 1
   for (;;) {
     const last = url.at(-1)!

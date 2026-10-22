@@ -32,15 +32,17 @@ import { commandSuggestions, parseCommand, registerCommand } from './lib/command
 import { runSetup } from './lib/setup'
 import { pollHost, PROBE_RUNS, probeOsc11, showMode, USE_OSC11, watchHost } from './lib/host'
 import { measureFonts } from './lib/typst'
-import { drawPages, linksFor, type ShownLink } from './lib/draw'
+import { drawPages, linkRowsOf, linksFor, takesSelect, type ShownLink } from './lib/draw'
 import {
-  needsSelect, picked, postOf, redrawSelection, runsOf, selectedRows, selectionAfter, selectTrace, stopNative, textOfRuns, topsOf, watchNative, type SelectPost, type Selection,
+  clickLinks, hovered, litOf, needsSelect, picked, postOf, redrawSelection, runsOf, sameLit, selectedRows, selectionAfter, selectTrace, stopNative, textOfRuns,
+  topsOf, watchNative, type Hover, type SelectPost, type Selection,
 } from './lib/select'
+import { targetAt, type Target } from './lib/targets'
 import { blits, selectColor } from './lib/blit'
 import { forgetPages, needFrames, notePages } from './lib/pagecache'
 import { traceDebug } from './lib/log'
 import { finalizeAll } from './lib/stream'
-import { knownWords, noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf, type PageWords } from './lib/probe'
+import { knownTargets, knownWords, noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf, type PageWords } from './lib/probe'
 import { codePointsOf, decodeSelection, hasPlaceholders, joinSegments, pageTopsOf, pickPages, textOfRun, type Drawn, type Pick, type Segment } from './lib/copy'
 import { pagesOf, type Drawing } from './lib/answer'
 import { clipboardNow, clipWatchArgs, clipWayReady, hintText } from './lib/clipboard'
@@ -91,6 +93,7 @@ export { nextJob } from './lib/stream'
 export * from './lib/images'
 export { rowsAfter, type Under } from './lib/pictures'
 export * from './lib/copy'
+export { targetAt, targetsOf, type PageTarget, type Target } from './lib/targets'
 export { CLIP_TOOLS, clipToolsOf, clipWayOf, FIND_SH, GTK_READ_PY, GTK_WATCH_PY, hintText, WL_WATCH_SH, X11_WATCH_SH, type ClipTool, type ClipWay } from './lib/clipboard'
 export {
   agoText, checkedOf, compareVersions, isDue, isNewer, parseVersion, shouldTell, toldOf, UPDATE_EVERY_MS, UPDATE_FETCH_MS, UPDATE_STEPS, UPDATE_TOAST_MS,
@@ -162,9 +165,10 @@ const stampOf = (ready: { env: Env; done: number }, view?: RenderViewport) =>
 // `text` the row's text (a string kept as given, so the compare is mostly
 // one pointer), `extra` its other inputs.
 type Memo<T> = { text: string; extra: string; stamp: string; onScreen: boolean | undefined; value: T }
-// An answer's tree is kept with its link rows (the copy counts them under
-// its pages), a plan's drawing with its link rows.
-type AnswerMemo = { tree: RenderElement; links: readonly ShownLink[] }
+// An answer's tree is kept with the link rows drawn under its pages (the
+// copy counts them; none where they take picture select), a plan's drawing
+// with its link rows.
+type AnswerMemo = { tree: RenderElement; after: number }
 const answers = new Map<string, Memo<AnswerMemo>>()
 const plans = new Map<string, Memo<{ drawing: Drawing; links: ShownLink[] }>>()
 const unders = new Map<string, Memo<Under[]>>()
@@ -440,18 +444,30 @@ async function dump($: EngineInterface, on: boolean): Promise<string> {
 // A Client's post: the selection after it, shown (once a frame at most, the
 // newest selection). A down puts its page first in the cache (lib/pagecache.ts)
 // and probes its words if they are not there, for the drag's frames and the
-// copy at the up, and lets a page whose blit was refused try again. A down
-// is always taken (a reloaded sel.tsx counts from 0 again).
+// copy at the up, lets a page whose blit was refused try again, and takes
+// the hover's tint down. A down is always taken (a reloaded sel.tsx counts
+// from 0 again). A hover or a leave moves the tint (hoverAt), after the up
+// or clear it carries; a clear (a click) on a target copies it.
 function onSelect($: EngineInterface, post: SelectPost, surface: RenderSurface) {
+  if (post.end) onSelect($, post.end, surface)
   if (post.seq <= picked.seq && post.phase !== 'down') return
   picked.seq = post.seq
   const d = drawnAnswers.get(post.id)
+  if (post.phase === 'hover' || post.phase === 'leave') {
+    // A leave of a page the pointer is no longer on (it is on another page) changes nothing.
+    const at = hovered.at
+    if (post.phase === 'leave' && at && (at.id !== post.id || at.page !== post.page)) return
+    hoverAt($, post.phase === 'hover' && d ? { id: post.id, page: post.page, x: post.head.x, y: post.head.y } : null)
+    return
+  }
   const was = picked.now
   picked.now = d ? selectionAfter(post, topsOf(d.pages)) : null
   if (S.debug) traceDebug($, selectTrace(post, d, picked.now))
   const page = d?.pages[post.page]
   if (post.phase === 'down') {
     blits.refused.clear()
+    hovered.at = null
+    hovered.lit = null
     if (d && page && S.env) {
       void needFrames($, page, selectColor(S.theme), { id: d.id, index: post.page, seq: d.seq }).catch(() => undefined)
       void wordsOf($, d, post.page).catch(() => undefined)
@@ -461,6 +477,66 @@ function onSelect($: EngineInterface, post: SelectPost, surface: RenderSurface) 
   watchNative($, () => clearSelection($))
   // The copy waits for the page's words when they are not there: the next posts do not.
   if (post.phase === 'up' && d && picked.now) void copySelection($, d, picked.now, surface).catch(() => undefined)
+  if (post.phase === 'clear' && d) {
+    void clickAt($, d, post, surface).catch(() => undefined)
+    // The pointer is still there: its target tinted again.
+    hoverAt($, { id: post.id, page: post.page, x: post.head.x, y: post.head.y })
+  }
+}
+
+// No links of a drawing known (its pages drawn with no picture select yet).
+const NO_LINKS: readonly ShownLink[] = []
+
+// The pointer over a page with no button down (null: off it): the target
+// under it tinted, while no selection shows. A new page's words are probed
+// when they are not known (the tint once they are); the tint's blit asks for
+// the page's frames (needFrames), as a down does.
+function hoverAt($: EngineInterface, at: Hover | null) {
+  const was = hovered.at
+  hovered.at = at
+  const d = at ? drawnAnswers.get(at.id) : undefined
+  if (at && d && (was?.id !== at.id || was.page !== at.page) && !knownWords(d, at.page)) {
+    void wordsOf($, d, at.page).then(() => lightHover($), () => undefined)
+  }
+  lightHover($)
+}
+
+// The hover's target tinted (none while a selection shows), redrawn when it changed.
+function lightHover($: EngineInterface) {
+  const at = hovered.at
+  const d = at ? drawnAnswers.get(at.id) : undefined
+  const targets = at && d && !picked.now ? knownTargets(d, at.page, clickLinks.get(at.id) ?? NO_LINKS) : undefined
+  const lit = at && targets ? litOf(at, targets) : null
+  if (sameLit(lit, hovered.lit)) return
+  hovered.lit = lit
+  if (S.debug) traceDebug($, lit ? `select: hover ${lit.id} page ${lit.page} target ${lit.index} (${targets?.[lit.index]?.target.kind}) rows ${lit.rows.map(r => `${r.row}:${r.x0}-${r.x1}`).join(',')}` : 'select: hover none')
+  redrawSelection($)
+}
+
+// A click (a clear) on a target of the page copies its text (a link's URL,
+// a file's path, a command). The page's words are probed first when they
+// are not known.
+async function clickAt($: EngineInterface, d: Drawn & { job?: Job }, post: SelectPost, surface: RenderSurface) {
+  const links = () => clickLinks.get(d.id) ?? NO_LINKS
+  let targets = knownTargets(d, post.page, links())
+  if (!targets) {
+    await wordsOf($, d, post.page)
+    targets = knownTargets(d, post.page, links())
+  }
+  const target = targets?.[targetAt(targets, post.anchor.x, post.anchor.y)]?.target
+  if (S.debug) traceDebug($, `select: click ${d.id} page ${post.page} at ${post.anchor.x},${post.anchor.y} target ${target ? target.kind : 'none'}`)
+  if (target) await copyTarget($, target, surface)
+}
+
+// A target's text on the clipboard (clickAt), with its toast.
+async function copyTarget($: EngineInterface, target: Target, surface: RenderSurface) {
+  const text = target.kind === 'web' ? target.href : target.kind === 'file' ? target.path : target.text
+  const name = target.kind === 'web' ? 'link' : target.kind === 'file' ? 'path' : 'command'
+  // The clipboard change of this text is not read again.
+  clip.wrote = text
+  clip.seen = text
+  const copied = await uiCopy($, { text, surface })
+  uiToast($, copied.isCopied ? `Intelligent UI: copied the ${name}` : `Intelligent UI: the copy failed: ${copied.reason}`)
 }
 
 // The text of a selection's cells, page by page, as a copy of those cells
@@ -522,12 +598,14 @@ function selectState(): string {
   return S.isFullscreen === null ? 'on in fullscreen (the screen is not known yet)' : 'on'
 }
 
-// No selection drawn (a new turn, typing in the prompt, a native
-// selection, Intelligent UI or select off).
+// No selection drawn, and no hover tint (a new turn, typing in the prompt,
+// a native selection, Intelligent UI or select off).
 function clearSelection($: EngineInterface) {
   stopNative()
-  if (!picked.now) return
+  hovered.at = null
+  if (!picked.now && !hovered.lit) return
   picked.now = null
+  hovered.lit = null
   redrawSelection($)
 }
 
@@ -854,7 +932,7 @@ export const register: Register = on => {
     // under them; the rows on screen at each draw, a memo hit too.
     if (kept) {
       noteCopy($, e.requestId, () => {
-        noteDrawnAgain(e.requestId, roomColumns(e.viewport), { top: MARGIN_TOP, after: kept.links.length })
+        noteDrawnAgain(e.requestId, roomColumns(e.viewport), { top: MARGIN_TOP, after: kept.after })
         noteOnScreen(e.requestId, e.props.onScreen)
       })
       return kept.tree
@@ -864,11 +942,12 @@ export const register: Register = on => {
       const links = await linksFor($, e.props.text, ready.env.cwd)
       const tree = drawPages($, e, drawing.result, drawing.bytes, { bullet, links, id: e.requestId })
       const { result } = drawing
+      const after = linkRowsOf(links, takesSelect($, e, drawing.bytes))
       noteCopy($, e.requestId, () => {
-        noteDrawn(e.requestId, result, roomColumns(e.viewport), { top: MARGIN_TOP, after: links.length })
+        noteDrawn(e.requestId, result, roomColumns(e.viewport), { top: MARGIN_TOP, after })
         noteOnScreen(e.requestId, e.props.onScreen)
       })
-      memoSet(answers, e.requestId, k, { tree, links })
+      memoSet(answers, e.requestId, k, { tree, after })
       return tree
     }
     answers.delete(e.requestId)
@@ -896,15 +975,17 @@ export const register: Register = on => {
         const k = { text: files.map(f => `${f.kind}:${f.path}`).join('\n'), extra: pdfPagesOf(id, files), stamp: stampOf(ready, e.viewport), onScreen }
         // Its jobs: one per Markdown file (pagesOf's id `file:<id>:<path>`).
         const kept = memoOf(unders, id, k, requestId => requestId.startsWith(`file:${id}:`))
-        // Each Markdown file's pages with the rows drawn after them (rowsAfter)
-        // and the row's rows on screen, at each draw.
+        // Each Markdown file's pages with the rows drawn after them (rowsAfter:
+        // no link rows where they take picture select) and the row's rows on
+        // screen, at each draw.
         const room = roomColumns(e.viewport)
+        const isSelect = takesSelect($, e)
         if (kept) {
           under = kept
           kept.forEach((u, i) => {
             if (!('drawing' in u)) return
             noteCopy($, u.id, () => {
-              noteDrawnAgain(u.id, room, { after: rowsAfter(kept, i, room) })
+              noteDrawnAgain(u.id, room, { after: rowsAfter(kept, i, room, isSelect) })
               noteOnScreen(u.id, e.props.onScreen)
             })
           })
@@ -917,7 +998,7 @@ export const register: Register = on => {
             if (!('drawing' in u) || u.drawing.kind !== 'pages') return
             const { result } = u.drawing
             noteCopy($, u.id, () => {
-              noteDrawn(u.id, result, room, { after: rowsAfter(drawn, i, room) })
+              noteDrawn(u.id, result, room, { after: rowsAfter(drawn, i, room, isSelect) })
               noteOnScreen(u.id, e.props.onScreen)
             })
           })
@@ -1001,12 +1082,13 @@ export const register: Register = on => {
       // Its pages can be copied as an answer's, by the call's id (the row's
       // requestId can be an answer's own). The engine's row is above them:
       // their place is read from the bottom (pageTopsOf), under them its
-      // link rows.
+      // link rows (none where they take picture select).
       if (drawing.kind === 'pages') {
         const { result } = drawing
         const id = `plan:${e.props.tool_use_id}`
+        const after = linkRowsOf(links, takesSelect($, e, drawing.bytes))
         noteCopy($, id, () => {
-          noteDrawn(id, result, roomColumns(e.viewport), { after: links.length })
+          noteDrawn(id, result, roomColumns(e.viewport), { after })
           noteOnScreen(id, e.props.onScreen)
         })
       }

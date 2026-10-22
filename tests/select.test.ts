@@ -1,7 +1,14 @@
 import { expect, test } from 'claude-code/testing'
 
 import { decodeSelection, placeholderCell, positionsOf, textOfRun, type Mark } from '../hooks/register'
-import { needsSelect, postOf, rowsAbove, runsOf, selectedRows, selectionAfter, selectTrace, textOfRuns, topsOf, type SelectPost } from '../hooks/lib/select'
+import {
+  forgetRedraws, hovered, litOf, needsSelect, picked, postOf, rowsAbove, runsOf, sameLit, selectedNow, selectedRows, selectionAfter, selectTrace, textOfRuns, topsOf,
+  type SelectPost,
+} from '../hooks/lib/select'
+import type { PageTarget } from '../hooks/lib/targets'
+import { linkRowsOf, type ShownLink } from '../hooks/lib/draw'
+import { rowsAfter, type Under } from '../hooks/lib/pictures'
+import { drawnAnswers } from '../hooks/lib/state'
 import { SMALL_MARKS, SMALL_PAGE, SMALL_PPI } from './copy-fixture'
 
 // ---- The posts --------------------------------------------------------------
@@ -38,6 +45,79 @@ test('a post keeps its region\'s size when it is whole cells; a bad one is dropp
   expect(postOf({ ...post(), size: { columns: 98 } })).toEqual(post())
   expect(postOf({ ...post(), size: { columns: 98, rows: 1.5 } })).toEqual(post())
   expect(postOf({ ...post(), size: null })).toEqual(post())
+})
+
+test('a hover and a leave are posts too; each keeps only an up or a clear as its end', () => {
+  const up = post({ phase: 'up', seq: 4 })
+  expect(postOf({ ...post({ phase: 'hover', seq: 5 }), end: up })).toEqual(post({ phase: 'hover', seq: 5, end: up }))
+  expect(postOf({ ...post({ phase: 'leave', seq: 5 }), end: post({ phase: 'clear', seq: 4 }) })?.end?.phase).toBe('clear')
+  // An end that is not an up or a clear, one with an end of its own, or one on a drag phase: dropped, the post kept.
+  expect(postOf({ ...post({ phase: 'hover', seq: 5 }), end: post({ phase: 'move', seq: 4 }) })).toEqual(post({ phase: 'hover', seq: 5 }))
+  expect(postOf({ ...post({ phase: 'hover', seq: 5 }), end: { ...up, end: up } })?.end).toEqual(up)
+  expect(postOf({ ...post({ phase: 'up', seq: 5 }), end: up })).toEqual(post({ phase: 'up', seq: 5 }))
+  // A hover or a leave selects nothing.
+  expect(selectionAfter(post({ phase: 'hover' }), [0])).toBe(null)
+  expect(selectionAfter(post({ phase: 'leave' }), [0])).toBe(null)
+})
+
+// ---- Links, files and commands ---------------------------------------------------
+
+const TARGETS: PageTarget[] = [
+  { target: { kind: 'web', href: 'https://example.com' }, rows: [{ row: 3, x0: 4, x1: 11 }] },
+  { target: { kind: 'command', text: 'echo hello\nls -la' }, rows: [{ row: 9, x0: 2, x1: 12 }, { row: 10, x0: 2, x1: 8 }] },
+]
+
+test('a hover tints the target under it: its cells, by reference; none off the targets', () => {
+  const at = { id: 'ans-1', page: 1, x: 5, y: 10 }
+  const lit = litOf(at, TARGETS)
+  expect(lit).toEqual({ id: 'ans-1', page: 1, index: 1, rows: TARGETS[1]!.rows })
+  expect(lit?.rows).toBe(TARGETS[1]!.rows)
+  expect(litOf({ ...at, x: 9 }, TARGETS)).toBe(null)
+  expect(litOf({ ...at, x: 11, y: 3 }, TARGETS)?.index).toBe(0)
+  expect(sameLit(lit, litOf({ ...at, x: 2, y: 9 }, TARGETS))).toBe(true)
+  expect(sameLit(lit, litOf({ ...at, x: 4, y: 3 }, TARGETS))).toBe(false)
+  expect(sameLit(lit, { ...lit!, page: 0 })).toBe(false)
+  expect(sameLit(null, null)).toBe(true)
+  expect(sameLit(lit, null)).toBe(false)
+})
+
+test('the pages show the selection; with none, the hovered target on its page only', () => {
+  forgetRedraws()
+  const pages = [{ file: '/c/p-1.png', width: 1568, height: 512, columns: 98, rows: 16 }, { file: '/c/p-2.png', width: 1568, height: 512, columns: 98, rows: 16 }]
+  drawnAnswers.set('ans-9', { id: 'ans-9', seq: 1, dir: '/c', pages })
+  try {
+    expect(selectedNow()).toBe(null)
+    hovered.lit = { id: 'ans-9', page: 1, index: 0, rows: [{ row: 3, x0: 4, x1: 11 }] }
+    expect(selectedNow()).toEqual({ id: 'ans-9', pages, rows: [[], [{ row: 3, x0: 4, x1: 11 }]] })
+    // A selection wins over the tint.
+    picked.now = { id: 'ans-9', anchor: { x: 0, y: 1 }, head: { x: 3, y: 1 }, isUp: true }
+    expect(selectedNow()?.rows).toEqual([[{ row: 1, x0: 0, x1: 3 }], []])
+    // A drawing no longer known: nothing.
+    picked.now = null
+    hovered.lit = { ...hovered.lit, id: 'gone' }
+    expect(selectedNow()).toBe(null)
+  } finally {
+    drawnAnswers.delete('ans-9')
+    forgetRedraws()
+  }
+})
+
+test('the link rows under pages: one a link, none where the pages take picture select', () => {
+  const links: ShownLink[] = [{ kind: 'web', label: 'x', href: 'https://x.org' }, { kind: 'command', label: 'ls', text: 'ls' } as ShownLink]
+  expect(linkRowsOf(links, false)).toBe(2)
+  expect(linkRowsOf(links, true)).toBe(0)
+  expect(linkRowsOf(undefined, false)).toBe(0)
+  const result = { pages: [{ file: '/c/k/a-1.png', width: 1568, height: 128, columns: 98, rows: 4, alt: '' }], bulletRow: 0 }
+  const under: Under[] = [
+    { drawing: { kind: 'pages', result }, id: 'file:t:a.md', links },
+    { drawing: { kind: 'pages', result }, id: 'file:t:b.md', links },
+  ]
+  // The first file: its own link rows, the second's pages and link rows.
+  expect(rowsAfter(under, 0, 100)).toBe(2 + 4 + 2)
+  expect(rowsAfter(under, 0, 100, true)).toBe(4)
+  // Pages sent as bytes (over ssh) have no Client: their link rows are drawn.
+  const bytes: Under[] = under.map(u => ('drawing' in u && u.drawing.kind === 'pages' ? { ...u, drawing: { ...u.drawing, bytes: [''] } } : u))
+  expect(rowsAfter(bytes, 0, 100, true)).toBe(2 + 4 + 2)
 })
 
 // ---- Scrolled pages -------------------------------------------------------------

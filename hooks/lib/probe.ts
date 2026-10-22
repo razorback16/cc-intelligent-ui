@@ -11,6 +11,8 @@ import { clip, DRAWN_KEPT, drawnAnswers, keep, lastKey, results, type Job, type 
 import { fitBox } from './terminal'
 import { isSafePage, probePage } from './typst'
 import { screenOf, type Drawn, type DrawnPage, type Item, type TextBlock } from './copy'
+import { targetsOf, type PageTarget } from './targets'
+import type { ShownLink } from './draw'
 
 // Notes the pages of `id` as drawn now, each at fitBox(page, room), as
 // drawPages draws it, with the Job of the key the row drew last (lastKey:
@@ -90,8 +92,26 @@ export async function wordsOf($: EngineInterface, d: Drawn & { job?: Job }, page
   return got
 }
 
+// The click targets of the pages whose words are known (targets.ts), by
+// page key and box, with the links they were made from.
+const targeted = new Map<string, { links: readonly ShownLink[]; targets: PageTarget[] }>()
+
+// A page's click targets once its words are known (undefined: not yet), made once.
+export function knownTargets(d: Drawn, page: number, links: readonly ShownLink[]): PageTarget[] | undefined {
+  const words = probed.get(pageKey(d, page))
+  const box = d.pages[page]
+  if (!words || !box) return undefined
+  const key = `${pageKey(d, page)}|${box.columns}x${box.rows}`
+  const kept = targeted.get(key)
+  if (kept?.links === links) return kept.targets
+  const targets = targetsOf(words, box, links)
+  keep(targeted, key, { links, targets }, PROBED_KEPT)
+  return targets
+}
+
 // Forgets the pages probed (for tests).
 export function forgetProbed() {
   probed.clear()
   inflight.clear()
+  targeted.clear()
 }

@@ -132,13 +132,19 @@ export type Mark = {
   cx?: number
   g?: number
   pad?: number
+  href?: string
+  code?: string
 }
 // A word, or a whole code line (`adv`: its character advance), in PNG
 // pixels: its box, the block it is in, and its place in the document (`i`).
 // `glued`: a character of a long word or of CJK text after the first (it
 // joins the one before with no space). A word's `em` is its text size and
-// `pad` the padding beside inline code (a word of it), in pixels.
-export type Item = { i: number; text: string; x0: number; y0: number; x1: number; y1: number; block: number; adv?: number; glued?: boolean; em?: number; pad?: number }
+// `pad` the padding beside inline code (a word of it), in pixels. `href`: the
+// URL of the link it is in; `code`: the whole text of the inline code it is in.
+export type Item = {
+  i: number; text: string; x0: number; y0: number; x1: number; y1: number; block: number; adv?: number; glued?: boolean; em?: number; pad?: number
+  href?: string; code?: string
+}
 // A block: paragraph, heading, code, quote, cell (`cx` its column), item
 // (`prefix`); `first` its first item.
 export type TextBlock = { kind: string; prefix: string; cx?: number; first: number }
@@ -167,7 +173,8 @@ function isMarker(marks: readonly Mark[], j: number): boolean {
 // The probe's marks (document order) as boxes in pixels at `ppi`. A list's
 // marker is dropped (isMarker). A block mark with no word since the last one
 // (an item, then its paragraph) adds to that block. A word of only
-// invisible characters is dropped.
+// invisible characters is dropped. A link's URL and an inline code's text go
+// to its words.
 export function positionsOf(marks: readonly Mark[], ppi: number): Positions {
   const k = ppi / 72
   const blocks: TextBlock[] = []
@@ -201,6 +208,7 @@ export function positionsOf(marks: readonly Mark[], ppi: number): Positions {
             i: count, text: (m.t ?? '').replace(INVISIBLE, ''), block, x0: round(m.x * k), x1: round((m.x + (m.w ?? 0)) * k),
             y0: round(m.y * k), y1: round((m.y + (m.h ?? m.s ?? 11)) * k), ...(m.g ? { glued: true } : {}),
             ...(m.s ? { em: round(m.s * k) } : {}), ...(m.pad ? { pad: round(m.pad * k) } : {}),
+            ...(m.href ? { href: m.href } : {}), ...(m.code ? { code: m.code } : {}),
           }
     if (!item.text) return
     count++

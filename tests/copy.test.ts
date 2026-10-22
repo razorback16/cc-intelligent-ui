@@ -16,7 +16,7 @@ import { clip, drawnAnswers, lastKey, results, type Job, type Result } from '../
 import { forgetBlits, over, rgbOf, WRITE_PL } from '../hooks/lib/blit'
 import { forgetRedraws } from '../hooks/lib/select'
 import { chunk, concat, decodePng, deflatePiece, fromBase64, headOf, tailOf, toBase64 } from '../hooks/lib/png'
-import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI } from './copy-fixture'
+import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI, TARGETS_MARKS, TARGETS_MD } from './copy-fixture'
 
 // One screen row of a picture as Claude Code draws it: `lead` (the gutter),
 // then the cells of `row` from `from` to `to`.
@@ -84,6 +84,32 @@ test('probe marks become pixel boxes; a list number is dropped and an item takes
     { i: 1, text: 'one', block: 1, x0: 60, x1: 90, y0: 60, y1: 84 },
     { i: 2, text: 'ab', block: 1, x0: 20, x1: 44, y0: 104, y1: 124, adv: 12 },
   ])
+})
+
+test("a word keeps its link's URL and its inline code's text", () => {
+  const marks: Mark[] = [
+    { k: 'b', p: 1, x: 0, y: 0, kind: 'par' },
+    { k: 'w', p: 1, x: 0, y: 0, t: 'docs', w: 10, h: 12, href: 'https://x.io' },
+    { k: 'w', p: 1, x: 20, y: 0, t: 'a.ts', w: 10, h: 12, code: 'a.ts', pad: 1 },
+    { k: 'b', p: 1, x: 0, y: 20, kind: 'item', prefix: '- ' },
+    { k: 'b', p: 1, x: 0, y: 20, kind: 'code' },
+    { k: 'c', p: 1, x: 0, y: 30, t: 'ls', w: 12, n: 2, a: 8, d: 2 },
+    { k: 'b', p: 1, x: 0, y: 40, kind: 'code' },
+    { k: 'c', p: 1, x: 0, y: 50, t: 'x', w: 6, n: 1, a: 8, d: 2 },
+  ]
+  const got = positionsOf(marks, 72)
+  expect(got.blocks).toEqual([
+    { kind: 'par', prefix: '', first: 0 },
+    { kind: 'item', prefix: '- ', first: 2 },
+    { kind: 'code', prefix: '', first: 3 },
+  ])
+  expect(got.pages[0]!.map(w => [w.text, w.href, w.code])).toEqual([
+    ['docs', 'https://x.io', undefined],
+    ['a.ts', undefined, 'a.ts'],
+    ['ls', undefined, undefined],
+    ['x', undefined, undefined],
+  ])
+  expect(got.pages[0]![1]).toEqual({ i: 1, text: 'a.ts', block: 0, x0: 20, x1: 30, y0: 0, y1: 12, pad: 1, code: 'a.ts' })
 })
 
 // A hand-made page: 10 columns of 10 px, 4 rows of 20 px.
@@ -507,7 +533,10 @@ const inputsOf = (argv: readonly string[]) => Object.fromEntries(argv.flatMap((a
 // before each frame write; `refused`: the cache folder sweep refuses that folder.
 function world(
   on: any,
-  o: { failFirst?: boolean; noBridge?: boolean; env?: Record<string, string>; tty?: string; version?: string; deny?: string; noPerl?: boolean; beforeWrite?: () => Promise<void>; refused?: string } = {},
+  o: {
+    failFirst?: boolean; noBridge?: boolean; env?: Record<string, string>; tty?: string; version?: string; deny?: string; noPerl?: boolean; beforeWrite?: () => Promise<void>
+    refused?: string; marks?: readonly object[]
+  } = {},
 ) {
   forgetBlits()
   forgetRedraws()
@@ -590,7 +619,7 @@ function world(
     queries.push(inputs)
     if (w.gate) await Promise.race([w.gate, dead])
     if (killed) return { value: { code: null, signal: 'SIGTERM' } }
-    yield { stream: 'stdout', text: JSON.stringify(SMALL_MARKS.map(m => ({ ...m, p: Number(inputs.page) }))) }
+    yield { stream: 'stdout', text: JSON.stringify((o.marks ?? SMALL_MARKS).map(m => ({ ...m, p: Number(inputs.page) }))) }
     return { value: { code: 0, signal: null } }
   })
   on('process.run', async ($: any, e: any) => {
@@ -1665,6 +1694,169 @@ test('picture select: with no perl the first frame write fails, is logged once a
   expect(w.writes).toBe(1)
   expect(w.logs.filter(l => l.includes('could not be written')).length).toBe(1)
   expect(w.copies).toEqual([COPIED, COPIED])
+})
+
+// ---- Picture select: links, files and commands --------------------------------
+
+// TARGETS_MD drawn as `ans-1` (its probe the fixture's TARGETS_MARKS), with
+// src/a.ts a file in the session's folder /w. Its targets (targets.test.ts):
+// the link "the docs" row 3 columns 4 to 11, the bare URL row 3 16 to 45,
+// `! ls -la` row 4 50 to 58, src/a.ts row 6 5 to 13 (the bash block rows 9 and 10: no target).
+async function drawTargets($: any, on: any, o: { env?: Record<string, string> } = {}, isFullscreen: boolean | null = true) {
+  const w = world(on, { tty: TTY, marks: TARGETS_MARKS, ...o })
+  on('session.cwd', async () => ({ value: '/w' }))
+  on('fs.exists', async ($: any, e: any) => ({ value: e.path === '/w/src/a.ts' }))
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const ui = await drawAnswer($, w, 'ans-1', TARGETS_MD, isFullscreen)
+  await settle(w)
+  return { w, ui }
+}
+const hover = (ui: any, x: number, y: number) => ui.pointer({ type: 'move', x, y, in: 'sel0' })
+const click = async (ui: any, x: number, y: number, o: { button?: 'left' | 'right'; ctrl?: true } = {}) => {
+  const ev = { x, y, button: o.button ?? 'left', ...(o.ctrl ? { ctrl: o.ctrl } : {}), in: 'sel0' }
+  await ui.pointer({ type: 'down', ...ev })
+  await ui.pointer({ type: 'up', ...ev })
+}
+
+test('picture select: the link rows are not drawn under pages that take it, and the copy counts none of them', async ($, on) => {
+  const { w, ui } = await drawTargets($, on, { env: { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1', IUI_DEBUG: '1' } })
+  expect(tree(await ui.drawn()).some(n => n.type === 'Link' || n.type === 'Button')).toBe(false)
+  // The message: the top margin and the page's 16 rows, nothing under them: the page's top is row 1.
+  await ui.redraw({ ...props(TARGETS_MD), onScreen: { first: 0, last: 16, of: 17 } })
+  await settle(w)
+  await ui.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'sel0' })
+  await settle(w)
+  expect(w.traces.find(t => t.includes('select: down #'))).toContain(' top 1 above 0 ')
+})
+
+test('picture select: on the main screen the link rows are drawn as before', async ($, on) => {
+  const { ui } = await drawTargets($, on, {}, false)
+  const drawn = await ui.drawn()
+  expect(tree(drawn).filter(n => n.type === 'Link').map(n => n.props.href)).toEqual(['https://example.com', 'https://typst.app/docs/reference', 'file:///w/src/a.ts'])
+  expect(tree(drawn).filter(n => n.type === 'Button').length).toBe(2)
+})
+
+test('picture select: a hover over a link tints its cells; off it, or a leave, puts the page back', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  expect(w.blits).toEqual([])
+  // Over a word that is no target: nothing.
+  await hover(ui, 1, 3)
+  await settle(w)
+  expect(w.blits).toEqual([])
+  await hover(ui, 6, 3)
+  await settle(w)
+  expect(isFrame(w)).toBe(true)
+  const png = w.frames.at(-1)!.png
+  expect([cellOf(png, 3, 4), cellOf(png, 3, 11)]).toEqual(['selected', 'selected'])
+  expect([cellOf(png, 3, 3), cellOf(png, 3, 12), cellOf(png, 2, 6), cellOf(png, 4, 6)]).toEqual(['page', 'page', 'page', 'page'])
+  // Within the same target: no new frame.
+  const frames = w.frames.length
+  await hover(ui, 9, 3)
+  await settle(w)
+  expect(w.frames.length).toBe(frames)
+  await hover(ui, 13, 3)
+  await settle(w)
+  expect(isPlain(w)).toBe(true)
+  await hover(ui, 20, 3)
+  await settle(w)
+  expect(isFrame(w)).toBe(true)
+  await ui.pointer({ type: 'leave', x: 20, y: 3, in: 'sel0' })
+  await settle(w)
+  expect(isPlain(w)).toBe(true)
+})
+
+test('picture select: a down takes the hover tint down, and no hover tints while a selection shows', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  await hover(ui, 6, 3)
+  await settle(w)
+  expect(isFrame(w)).toBe(true)
+  // A drag that starts on the link selects text.
+  await ui.pointer({ type: 'down', x: 6, y: 3, button: 'left', in: 'sel0' })
+  await settle(w)
+  expect(isPlain(w)).toBe(true)
+  await ui.pointer({ type: 'move', x: 20, y: 3, button: 'left', in: 'sel0' })
+  await ui.pointer({ type: 'up', x: 30, y: 3, button: 'left', in: 'sel0' })
+  await settle(w)
+  expect(w.copies.length).toBe(1)
+  const blits = w.blits.length
+  await hover(ui, 52, 4)
+  await settle(w)
+  expect(w.blits.length).toBe(blits)
+})
+
+test('picture select: a click copies a link, a file\'s path or a command; a click off them clears as before', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  await click(ui, 6, 3)
+  await settle(w)
+  await click(ui, 30, 3)
+  await settle(w)
+  await click(ui, 8, 6)
+  await settle(w)
+  await click(ui, 52, 4)
+  await settle(w)
+  expect(w.copies).toEqual(['https://example.com', 'https://typst.app/docs/reference', '/w/src/a.ts', 'ls -la'])
+  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: copied the '))).toEqual([
+    'Intelligent UI: copied the link', 'Intelligent UI: copied the link', 'Intelligent UI: copied the path', 'Intelligent UI: copied the command',
+  ])
+  // No target (a code block is none): nothing copied.
+  await click(ui, 1, 3)
+  await click(ui, 60, 8)
+  await click(ui, 5, 10)
+  await settle(w)
+  expect(w.copies.length).toBe(4)
+})
+
+test('picture select: a ctrl+click copies as a plain click does; a right click is dropped', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  await click(ui, 6, 3, { button: 'right' })
+  await click(ui, 6, 3, { button: 'right', ctrl: true })
+  await settle(w)
+  expect(w.copies).toEqual([])
+  await click(ui, 6, 3, { ctrl: true })
+  await settle(w)
+  expect(w.copies).toEqual(['https://example.com'])
+})
+
+test('picture select: after a click on a target its tint shows again; a leave then takes it down', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  await click(ui, 6, 3)
+  await settle(w)
+  expect(isFrame(w)).toBe(true)
+  expect(cellOf(w.frames.at(-1)!.png, 3, 4)).toBe('selected')
+  // The same cell again: no new post, no new frame.
+  const frames = w.frames.length
+  await hover(ui, 6, 3)
+  await settle(w)
+  expect(w.frames.length).toBe(frames)
+  await ui.pointer({ type: 'leave', x: 6, y: 3, in: 'sel0' })
+  await settle(w)
+  expect(isPlain(w)).toBe(true)
+})
+
+test('picture select: a hover that replaced an up in its frame carries it: the copy is made', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  const at = (x: number, y: number) => ({ x, y })
+  const up = { id: 'ans-1', page: 0, anchor: at(0, 1), head: at(21, 3), phase: 'up', seq: 102 }
+  await ui.post({ id: 'ans-1', page: 0, anchor: at(0, 1), head: at(0, 1), phase: 'down', seq: 101 }, { in: 'sel0' })
+  await ui.post({ id: 'ans-1', page: 0, anchor: at(6, 3), head: at(6, 3), phase: 'hover', seq: 103, end: up }, { in: 'sel0' })
+  // The same up again (a later hover): not copied twice.
+  await ui.post({ id: 'ans-1', page: 0, anchor: at(7, 3), head: at(7, 3), phase: 'hover', seq: 104, end: up }, { in: 'sel0' })
+  await settle(w)
+  expect(w.copies.length).toBe(1)
+  expect(w.copies[0]).toContain('Targets')
+})
+
+test('picture select: with IUI_DEBUG, a click writes its target; a hover its target', async ($, on) => {
+  const { w, ui } = await drawTargets($, on, { env: { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1', IUI_DEBUG: '1' } })
+  await hover(ui, 6, 3)
+  await settle(w)
+  await click(ui, 6, 3)
+  await settle(w)
+  await click(ui, 1, 3)
+  await settle(w)
+  expect(w.traces.some(t => t.includes('select: hover ans-1 page 0 target 0 (web) rows 3:4-11'))).toBe(true)
+  expect(w.traces.some(t => t.includes('select: click ans-1 page 0 at 6,3 target web'))).toBe(true)
+  expect(w.traces.some(t => t.includes('select: click ans-1 page 0 at 1,3 target none'))).toBe(true)
 })
 
 test('no private cache folder: nothing is drawn (no shared folder instead); /iui, its details and a toast say why', async ($, on) => {

@@ -524,7 +524,8 @@
 //      its characters (clusters) is a word, boxed, `g` on all but the
 //      first (they join with no space).
 //      A word of inline code has `pad`, the theme's padding beside the
-//      code, when it is not 0.
+//      code, when it is not 0, and `code`, the whole text of that code.
+//      A word in a link to a URL (a string) has `href`, the URL.
 //   c: a block code line: x its start, y its baseline, a and d the code
 //      font's ascender and descender, w its width, n its characters.
 //   b: a block starts: paragraph, heading, code block, quote, table cell
@@ -552,6 +553,9 @@
 // (`pad`: a copy takes it off the gap to the text next to it).
 #let in-inline-code(costs) = costs.orphan == 104%
 #let cjk = regex("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]")
+// The URL of the link and the text of the inline code the text is in.
+#let probe-href = state("probe-href", none)
+#let probe-code = state("probe-code", none)
 #let probe-rules(body) = {
   // A word is cut after a hyphen or a slash, where a line may break; a
   // token of 30+ characters is one word (it breaks anywhere, see above).
@@ -560,6 +564,11 @@
     let t = it.text
     let pad = E.inline-code.pad-x-px * px
     let pad = if in-inline-code(text.costs) and pad > 0pt { (pad: pad / 1pt) } else { (:) }
+    let tags = pad
+    let href = probe-href.get()
+    if href != none { tags.insert("href", href) }
+    let code = if in-inline-code(text.costs) { probe-code.get() }
+    if code != none { tags.insert("code", code) }
     if t.clusters().len() >= 30 or t.match(cjk) != none {
       // A long word or CJK text breaks anywhere: a box for each character
       // (a line may break between boxes, as at the long-word rule's zws).
@@ -567,12 +576,12 @@
       // with all the marks after it.
       for (i, c) in t.clusters().enumerate() {
         let one = measure(c)
-        box({ mark("w", t: c, w: one.width / 1pt, h: one.height / 1pt, ..pad, ..if i > 0 { (g: 1) } else { (:) }); c })
+        box({ mark("w", t: c, w: one.width / 1pt, h: one.height / 1pt, ..tags, ..if i > 0 { (g: 1) } else { (:) }); c })
       }
     } else {
       // Boxed, so the mark is where the word is drawn (a bare mark at the
       // start of a wrapped line stays at the end of the line above).
-      box({ mark("w", t: t, w: size.width / 1pt, h: size.height / 1pt, ..pad); it })
+      box({ mark("w", t: t, w: size.width / 1pt, h: size.height / 1pt, ..tags); it })
     }
   }
   // A code line: a zero-size box at its start (its y is the baseline). An
@@ -589,7 +598,8 @@
     it
   }
   show math.equation: set text(costs: (orphan: 102%))
-  show raw.where(block: false): it => context if no-marks(text.costs) { it } else { set text(costs: (orphan: 104%)); it }
+  show raw.where(block: false): it => context if no-marks(text.costs) { it } else { set text(costs: (orphan: 104%)); probe-code.update(it.text); it }
+  show link: it => if type(it.dest) != str { it } else { probe-href.update(it.dest); it; probe-href.update(none) }
   show par: it => { mark("b", kind: "par"); it }
   show heading: it => { mark("b", kind: "heading"); it }
   show quote.where(block: true): it => { mark("b", kind: "quote"); it }

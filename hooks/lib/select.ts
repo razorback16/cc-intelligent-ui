@@ -13,15 +13,20 @@ import { compareVersions } from './updates'
 import { joinSegments, pageTopsOf, textOfRun, type Drawn, type Item, type RunLine, type TextBlock } from './copy'
 import { endFold, foldNew, FRAME_MS, pokeFold, showSelection, startFold } from './blit'
 import { clockAfter, clockEvery, uiSelection } from './api'
+import { targetAt, type PageTarget } from './targets'
+import type { ShownLink } from './draw'
 
 export type Point = { x: number; y: number }
-export type SelectPhase = 'down' | 'move' | 'up' | 'clear'
+export type SelectPhase = 'down' | 'move' | 'up' | 'clear' | 'hover' | 'leave'
 // A post of the Client (hooks/sel.tsx): the drawing's id (drawnAnswers),
 // the page whose region posted, the anchor (where the button went down)
 // and the head (the pointer now) in that region's cells, and the post's
 // order (one count for every instance). `size`: the region's columns and
-// rows as the Client has them (for the trace).
-export type SelectPost = { id: string; page: number; anchor: Point; head: Point; phase: SelectPhase; seq: number; size?: Box }
+// rows as the Client has them (for the trace). A hover (the pointer with no
+// button down; anchor and head its cell) or a leave carries the up or clear
+// posted before it (`end`): a later post of one frame replaces an earlier
+// one.
+export type SelectPost = { id: string; page: number; anchor: Point; head: Point; phase: SelectPhase; seq: number; size?: Box; end?: SelectPost }
 // The selection: anchor and head in the drawing's rows (the page tops
 // added), `isUp` once the button came up.
 export type Selection = { id: string; anchor: Point; head: Point; isUp: boolean }
@@ -33,6 +38,19 @@ type Box = { columns: number; rows: number }
 // The one selection over the pictures (null: none), the order of the last
 // post taken, and a Client that failed (`isBroken`: no select until a reload).
 export const picked = { now: null as Selection | null, seq: 0, isBroken: false }
+
+// The hover: the cell under the pointer with no button down (`at`, null:
+// off the pictures) and the target tinted now (`lit`: its drawing, page,
+// index in the page's targets and cells; null: none). The tint shows only
+// while no selection does, through the selection's blits.
+export type Hover = { id: string; page: number; x: number; y: number }
+export type Lit = { id: string; page: number; index: number; rows: SelRow[] }
+export const hovered = { at: null as Hover | null, lit: null as Lit | null }
+
+// Each drawing's links when its pages take picture select (drawPages: its
+// link rows are then not drawn), by its id (the RESULTS_KEPT drawn last):
+// the files a click copies.
+export const clickLinks = new Map<string, readonly ShownLink[]>()
 
 // Shows the selection now on the pages (blit.ts), at most once a frame: the
 // posts between fold into one, the newest.
@@ -51,21 +69,40 @@ async function runSelection($: EngineInterface) {
   if (endFold(fold) || again) redrawSelection($)
 }
 
-// The selection's drawing, its pages and their selected rows (none: null).
-function selectedNow() {
+// The selection's drawing, its pages and their selected rows; with no
+// selection, the hovered target's (none: null).
+export function selectedNow() {
   const sel = picked.now
-  const d = sel ? drawnAnswers.get(sel.id) : undefined
-  return sel && d ? { id: sel.id, pages: d.pages, rows: selectedRows(sel, d.pages) } : null
+  if (sel) {
+    const d = drawnAnswers.get(sel.id)
+    return d ? { id: sel.id, pages: d.pages, rows: selectedRows(sel, d.pages) } : null
+  }
+  const lit = hovered.lit
+  const d = lit ? drawnAnswers.get(lit.id) : undefined
+  return lit && d ? { id: lit.id, pages: d.pages, rows: d.pages.map((_, i) => (i === lit.page ? lit.rows : [])) } : null
 }
 
-// Forgets the fold, the selection and the native watch (for tests).
+// Forgets the fold, the selection, the hover and the native watch (for tests).
 export function forgetRedraws() {
   fold = foldNew()
   stopNative()
   picked.now = null
   picked.seq = 0
   picked.isBroken = false
+  hovered.at = null
+  hovered.lit = null
+  clickLinks.clear()
 }
+
+// The target under a hover, tinted (null: none).
+export function litOf(at: Hover, targets: readonly PageTarget[]): Lit | null {
+  const index = targetAt(targets, at.x, at.y)
+  const t = targets[index]
+  return t ? { id: at.id, page: at.page, index, rows: t.rows } : null
+}
+
+// Whether two tints are the same target (its cells by reference: one page's targets are kept).
+export const sameLit = (a: Lit | null, b: Lit | null) => a === b || (!!a && !!b && a.id === b.id && a.page === b.page && a.index === b.index && a.rows === b.rows)
 
 // A native selection (Claude Code's own) made while a picture selection
 // shows takes ours down (`clear`): no event says so, so `$.ui.selection()`
@@ -111,17 +148,21 @@ const pointOf = (v: unknown): Point | null => {
   return p && isInt(p.x) && isInt(p.y) ? { x: p.x, y: p.y } : null
 }
 
+const PHASES: readonly unknown[] = ['down', 'move', 'up', 'clear', 'hover', 'leave'] satisfies SelectPhase[]
+
 // A Client's post as a SelectPost; null when it is not one (data from code).
-export function postOf(data: unknown): SelectPost | null {
+// Its `end` only as an up or a clear (with no end of its own).
+export function postOf(data: unknown, isEnd = false): SelectPost | null {
   const d = data as Partial<Record<keyof SelectPost, unknown>> | null
   if (!d || typeof d !== 'object' || typeof d.id !== 'string' || !isInt(d.page) || d.page < 0 || !isInt(d.seq)) return null
   const anchor = pointOf(d.anchor)
   const head = pointOf(d.head)
-  const phase = d.phase
-  if (!anchor || !head || (phase !== 'down' && phase !== 'move' && phase !== 'up' && phase !== 'clear')) return null
+  const phase = d.phase as SelectPhase
+  if (!anchor || !head || !PHASES.includes(phase) || (isEnd && phase !== 'up' && phase !== 'clear')) return null
   const size = d.size as Partial<Box> | null | undefined
   const known = size && isInt(size.columns) && isInt(size.rows) ? { size: { columns: size.columns, rows: size.rows } } : {}
-  return { id: d.id, page: d.page, anchor, head, phase, seq: d.seq, ...known }
+  const end = !isEnd && (phase === 'hover' || phase === 'leave') && d.end ? postOf(d.end, true) : null
+  return { id: d.id, page: d.page, anchor, head, phase, seq: d.seq, ...known, ...(end ? { end } : {}) }
 }
 
 // The row each page starts at in its drawing (the pages one under the other).
@@ -132,10 +173,11 @@ export function topsOf(pages: readonly Box[]): number[] {
 
 // The selection after a post: a down, a move or an up selects from its
 // anchor to its head (a down on another picture drops the old one); a
-// clear (a click with no drag) leaves none. `tops`: the drawing's page tops.
+// clear (a click with no drag) leaves none, and a hover or a leave (no
+// drag) none either. `tops`: the drawing's page tops.
 export function selectionAfter(post: SelectPost, tops: readonly number[]): Selection | null {
   const top = tops[post.page]
-  if (post.phase === 'clear' || top === undefined) return null
+  if (post.phase === 'clear' || post.phase === 'hover' || post.phase === 'leave' || top === undefined) return null
   const at = (p: Point) => ({ x: p.x, y: p.y + top })
   return { id: post.id, anchor: at(post.anchor), head: at(post.head), isUp: post.phase === 'up' }
 }

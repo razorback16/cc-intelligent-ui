@@ -17,7 +17,7 @@ import {
   pictureRowsFor, type PdfFacts, type PixelBox, type SentFile,
 } from './images'
 import { imagePathOf } from './markdown'
-import { drawPages, hashOf, linksFor, type ShownLink } from './draw'
+import { drawPages, hashOf, linkRowsOf, linksFor, type ShownLink } from './draw'
 import { convertCall, logDebug, parseOd, pngSize } from './typst'
 import { pagesOf, type Drawing } from './answer'
 import { HEADERS_SH } from './host'
@@ -487,20 +487,22 @@ const boxOf = (frame: Frame, inline: boolean, height: Height): PixelBox =>
 // error line: its link rows, then all after it (a picture its rows, a
 // PDF's error line one, each with a PDF's control line; a Markdown file its
 // pages at their drawn box (fitBox in `room`, as drawPages), a Typst error
-// line and its link rows; a blank none).
-export function rowsAfter(under: readonly Under[], i: number, room: number): number {
+// line and its link rows; a blank none). `isSelect`: the row's pages take
+// picture select (takesSelect), so pages drawn from files have no link rows.
+export function rowsAfter(under: readonly Under[], i: number, room: number, isSelect = false): number {
   const own = under[i]
-  return linkRows(own) + under.slice(i + 1).reduce((sum, u) => {
+  return linkRows(own, isSelect) + under.slice(i + 1).reduce((sum, u) => {
     if ('note' in u) return sum + 1 + (u.pdf ? 1 : 0)
     if ('source' in u) return sum + u.rows + (u.pdf ? 1 : 0)
     if (u.drawing.kind !== 'pages') return sum
     const { pages, note } = u.drawing.result
-    return sum + pages.reduce((n, p) => n + fitBox(p, room).rows, 0) + (note ? 1 : 0) + linkRows(u)
+    return sum + pages.reduce((n, p) => n + fitBox(p, room).rows, 0) + (note ? 1 : 0) + linkRows(u, isSelect)
   }, 0)
 }
 
-// The link rows drawn under a Markdown file's pages (one row each).
-const linkRows = (u: Under | undefined) => (u && 'drawing' in u && u.drawing.kind === 'pages' ? (u.links?.length ?? 0) : 0)
+// The link rows drawn under a Markdown file's pages (one row each; none where they take picture select).
+const linkRows = (u: Under | undefined, isSelect: boolean) =>
+  u && 'drawing' in u && u.drawing.kind === 'pages' ? linkRowsOf(u.links, isSelect && !u.drawing.bytes) : 0
 
 // The engine's row, then the pictures under it.
 export function underRow($: EngineInterface, e: RowInput, row: RenderElement, under: readonly Under[]) {

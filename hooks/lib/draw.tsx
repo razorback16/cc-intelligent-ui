@@ -5,13 +5,13 @@
 import type { EngineInterface, RenderComponent, RenderSurface, RenderViewport, ResolveInput } from 'claude-code'
 
 import type { IuiTheme } from '../../types'
-import { BODY_PT, bulletOf, GRID_VERSION, GUTTER, LINK_FILES_KEPT, MARGIN_TOP, TEMPLATE_VERSION } from './settings'
+import { BODY_PT, bulletOf, GRID_VERSION, GUTTER, LINK_FILES_KEPT, MARGIN_TOP, RESULTS_KEPT, TEMPLATE_VERSION } from './settings'
 import { INLINE_KEPT, inlined, keep, linkFiles, S, type Cell, type Look, type Metrics, type Result, type Room } from './state'
 import { DEFAULT_GRID, gridFirstRow, type GridMetrics } from './grid'
 import { FENCE, imagePathOf } from './markdown'
 import { linksOf, type LinkItem } from './links'
 import { fitBox, fitsInline, roomColumns } from './terminal'
-import { selectOn } from './select'
+import { clickLinks, selectOn } from './select'
 import { noteSite } from './blit'
 import { fsExists, fsRead, uiCopy, uiResolve, uiToast } from './api'
 
@@ -183,9 +183,11 @@ export async function inlineOf($: EngineInterface, result: Result): Promise<stri
 // How a set of pages sits: `bullet` the reply bullet in the gutter (on the
 // first line's row), `gutter` its width (0: none), `marginTop` the rows above,
 // `keys` a prefix for its Images' and Buttons' keys (several sets in one
-// tree), `links` the link rows under the pages (one row each), `id` the
-// drawing's id in drawnAnswers (its pages take picture select, its Images
-// swapped by key under the render's requestId: blit.ts).
+// tree), `links` the link rows under the pages (one row each; none drawn
+// when the pages take picture select: a click on the picture copies or
+// opens them), `id` the drawing's id in drawnAnswers (its pages take
+// picture select, its Images swapped by key under the render's requestId:
+// blit.ts).
 export type PagesLayout = { bullet?: boolean; gutter?: number; marginTop?: number; keys?: string; links?: readonly ShownLink[]; id?: string }
 
 // The bullet's row when the page is drawn `factor` as wide.
@@ -193,6 +195,18 @@ export function scaledBulletRow(bulletRow: number, factor: number): number {
   if (factor >= 1) return bulletRow
   return Math.max(0, Math.round((bulletRow + 0.5) * factor - 0.5))
 }
+
+// Whether pages drawn in this render take picture select (with their
+// Client): from files (not `inline`, as bytes over ssh), in an engine with
+// the Client element, and selectOn.
+export function takesSelect($: EngineInterface, e: ResolveInput<RenderComponent, 'terminal'> & { viewport?: RenderViewport }, inline?: readonly string[]): boolean {
+  const table = uiResolve($, e)
+  const Client: typeof table.Client | undefined = table.Client
+  return !inline && !!Client && selectOn({ hasClient: true, isFullscreen: e.viewport?.isFullscreen })
+}
+
+// The link rows drawn under pages (one each): none when they take picture select.
+export const linkRowsOf = (links: readonly ShownLink[] | undefined, isSelect: boolean) => (isSelect ? 0 : (links?.length ?? 0))
 
 // `inline`: each page's PNG as base64 (over ssh); else the terminal reads the
 // file. Each page draws at its own box, never stretched. A page wider than
@@ -217,8 +231,9 @@ export function drawPages(
   // is above the screen down to row 0, its pointer too). The highlight
   // swaps the Image's picture (blit.ts); the layout stays.
   const id = layout.id
-  const isSelect = !!id && !inline && !!Client && selectOn({ hasClient: true, isFullscreen: e.viewport?.isFullscreen })
+  const isSelect = !!id && !!Client && takesSelect($, e, inline)
   if (isSelect && e.requestId) noteSite(id, e.requestId, keys)
+  if (isSelect) keep(clickLinks, id, layout.links ?? [], RESULTS_KEPT)
   return (
     <Box flexDirection="row" marginTop={layout.marginTop ?? MARGIN_TOP}>
       {gutter > 0 ? (
@@ -250,7 +265,7 @@ export function drawPages(
           )
         })}
         {result.note ? <Text dimColor wrap="truncate-end">Typst error: {result.note}</Text> : null}
-        {layout.links?.length ? drawLinks($, e, layout.links, keys) : null}
+        {layout.links?.length && !isSelect ? drawLinks($, e, layout.links, keys) : null}
       </Box>
     </Box>
   )
@@ -259,7 +274,8 @@ export function drawPages(
 // ---- Links ------------------------------------------------------------------
 // A click on a picture cannot open a link (an Image is a leaf: no Link holds
 // it, and a press on it gives no cell). So the links, file paths and commands
-// of a text are drawn under its pages, one row each.
+// of a text are drawn under its pages, one row each; where the pages take
+// picture select, its Client finds them on the picture (targets.ts) instead.
 
 // A link row: a web link, a file found (`path` its absolute path, `href` its
 // file:// URL), or a command.

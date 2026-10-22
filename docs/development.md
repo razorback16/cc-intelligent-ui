@@ -30,6 +30,8 @@ Picture select writes trace lines that start with `select:`:
 - `select: words <id> page <n> <k> words in <ms> (background)`: the background probe of a page's words (`none` when it found no words).
 - `select: copy <n> chars <ms>ms after the up (text <ms>ms, words cached | words probed for page <n>); native selection seen (...) | no native selection`: the copy at `up`, and whether Claude Code has a selection of its own with picture cells.
 - `select: native copy seen: ...`: picture cells on the clipboard, or a `$.ui.copy` with picture cells.
+- `select: hover <id> page <n> target <i> (<kind>) rows <row>:<x0>-<x1>,...` (or `select: hover none`): the target under the pointer changed (`web`, `file` or `command`, and its cells).
+- `select: click <id> page <n> at <x>,<y> target <kind>|none`: one line for each click (a `clear`), with the target that it copies.
 
 ## Module layout
 
