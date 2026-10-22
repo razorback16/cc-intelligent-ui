@@ -2,7 +2,7 @@
 // probe=1, for the Markdown below at 98 columns of a 16 x 32 px cell (the
 // default metrics, the default theme claude-code, dark: width 570.02 pt,
 // ppi 198.0562, top 4.36 pt, row 11.6331 pt, code 0.8784). Its PNG is
-// 1568 x 512 px, 16 rows. To make it again (after a template change), with
+// 1568 x 544 px, 17 rows. To make it again (after a template change), with
 // doc.json {"base": "/tmp", "segments": [SMALL_MD], "images": []} and
 // IN="--input theme=dark --input width=570.02 --input top=4.36
 // --input row=11.6331 --input code=0.8784
@@ -15,7 +15,7 @@
 export const SMALL_MD = "## Copy test\n\nThe quick brown fox jumps over the lazy dog, then keeps running across the wide green field until the well-known path ends.\n\n- first item\n- second item\n\n```sh\necho hello world\nls -la\n```\n"
 
 export const SMALL_PPI = 198.0562
-export const SMALL_PAGE = { width: 1568, height: 512, columns: 98, rows: 16 }
+export const SMALL_PAGE = { width: 1568, height: 544, columns: 98, rows: 17 }
 
 export const SMALL_MARKS = [
   {"k": "b", "p": 1, "x": 0.0, "y": 4.36, "s": 13.2, "kind": "heading"},
@@ -54,8 +54,9 @@ export const SMALL_MARKS = [
   {"k": "w", "p": 1, "x": 32.138476562499996, "y": 99.929375, "s": 11.0, "t": "second", "w": 37.87158203125, "h": 13.126953125},
   {"k": "w", "p": 1, "x": 73.10380859375, "y": 99.929375, "s": 11.0, "t": "item", "w": 22.48876953125, "h": 13.126953125},
   {"k": "b", "p": 1, "x": 0.0, "y": 126.256328125, "s": 11.0, "kind": "code"},
-  {"k": "c", "p": 1, "x": 12.571428571428573, "y": 147.18517857142857, "s": 11.0, "t": "echo hello world", "w": 105.9609375, "n": 16, "a": 8.357421875, "d": 2.642578125},
-  {"k": "c", "p": 1, "x": 12.571428571428573, "y": 162.11217857142856, "s": 11.0, "t": "ls -la", "w": 39.7353515625, "n": 6, "a": 8.357421875, "d": 2.642578125},
+  {"k": "t", "p": 1, "x": 78.2086342075893, "y": 126.256328125, "s": 11.0, "kind": "copy", "w": 46.60944614955357, "h": 18.70076729910714, "code": "echo hello world\nls -la\n", "lang": "sh"},
+  {"k": "c", "p": 1, "x": 12.571428571428573, "y": 165.88594587053572, "s": 11.0, "t": "echo hello world", "w": 105.9609375, "n": 16, "a": 8.357421875, "d": 2.642578125},
+  {"k": "c", "p": 1, "x": 12.571428571428573, "y": 180.8129458705357, "s": 11.0, "t": "ls -la", "w": 39.7353515625, "n": 6, "a": 8.357421875, "d": 2.642578125},
 ] as const
 
 // The same probe (same inputs) for a long path and a long URL (30+
@@ -320,10 +321,10 @@ export const LONG_MARKS = [
 // The same probe (same inputs, page=1) for links, inline code, a bare URL
 // and path, and a bash block: the words in a link have `href`, those of
 // inline code `code`. Its PNG is 1568 x
-// 416 px, 13 rows.
+// 448 px, 14 rows.
 export const TARGETS_MD = "## Targets\n\nSee [the docs](https://example.com) and https://typst.app/docs/reference. Run `! ls -la` here.\n\nOpen `src/a.ts` or the bare path hooks/lib/copy.ts now, and [top](#targets).\n\n```bash\necho hello\nls -la\n```\n"
 
-export const TARGETS_PAGE = { width: 1568, height: 416, columns: 98, rows: 13 }
+export const TARGETS_PAGE = { width: 1568, height: 448, columns: 98, rows: 14 }
 
 export const TARGETS_MARKS = [
   {"k": "b", "p": 1, "x": 0.0, "y": 4.36, "s": 13.2, "kind": "heading"},
@@ -367,7 +368,7 @@ export const TARGETS_MARKS = [
   {"k": "w", "p": 1, "x": 254.8798828125, "y": 38.988515625000005, "s": 11.0, "t": "e", "w": 6.2841796875, "h": 13.126953125, "g": 1},
   {"k": "w", "p": 1, "x": 261.1640625, "y": 38.988515625000005, "s": 11.0, "t": ".", "w": 3.265625, "h": 13.126953125, "g": 1},
   {"k": "w", "p": 1, "x": 267.5234375, "y": 38.988515625000005, "s": 11.0, "t": "Run", "w": 20.0234375, "h": 13.126953125},
-  {"k": "w", "p": 1, "x": 290.640625, "y": 38.988515625000005, "s": 11.0, "t": "\u200d", "w": 0.0, "h": 13.126953125, "code": "! ls -la"},
+  {"k": "w", "p": 1, "x": 290.640625, "y": 38.988515625000005, "s": 11.0, "t": "‍", "w": 0.0, "h": 13.126953125, "code": "! ls -la"},
   {"k": "w", "p": 1, "x": 290.640625, "y": 41.104726562500005, "s": 11.0, "t": "!", "w": 6.62255859375, "h": 11.0, "code": "! ls -la"},
   {"k": "w", "p": 1, "x": 303.8857421875, "y": 41.104726562500005, "s": 11.0, "t": "ls", "w": 13.2451171875, "h": 11.0, "code": "! ls -la"},
   {"k": "w", "p": 1, "x": 323.75341796875, "y": 41.104726562500005, "s": 11.0, "t": "-", "w": 6.62255859375, "h": 11.0, "code": "! ls -la"},
@@ -375,7 +376,7 @@ export const TARGETS_MARKS = [
   {"k": "w", "p": 1, "x": 346.71484375, "y": 38.988515625000005, "s": 11.0, "t": "here.", "w": 26.33447265625, "h": 13.126953125},
   {"k": "b", "p": 1, "x": 0.0, "y": 65.31546875, "s": 11.0, "kind": "par"},
   {"k": "w", "p": 1, "x": 0.0, "y": 65.31546875, "s": 11.0, "t": "Open", "w": 27.90283203125, "h": 13.126953125},
-  {"k": "w", "p": 1, "x": 30.99658203125, "y": 65.31546875, "s": 11.0, "t": "\u200d", "w": 0.0, "h": 13.126953125, "code": "src/a.ts"},
+  {"k": "w", "p": 1, "x": 30.99658203125, "y": 65.31546875, "s": 11.0, "t": "‍", "w": 0.0, "h": 13.126953125, "code": "src/a.ts"},
   {"k": "w", "p": 1, "x": 30.99658203125, "y": 67.4316796875, "s": 11.0, "t": "src/", "w": 26.490234375, "h": 11.0, "code": "src/a.ts"},
   {"k": "w", "p": 1, "x": 57.48681640625, "y": 67.4316796875, "s": 11.0, "t": "a.ts", "w": 26.490234375, "h": 11.0, "code": "src/a.ts"},
   {"k": "w", "p": 1, "x": 87.07080078125, "y": 65.31546875, "s": 11.0, "t": "or", "w": 10.6884765625, "h": 13.126953125},
@@ -390,6 +391,7 @@ export const TARGETS_MARKS = [
   {"k": "w", "p": 1, "x": 312.447265625, "y": 65.31546875, "s": 11.0, "t": "top", "w": 17.12841796875, "h": 13.126953125},
   {"k": "w", "p": 1, "x": 329.57568359375, "y": 65.31546875, "s": 11.0, "t": ".", "w": 3.265625, "h": 13.126953125},
   {"k": "b", "p": 1, "x": 0.0, "y": 91.642421875, "s": 11.0, "kind": "code"},
-  {"k": "c", "p": 1, "x": 12.571428571428573, "y": 112.57127232142858, "s": 11.0, "t": "echo hello", "w": 66.2255859375, "n": 10, "a": 8.357421875, "d": 2.642578125},
-  {"k": "c", "p": 1, "x": 12.571428571428573, "y": 127.49827232142857, "s": 11.0, "t": "ls -la", "w": 39.7353515625, "n": 6, "a": 8.357421875, "d": 2.642578125},
+  {"k": "t", "p": 1, "x": 46.440586635044646, "y": 91.642421875, "s": 11.0, "kind": "copy", "w": 46.60944614955357, "h": 18.70076729910714, "code": "echo hello\nls -la\n", "lang": "bash"},
+  {"k": "c", "p": 1, "x": 12.571428571428573, "y": 131.2720396205357, "s": 11.0, "t": "echo hello", "w": 66.2255859375, "n": 10, "a": 8.357421875, "d": 2.642578125},
+  {"k": "c", "p": 1, "x": 12.571428571428573, "y": 146.19903962053573, "s": 11.0, "t": "ls -la", "w": 39.7353515625, "n": 6, "a": 8.357421875, "d": 2.642578125},
 ] as const

@@ -6,7 +6,8 @@
 // never reaches the clipboard). A mouse copy puts those cells on the
 // clipboard, one line per screen row. decodeSelection reads them back as
 // runs of (row, columns) per picture; positionsOf turns the template's probe
-// marks (render/md.typ, `<mdpos>`) into word boxes in PNG pixels; pickPages
+// marks (render/md.typ, `<mdpos>`) into word boxes (and the boxes of code
+// blocks' copy buttons) in PNG pixels; pickPages
 // says which drawn page each run is; textOfRun reads the words under a run.
 // The drawn pages and the probe of a page are in probe.ts; the clipboard
 // watcher (its change counts) and the commands are in register.tsx.
@@ -115,8 +116,10 @@ export function decodeSelection(text: string): Segment[] {
 // ---- Where the words are ---------------------------------------------------
 
 // A probe mark as `typst query <mdpos> --field value` gives it (pt).
+// `t`: a tag that is no word (kind `copy`: a code block's copy button, its
+// box, the whole `code` and its `lang`).
 export type Mark = {
-  k: 'w' | 'c' | 'b'
+  k: 'w' | 'c' | 'b' | 't'
   p: number
   x: number
   y: number
@@ -134,6 +137,7 @@ export type Mark = {
   pad?: number
   href?: string
   code?: string
+  lang?: string
 }
 // A word, or a whole code line (`adv`: its character advance), in PNG
 // pixels: its box, the block it is in, and its place in the document (`i`).
@@ -149,8 +153,11 @@ export type Item = {
 // (`prefix`, and `mx` the x of its marker's centre in pixels, on its first
 // word's line); `first` its first item.
 export type TextBlock = { kind: string; prefix: string; cx?: number; mx?: number; first: number }
-// A probe's words by page (0-based: PNG page N+1), and its blocks.
-export type Positions = { ppi: number; blocks: TextBlock[]; pages: Item[][] }
+// A code block's copy button in PNG pixels: its box, its code and language.
+export type Button = { x0: number; y0: number; x1: number; y1: number; code: string; lang?: string }
+// A probe's words by page (0-based: PNG page N+1), its blocks, and its
+// copy buttons by page.
+export type Positions = { ppi: number; blocks: TextBlock[]; pages: Item[][]; buttons: Button[][] }
 
 const round = (n: number) => Math.round(n * 100) / 100
 // The break chances the template adds (a zws in a long word), the strut
@@ -167,7 +174,7 @@ function isMarker(marks: readonly Mark[], j: number): boolean {
   const next = marks[j + 1]
   if (m.k !== 'w' || next?.k !== 'b' || next.kind !== 'item') return false
   if (next.prefix?.trim().split(' ')[0] === m.t) return true
-  const body = marks.slice(j + 2).find(x => x.k !== 'b')
+  const body = marks.slice(j + 2).find(x => x.k !== 'b' && x.k !== 't')
   return !!body && body.p === m.p && body.x > m.x && Math.abs(body.y - m.y) < (m.h ?? m.s ?? 11) / 2
 }
 
@@ -176,14 +183,26 @@ function isMarker(marks: readonly Mark[], j: number): boolean {
 // checkbox drawn as a shape: 0.8 of the text size left of the item). A block mark with no word since the last one
 // (an item, then its paragraph) adds to that block. A word of only
 // invisible characters is dropped. A link's URL and an inline code's text go
-// to its words.
+// to its words. A copy tag is a button, not a word (no block, no text); its
+// code less one line break at its end (a paste does not run it at once).
 export function positionsOf(marks: readonly Mark[], ppi: number): Positions {
   const k = ppi / 72
   const blocks: TextBlock[] = []
   const pages: Item[][] = []
+  const buttons: Button[][] = []
   let hasItems = false
   let count = 0
   marks.forEach((m, j) => {
+    if (m.k === 't') {
+      if (m.kind !== 'copy' || typeof m.code !== 'string') return
+      const page = Math.max(0, m.p - 1)
+      while (buttons.length <= page) buttons.push([])
+      buttons[page]!.push({
+        x0: round(m.x * k), y0: round(m.y * k), x1: round((m.x + (m.w ?? 0)) * k), y1: round((m.y + (m.h ?? 0)) * k), code: m.code.replace(/\r?\n$/, ''),
+        ...(m.lang ? { lang: m.lang } : {}),
+      })
+      return
+    }
     if (m.k === 'b') {
       const cur = blocks[blocks.length - 1]
       const before = marks[j - 1]
@@ -225,7 +244,7 @@ export function positionsOf(marks: readonly Mark[], ppi: number): Positions {
     while (pages.length <= page) pages.push([])
     pages[page]!.push(item)
   })
-  return { ppi, blocks, pages }
+  return { ppi, blocks, pages, buttons }
 }
 
 // ---- Which page a run is ---------------------------------------------------

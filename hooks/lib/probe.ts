@@ -10,7 +10,7 @@ import { PROBED_KEPT } from './settings'
 import { clip, DRAWN_KEPT, drawnAnswers, keep, lastKey, results, type Job, type Result } from './state'
 import { fitBox } from './terminal'
 import { isSafePage, probePage } from './typst'
-import { screenOf, type Drawn, type DrawnPage, type Item, type TextBlock } from './copy'
+import { screenOf, type Button, type Drawn, type DrawnPage, type Item, type TextBlock } from './copy'
 import { targetsOf, type PageTarget } from './targets'
 import type { ShownLink } from './draw'
 
@@ -55,8 +55,8 @@ export function noteOnScreen(id: string, onScreen: unknown) {
 
 // ---- Positions ----------------------------------------------------------------
 
-// The words of one page and the blocks they are in.
-export type PageWords = { items: Item[]; blocks: TextBlock[] }
+// The words of one page, the blocks they are in, and its code blocks' copy buttons.
+export type PageWords = { items: Item[]; blocks: TextBlock[]; buttons?: Button[] }
 
 // The pages probed, by `<folder>#<page>` (the PROBED_KEPT read last), and
 // the probes that run now (a copy of the same page waits for the same run).
@@ -83,7 +83,7 @@ export async function wordsOf($: EngineInterface, d: Drawn & { job?: Job }, page
   const drawn = d.pages[page]
   if (!d.job || !drawn) return null
   const run = probePage($, d.job, d.dir, { page, pages: d.pages.length, isSafe: isSafePage(drawn.file) })
-    .then(got => (got ? { items: got.pages[page] ?? [], blocks: got.blocks } : null))
+    .then(got => (got ? { items: got.pages[page] ?? [], blocks: got.blocks, buttons: got.buttons[page] ?? [] } : null))
     .catch(() => null)
   inflight.set(key, run)
   const got = await run

@@ -514,7 +514,7 @@ function lightHover($: EngineInterface) {
 }
 
 // A click (a clear) on a target of the page copies its text (a link's URL,
-// a file's path, a command). The page's words are probed first when they
+// a file's path, a command, a code block's code). The page's words are probed first when they
 // are not known.
 async function clickAt($: EngineInterface, d: Drawn & { job?: Job }, post: SelectPost, surface: RenderSurface) {
   const links = () => clickLinks.get(d.id) ?? NO_LINKS
@@ -531,7 +531,7 @@ async function clickAt($: EngineInterface, d: Drawn & { job?: Job }, post: Selec
 // A target's text on the clipboard (clickAt), with its toast.
 async function copyTarget($: EngineInterface, target: Target, surface: RenderSurface) {
   const text = target.kind === 'web' ? target.href : target.kind === 'file' ? target.path : target.text
-  const name = target.kind === 'web' ? 'link' : target.kind === 'file' ? 'path' : 'command'
+  const name = target.kind === 'web' ? 'link' : target.kind === 'file' ? 'path' : target.kind === 'code' ? 'code' : 'command'
   // The clipboard change of this text is not read again.
   clip.wrote = text
   clip.seen = text

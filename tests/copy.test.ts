@@ -16,7 +16,7 @@ import { clip, drawnAnswers, lastKey, results, type Job, type Result } from '../
 import { forgetBlits, over, rgbOf, WRITE_PL } from '../hooks/lib/blit'
 import { forgetRedraws } from '../hooks/lib/select'
 import { chunk, concat, decodePng, deflatePiece, fromBase64, headOf, tailOf, toBase64 } from '../hooks/lib/png'
-import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI, TARGETS_MARKS, TARGETS_MD } from './copy-fixture'
+import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI, TARGETS_MARKS, TARGETS_MD, TARGETS_PAGE } from './copy-fixture'
 
 // One screen row of a picture as Claude Code draws it: `lead` (the gutter),
 // then the cells of `row` from `from` to `to`.
@@ -111,6 +111,43 @@ test("a word keeps its link's URL and its inline code's text", () => {
     ['x', undefined, undefined],
   ])
   expect(got.pages[0]![1]).toEqual({ i: 1, text: 'a.ts', block: 0, x0: 20, x1: 30, y0: 0, y1: 12, pad: 1, code: 'a.ts' })
+})
+
+test("a code block's copy tag is a button in pixels, on its page; no word, so the copy of the text does not change", () => {
+  const marks: Mark[] = [
+    { k: 'b', p: 1, x: 0, y: 0, kind: 'code' },
+    { k: 't', p: 2, x: 100, y: 4, s: 11, kind: 'copy', w: 30, h: 12, code: 'ls\npwd', lang: 'sh' },
+    { k: 'c', p: 2, x: 0, y: 30, t: 'ls', w: 12, n: 2, a: 8, d: 2 },
+    { k: 't', p: 2, x: 100, y: 50, kind: 'copy', w: 30, h: 12, code: 'x' },
+    // Another tag kind, or one with no code: dropped.
+    { k: 't', p: 2, x: 0, y: 0, kind: 'other', w: 1, h: 1, code: 'y' },
+    { k: 't', p: 2, x: 0, y: 0, kind: 'copy', w: 1, h: 1 },
+  ]
+  const got = positionsOf(marks, 144)
+  expect(got.buttons).toEqual([[], [{ x0: 200, y0: 8, x1: 260, y1: 32, code: 'ls\npwd', lang: 'sh' }, { x0: 200, y0: 100, x1: 260, y1: 124, code: 'x' }]])
+  expect(got.pages).toEqual([[], [{ i: 0, text: 'ls', block: 0, x0: 0, x1: 24, y0: 44, y1: 64, adv: 12 }]])
+  expect(got.blocks).toEqual([{ kind: 'code', prefix: '', first: 0 }])
+  // One line break at the end goes ("\n" or "\r\n"), not more, and no other space.
+  const code = (c: string) => positionsOf([{ k: 't', p: 1, x: 0, y: 0, kind: 'copy', w: 1, h: 1, code: c }], 72).buttons[0]![0]!.code
+  expect([code('ls\n'), code('ls\r\n'), code('ls\n\n'), code('ls  \n'), code('\tls '), code('\n')]).toEqual(['ls', 'ls', 'ls\n', 'ls  ', '\tls ', ''])
+  // An old probe (no tags): no buttons.
+  expect(positionsOf(marks.filter(m => m.k !== 't'), 144).buttons).toEqual([])
+  // The text of the fixture's page (its probe has a tag) is the same with no tag.
+  const all = Array.from({ length: TARGETS_PAGE.rows }, (_, row) => ({ row, colStart: 0, colEnd: 97 }))
+  const textOf = (ms: readonly object[]) => {
+    const p = positionsOf(ms as unknown as Mark[], SMALL_PPI)
+    return textOfRun(all, p.pages[0]!, p.blocks, TARGETS_PAGE)
+  }
+  expect(TARGETS_MARKS.some(m => m.k === 't')).toBe(true)
+  expect(textOf(TARGETS_MARKS)).toBe(textOf(TARGETS_MARKS.filter(m => m.k !== 't')))
+  // A list item whose first content is a code block: the tag is not its body (the marker test).
+  const item: Mark[] = [
+    { k: 'w', p: 1, x: 0, y: 0, t: '-', w: 4, h: 12 },
+    { k: 'b', p: 1, x: 10, y: 0, kind: 'item', prefix: '- ' },
+    { k: 't', p: 1, x: 200, y: 0, kind: 'copy', w: 30, h: 12, code: 'a' },
+    { k: 'c', p: 1, x: 10, y: 20, t: 'a', w: 6, n: 1, a: 8, d: 2 },
+  ]
+  expect(positionsOf(item, 72).pages[0]!.map(w => w.text)).toEqual(['a'])
 })
 
 // A hand-made page: 10 columns of 10 px, 4 rows of 20 px.
@@ -291,8 +328,8 @@ test("a real probe: the whole picture copies as the answer's text", () => {
 })
 
 test('a real probe: a selection from mid-paragraph into the code block', () => {
-  // Rows: heading 1, paragraph 3 and 5, items 7 and 9, code 12 and 13.
-  const lines = [{ row: 3, colStart: 30, colEnd: 97 }, ...[4, 5, 6, 7, 8, 9, 10, 11].map(ALL_COLUMNS), { row: 12, colStart: 0, colEnd: 14 }]
+  // Rows: heading 1, paragraph 3 and 5, items 7 and 9, the code's header 11, code 14 and 15.
+  const lines = [{ row: 3, colStart: 30, colEnd: 97 }, ...[4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map(ALL_COLUMNS), { row: 14, colStart: 0, colEnd: 14 }]
   expect(textOfRun(lines, REAL.pages[0]!, REAL.blocks, SMALL_PAGE)).toBe(
     'the lazy dog, then keeps running across the wide green field until the well-known path ends.\n- first item\n- second item\necho hello ',
   )
@@ -1724,8 +1761,9 @@ test('picture select: with no perl the first frame write fails, is logged once a
 // TARGETS_MD drawn as `ans-1` (its probe the fixture's TARGETS_MARKS), with
 // src/a.ts a file in the session's folder /w. Its targets (targets.test.ts):
 // the link "the docs" row 3 columns 4 to 11, the bare URL row 3 16 to 45,
-// `! ls -la` row 4 50 to 58, src/a.ts row 6 5 to 13 (the bash block rows 9 and 10: no target).
-async function drawTargets($: any, on: any, o: { env?: Record<string, string> } = {}, isFullscreen: boolean | null = true) {
+// `! ls -la` row 4 50 to 58, src/a.ts row 6 5 to 13, the bash block's copy
+// button row 8 8 to 15 (its code rows 11 and 12: no target).
+async function drawTargets($: any, on: any, o: { env?: Record<string, string>; marks?: readonly object[] } = {}, isFullscreen: boolean | null = true) {
   const w = world(on, { tty: TTY, marks: TARGETS_MARKS, ...o })
   on('session.cwd', async () => ({ value: '/w' }))
   on('fs.exists', async ($: any, e: any) => ({ value: e.path === '/w/src/a.ts' }))
@@ -1827,6 +1865,28 @@ test('picture select: a click copies a link, a file\'s path or a command; a clic
   await click(ui, 5, 10)
   await settle(w)
   expect(w.copies.length).toBe(4)
+})
+
+test("picture select: a click on a code block's copy button copies its whole code; a hover tints the button", async ($, on) => {
+  const { w, ui } = await drawTargets($, on, { env: { HOME: '/h', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1', IUI_DEBUG: '1' } })
+  // The button: row 8, columns 8 to 15.
+  await hover(ui, 11, 8)
+  await settle(w)
+  expect(isFrame(w)).toBe(true)
+  const png = w.frames.at(-1)!.png
+  expect([cellOf(png, 8, 8), cellOf(png, 8, 15)]).toEqual(['selected', 'selected'])
+  expect([cellOf(png, 8, 7), cellOf(png, 8, 16), cellOf(png, 9, 11)]).toEqual(['page', 'page', 'page'])
+  await click(ui, 11, 8)
+  await settle(w)
+  expect(w.copies).toEqual(['echo hello\nls -la'])
+  expect(w.toasts).toContain('Intelligent UI: copied the code')
+  expect(w.traces.some(t => t.includes('select: hover ans-1 page 0 target 4 (code) rows 8:8-15'))).toBe(true)
+  expect(w.traces.some(t => t.includes('select: click ans-1 page 0 at 11,8 target code'))).toBe(true)
+  // The code's text is no target; the other targets copy as before.
+  await click(ui, 5, 11)
+  await click(ui, 52, 4)
+  await settle(w)
+  expect(w.copies).toEqual(['echo hello\nls -la', 'ls -la'])
 })
 
 test('picture select: a ctrl+click copies as a plain click does; a right click is dropped', async ($, on) => {

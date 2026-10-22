@@ -59,6 +59,17 @@
 #let safe = inp.at("safe", default: "0") not in ("", "0", "false", "no", "off")
 // One segment only (page=<n>, 1-based); 0 = all of them.
 #let only = int(inp.at("page", default: "0"))
+// The probe (probe=1) and its marks: see the probe section below.
+#let probe = inp.at("probe", default: "0") not in ("", "0", "false", "no", "off")
+#let mark(kind, ..extra) = context {
+  let at = here().position()
+  [#metadata((k: kind, p: at.page + calc.max(0, only - 1), x: at.x / 1pt, y: at.y / 1pt, s: text.size.to-absolute() / 1pt, ..extra.named()))<mdpos>]
+}
+// Block code sets this so the word rule leaves its text to the line marks;
+// math and live drawings set no-marks. The orphan cost changes nothing
+// here: a page is as tall as its text, so no paragraph breaks across pages.
+#let in-code(costs) = costs.orphan == 101%
+#let no-marks(costs) = costs.orphan == 102%
 #let page-w = float(inp.at("width", default: "600")) * 1pt
 // No left margin, so the text starts in the column normal replies start in.
 #let margin-left = 0pt
@@ -401,36 +412,67 @@
   h(pad-x)
 }
 // Code blocks: VS Code's `pre` (padding 16px, radius 3px, 1px border) with
-// `code { line-height: 1.357em }`. A block with no language has its own
-// colour, code-plain-fg, when the theme sets one (Typst gives unscoped code
-// the text colour, not the tmTheme's).
+// `code { line-height: 1.357em }`, only as wide as its code and header need
+// (at most the width here, where long lines wrap). A block with no language
+// has its own colour, code-plain-fg, when the theme sets one (Typst gives
+// unscoped code the text colour, not the tmTheme's).
+// The header row on top: the language as written (when the fence has one)
+// and a copy button, small and muted, with a rule under them. Its text has
+// no marks (no-marks); the probe marks the button (`t`, see the probe).
+// The copy icon: two pages, the back one seen over and right of the front.
+#let copy-icon = box(width: 0.85em, height: 0.85em, baseline: 0.12em, {
+  let line = (paint: C.muted, thickness: 0.07em, join: "round")
+  place(rect(width: 0.6em, height: 0.6em, radius: 0.12em, stroke: line), dy: 0.25em)
+  place(curve(stroke: line, curve.move((0.25em, 0.25em)), curve.line((0.25em, 0em)), curve.line((0.85em, 0em)), curve.line((0.85em, 0.6em)), curve.line((0.6em, 0.6em))))
+})
 #show raw.where(block: true): it => context {
   let fg = if it.lang == none { C.at("code-plain-fg", default: C.code-fg) } else { C.code-fg }
   let CB = E.code-block
-  if on-grid {
-    // The grid: each code line exactly one row (the code is the terminal's
-    // font at its size), padding of whole rows (16px is about one row), and
-    // half a row more when its lines are not in the flow's phase (phase-pad).
-    let g = grid-edges()
-    let half = calc.even(g.rows)
-    let pad = phase-pad(half)
-    return {
-      set text(top-edge: g.top, bottom-edge: g.bottom, costs: half-costs(half))
-      set par(leading: 0pt, justify: false)
-      block(
-        width: 100%, fill: C.code-bg, stroke: CB.border-px * px + C.code-border,
-        radius: CB.radius-px * px, inset: (x: CB.pad-px * px, y: rows-near(CB.pad-px * px) + pad), above: row, below: row,
-        text(fill: fg, it),
-      )
-    }
-  }
+  let pad = CB.pad-px * px
+  let line = CB.border-px * px + C.code-border
+  // The grid: each code line exactly one row (the code is the terminal's
+  // font at its size), the header one line of code, padding of whole rows
+  // (16px is about one row), and half a row more when its lines are not in
+  // the flow's phase (phase-pad).
+  let g = if on-grid { grid-edges() } else { (top: 0pt, bottom: 0pt, rows: 1) }
+  let half = calc.even(g.rows)
+  let phase = if on-grid { phase-pad(half) } else { 0pt }
   let area = measure(text(top-edge: "ascender", bottom-edge: "descender", "x")).height
-  set par(leading: calc.max(0pt, CB.line-height * text.size - area), justify: false)
-  block(
-    width: 100%, fill: C.code-bg, stroke: CB.border-px * px + C.code-border,
-    radius: CB.radius-px * px, inset: CB.pad-px * px, above: 1.2em, below: 1.2em,
-    text(fill: fg, it),
-  )
+  set text(top-edge: g.top, bottom-edge: g.bottom, costs: half-costs(half)) if on-grid
+  set par(leading: if on-grid { 0pt } else { calc.max(0pt, CB.line-height * text.size - area) }, justify: false)
+  let gap = if on-grid { row } else { 1.2em }
+  // In a live drawing (no-marks): the full width and no header, as the
+  // drawing is scaled (its button would not be where it is drawn).
+  if no-marks(text.costs) {
+    block(
+      width: 100%, fill: C.code-bg, stroke: line, radius: CB.radius-px * px, above: gap, below: gap,
+      inset: if on-grid { (x: pad, y: rows-near(pad) + phase) } else { pad }, text(fill: fg, it),
+    )
+  } else {
+    let small(body) = text(font: sans, size: 0.85em, fill: C.muted, body)
+    let lang = if it.lang != none { small(it.lang) }
+    let copy = small[#copy-icon#h(0.35em)Copy]
+    let bpad = pad / 2
+    let bw = measure(copy).width + 2 * bpad
+    let hh = if on-grid { g.rows * row } else { measure(small("X")).height + 0.6 * pad }
+    let header = block(width: 100%, height: hh, inset: (left: pad, right: pad - bpad), stroke: (bottom: line), {
+      set text(costs: (orphan: 102%))
+      if probe and in-code(text.costs) { place(top + right, box(width: bw, height: hh, mark("t", kind: "copy", w: bw / 1pt, h: hh / 1pt, code: it.text, ..if it.lang != none { (lang: it.lang) }))) }
+      grid(columns: (1fr, bw), rows: hh, align: (left + horizon, center + horizon), lang, copy)
+    })
+    let code = block(width: 100%, inset: if on-grid { (x: pad, y: rows-near(pad)) } else { pad }, text(fill: fg, it))
+    block(width: 100%, above: gap, below: gap, layout(size => {
+      // The width the code and the header need, at most the width here.
+      let need = calc.max(
+        measure(text(fill: fg, it)).width,
+        if lang == none { 0pt } else { measure(lang).width + pad } + bw - bpad,
+      ) + 2 * pad
+      block(
+        width: calc.min(need, size.width), fill: C.code-bg, stroke: line,
+        radius: CB.radius-px * px, inset: (y: phase), stack(header, code),
+      )
+    }))
+  }
 }
 
 // ---------- block quotes ----------
@@ -530,6 +572,10 @@
 //      font's ascender and descender, w its width, n its characters.
 //   b: a block starts: paragraph, heading, code block, quote, table cell
 //      (column `cx`), list item (`prefix`: "- ", "1. ", "- [x] ").
+//   t: a click target: kind "copy", the copy button of a code block (after
+//      its `b`, before its lines), boxed; x, y the top-left of its box, w
+//      and h its size, `code` the block's whole text, `lang` its language
+//      (when the fence has one).
 // Math and live ```typst drawings have no marks (a drawing is scaled, so
 // its marks would not be where it is drawn).
 // With page=<n>, only that segment is laid out, as in the whole document
@@ -539,16 +585,6 @@
 // `s`; all lengths in pt from the page's top-left. A bare (unboxed) mark at
 // the start of a wrapped line is placed at the end of the line above, and
 // one at a paragraph's end on the next line; hence the boxes.
-#let probe = inp.at("probe", default: "0") not in ("", "0", "false", "no", "off")
-#let mark(kind, ..extra) = context {
-  let at = here().position()
-  [#metadata((k: kind, p: at.page + calc.max(0, only - 1), x: at.x / 1pt, y: at.y / 1pt, s: text.size.to-absolute() / 1pt, ..extra.named()))<mdpos>]
-}
-// Block code sets this so the word rule leaves its text to the line marks;
-// math and live drawings set no-marks. The orphan cost changes nothing
-// here: a page is as tall as its text, so no paragraph breaks across pages.
-#let in-code(costs) = costs.orphan == 101%
-#let no-marks(costs) = costs.orphan == 102%
 // Inline code sets this so its words carry the theme's padding beside it
 // (`pad`: a copy takes it off the gap to the text next to it).
 #let in-inline-code(costs) = costs.orphan == 104%
@@ -592,7 +628,7 @@
     box(mark("c", t: it.text, w: measure(it.body).width / 1pt, n: it.text.clusters().len(), a: asc / 1pt, d: desc / 1pt))
     it
   }
-  show raw.where(block: true): it => {
+  show raw.where(block: true): it => context if no-marks(text.costs) { it } else {
     mark("b", kind: "code")
     set text(costs: (orphan: 101%))
     it
@@ -933,7 +969,8 @@
     let drawing = {
       show colbreak: none
       // The probe: no marks (see no-marks). The grid: no half-row phase.
-      set text(costs: (orphan: 102%)) if probe or on-grid
+      // Code blocks: no header (see the code section).
+      set text(costs: (orphan: 102%))
       // Off-grid text rules, so multi-line labels do not overlap.
       set text(top-edge: "ascender", bottom-edge: "descender") if on-grid
       set par(leading: E.text.leading-em * 1em, spacing: E.text.paragraph-em * 1em) if on-grid

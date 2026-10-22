@@ -106,13 +106,13 @@ A selection can go on into the next page of the same answer.
 
 #### Click a link, a file or a command
 
-With picture select, the web links, file paths and commands in a picture are live. The dim link rows do not show under the picture.
+With picture select, the web links, file paths, commands and the copy buttons of code blocks in a picture are live. The dim link rows do not show under the picture.
 
-- Move the pointer over a link, a file path or a command (no button). Its cells show on the blue background. Move the pointer off it, and the background goes. While a selection shows, there is no such highlight.
-- Click it (push and release the button on the same cell). The mod copies it and shows a toast: a web link copies its URL ("copied the link"), a file path copies its full path ("copied the path"), and a command copies the full command ("copied the command").
+- Move the pointer over a link, a file path, a command or a copy button (no button). Its cells show on the blue background. Move the pointer off it, and the background goes. While a selection shows, there is no such highlight.
+- Click it (push and release the button on the same cell). The mod copies it and shows a toast: a web link copies its URL ("copied the link"), a file path copies its full path ("copied the path"), a command copies the full command ("copied the command"), and the copy button of a code block (at the top right of the block) copies all the code of the block ("copied the code").
 - A drag that starts on a link, a file path or a command selects text, as on other text.
 
-A web link is a Markdown link to an `http:`, `https:` or `mailto:` URL, or a URL in the text. A file path is in the text or in inline code, and the file must exist (a relative path starts from the session's folder). A command is any inline code that is not a file that exists, for example `` `git status` `` (a click copies its text; for `` `! cmd` `` it copies only `cmd`). A code block is not a target (to copy it, select its text). A link to a heading in the same text is not a link for this.
+A web link is a Markdown link to an `http:`, `https:` or `mailto:` URL, or a URL in the text. A file path is in the text or in inline code, and the file must exist (a relative path starts from the session's folder). A command is any inline code that is not a file that exists, for example `` `git status` `` (a click copies its text; for `` `! cmd` `` it copies only `cmd`). The text of a code block is not a target: to copy all of it, click its copy button, or select its text. A link to a heading in the same text is not a link for this.
 
 When a page is drawn or comes on the screen, the mod gets the page ready for the highlight in the background. It also finds the position of each word on the page. Thus the first highlight and the copy are fast. If you push the button on a page that is not ready, the mod gets that page ready first, and the first highlight shows a short time later. If the words of the page are not ready when you release the button, the copy waits for them: approximately 0.05 s for plain text (only ASCII characters, no math, no Typst block and no image), 0.15–0.5 s for other text, and more (2–3 s) for a page with a large Typst drawing. No toast shows while the mod does this. Only the toast of the copy shows. The mod keeps the positions in memory, so the next copy from the same page is fast.
 

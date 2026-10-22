@@ -207,7 +207,7 @@ test('a selection reads as a copy of the same cells: the same runs, the same tex
 test('a selection over two pages is the text of each, one line apart; a page with no words read is no text', () => {
   const pages = [SMALL_PAGE, SMALL_PAGE]
   // Page 0 from "the lazy dog" (row 3, column 30) to its end, page 1 its heading.
-  const runs = runsOf(selectedRows(sel(30, 3, 97, 17), pages))
+  const runs = runsOf(selectedRows(sel(30, 3, 97, 18), pages))
   expect(runs.map(r => r.page)).toEqual([0, 1])
   const words = () => ({ items: REAL.pages[0]!, blocks: REAL.blocks })
   expect(textOfRuns(runs, words, pages)).toBe(

@@ -1,15 +1,17 @@
-// Click targets (pure): the web links, files and commands drawn on a page of
-// a picture, and the cells each takes, from the page's probed words (copy.ts:
-// a word's `href` and `code`) and the drawing's resolved links (only files
-// that exist, by their label). Code blocks are no targets: inline code is
-// (a command to copy).
-import { joinItems, type Item } from './copy'
+// Click targets (pure): the web links, files, commands and code blocks' copy
+// buttons drawn on a page of a picture, and the cells each takes, from the
+// page's probed words (copy.ts: a word's `href` and `code`), its buttons and
+// the drawing's resolved links (only files that exist, by their label). The
+// text of a code block is no target, only its copy button (its whole code);
+// inline code is (a command to copy).
+import { joinItems, type Button, type Item } from './copy'
 import type { ShownLink } from './draw'
 import { fileOf, trimUrl } from './links'
 import type { PageWords } from './probe'
 import type { SelRow } from './select'
 
-export type Target = { kind: 'web'; href: string } | { kind: 'file'; path: string } | { kind: 'command'; text: string }
+export type Target =
+  | { kind: 'web'; href: string } | { kind: 'file'; path: string } | { kind: 'command'; text: string } | { kind: 'code'; text: string; lang?: string }
 // One target on one page: what it does, and its cells on that page (the cells whose centre test matches
 // textOfRun's rule: a word is in a cell when its box centre is in it; a target covers, on each of its rows,
 // the columns from its first word's left cell to its last word's right cell).
@@ -43,6 +45,25 @@ function rowsOf(items: readonly Item[], page: Page): SelRow[] {
   return [...rows.values()].sort((a, b) => a.row - b.row)
 }
 
+// The cells of a button's box, row by row: the cells whose centres are in
+// it (at least the one its centre is in).
+function boxRows(box: Button, page: Page): SelRow[] {
+  const colW = page.width / page.columns
+  const rowH = page.height / page.rows
+  // The first and last cells whose centres are in [a, b] (else the one of its centre), clamped to n.
+  const span = (a: number, b: number, size: number, n: number) => {
+    const mid = Math.floor((a + b) / 2 / size)
+    const lo = Math.min(mid, Math.ceil(a / size - 0.5))
+    const hi = Math.max(mid, Math.floor(b / size - 0.5))
+    return [Math.max(0, lo), Math.min(n - 1, hi)] as const
+  }
+  const [r0, r1] = span(box.y0, box.y1, rowH, page.rows)
+  const [x0, x1] = span(box.x0, box.x1, colW, page.columns)
+  const rows: SelRow[] = []
+  if (x0 <= x1) for (let row = r0; row <= r1; row++) rows.push({ row, x0, x1 })
+  return rows
+}
+
 // A file's target: the ShownLink of kind file with that label (it exists).
 function fileTarget(label: string, links: readonly ShownLink[]): Target | null {
   const link = links.find(l => l.kind === 'file' && l.label === label)
@@ -62,7 +83,8 @@ function bareTarget(token: string, links: readonly ShownLink[]): Target | null {
 // link URL are one web target (a URL only); the words of one inline code a
 // file that exists, else a command (its text, less a `! ` before it); a code block none; a bare URL
 // or file path one target over its words (pieces with no space between, as
-// the copy joins them).
+// the copy joins them). A copy button is a code target over its box, put
+// before the first target that starts below it (or right of it on its row).
 export function targetsOf(words: PageWords, page: Page, links: readonly ShownLink[]): PageTarget[] {
   const { items } = words
   const out: PageTarget[] = []
@@ -94,6 +116,14 @@ export function targetsOf(words: PageWords, page: Page, links: readonly ShownLin
       add(bareTarget(token.map(w => w.text).join(''), links), token)
     }
     i = j
+  }
+  for (const button of words.buttons ?? []) {
+    const rows = boxRows(button, page)
+    if (!rows.length) continue
+    const top = rows[0]!
+    const at = out.findIndex(t => t.rows[0]!.row > top.row || (t.rows[0]!.row === top.row && t.rows[0]!.x0 > top.x0))
+    const target: Target = { kind: 'code', text: button.code, ...(button.lang ? { lang: button.lang } : {}) }
+    out.splice(at < 0 ? out.length : at, 0, { target, rows })
   }
   return out
 }

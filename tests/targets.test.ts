@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { positionsOf, targetAt, targetsOf, textOfRun, type Item, type Mark, type ShownLink, type TextBlock } from '../hooks/register'
+import { positionsOf, targetAt, targetsOf, textOfRun, type Button, type Item, type Mark, type ShownLink, type TextBlock } from '../hooks/register'
 import { LONG_MARKS, LONG_MD, LONG_PAGE, SMALL_PPI, TARGETS_MARKS, TARGETS_PAGE } from './copy-fixture'
 
 const file = (label: string, path: string): ShownLink => ({ kind: 'file', label, path, href: `file://${path}` })
@@ -12,7 +12,7 @@ const REAL = positionsOf(TARGETS_MARKS as unknown as Mark[], SMALL_PPI)
 const WORDS = { items: REAL.pages[0]!, blocks: REAL.blocks }
 
 test('a real probe: links, a bare URL, inline code, a bare path are targets; a bash block is none', () => {
-  // Rows: paragraph 3 (its inline code 4), paragraph 6, code 9 and 10.
+  // Rows: paragraph 3 (its inline code 4), paragraph 6, the code's button 8, code 11 and 12.
   expect(targetsOf(WORDS, TARGETS_PAGE, LINKS)).toEqual([
     { target: { kind: 'web', href: 'https://example.com' }, rows: [{ row: 3, x0: 4, x1: 11 }] },
     { target: { kind: 'web', href: 'https://typst.app/docs/reference' }, rows: [{ row: 3, x0: 16, x1: 45 }] },
@@ -33,6 +33,19 @@ test('a real probe: a bare file that does not exist (no ShownLink) is no target,
   const got = targetsOf(WORDS, TARGETS_PAGE, [file('other.ts', '/w/other.ts')]).map(t => t.target)
   expect(got.map(t => t.kind)).toEqual(['web', 'web', 'command', 'command'])
   expect(got[3]).toEqual({ kind: 'command', text: 'src/a.ts' })
+})
+
+test("a real probe with a code block's copy button: a code target over its box, in order; the words' targets as before", () => {
+  const got = positionsOf(TARGETS_MARKS as unknown as Mark[], SMALL_PPI)
+  const words = { items: got.pages[0]!, blocks: got.blocks, buttons: got.buttons[0]! }
+  expect(words.items).toEqual(WORDS.items)
+  const targets = targetsOf(words, TARGETS_PAGE, LINKS)
+  expect(targets.map(t => t.target.kind)).toEqual(['web', 'web', 'command', 'file', 'file', 'code'])
+  expect(targets[5]).toEqual({ target: { kind: 'code', text: 'echo hello\nls -la', lang: 'bash' }, rows: [{ row: 8, x0: 8, x1: 15 }] })
+  expect(targetAt(targets, 8, 8)).toBe(5)
+  expect(targetAt(targets, 15, 8)).toBe(5)
+  expect(targetAt(targets, 16, 8)).toBe(-1)
+  expect(targetAt(targets, 11, 9)).toBe(-1)
 })
 
 test('a real probe: a long path and a long URL that wraps (a character a word)', () => {
@@ -101,9 +114,46 @@ test('a bare path takes the punctuation around it off; a bare word that is a nam
   expect(of([word(0, 'a/', 0, 0), word(1, 'b.ts:12', 30, 0)], PAR, links)).toEqual([])
 })
 
-test('a code block is no target, also a shell block', () => {
+test('the text of a code block is no target, also a shell block', () => {
   const line = (i: number, text: string, row: number): Item => ({ i, text, x0: 10, x1: 10 + text.length * 5, y0: row * 20 + 4, y1: row * 20 + 16, block: 0, adv: 5 })
   expect(of([line(0, '$ make build', 0), line(1, 'https://x.dev', 1)], [{ kind: 'code', prefix: '', first: 0 }])).toEqual([])
+})
+
+// A button's box: x0..x1, y0..y1 in px.
+const button = (x0: number, y0: number, x1: number, y1: number, more: Partial<Button> = {}): Button => ({ x0, y0, x1, y1, code: 'make\nmake test', ...more })
+const withButtons = (items: Item[], buttons: Button[], blocks = PAR) => targetsOf({ items, blocks, buttons }, PAGE, [])
+
+test("a copy button is a code target: the cells whose centres are in its box, its code and language", () => {
+  // Centres of columns 6 to 8 (65, 75, 85) and row 0 (10) are in the box.
+  expect(withButtons([], [button(62, 2, 88, 18, { lang: 'sh' })])).toEqual([
+    { target: { kind: 'code', text: 'make\nmake test', lang: 'sh' }, rows: [{ row: 0, x0: 6, x1: 8 }] },
+  ])
+  // No language: none kept.
+  expect(withButtons([], [button(62, 2, 88, 18)])[0]!.target).toEqual({ kind: 'code', text: 'make\nmake test' })
+  // A box smaller than a cell, over no centre: the cell of its centre.
+  expect(withButtons([], [button(71, 21, 78, 28)])[0]!.rows).toEqual([{ row: 1, x0: 7, x1: 7 }])
+})
+
+test('a copy button that is taller than a row takes each row whose centre is in it; one off the page none', () => {
+  // Rows 1 and 2 (centres 30, 50); columns 7 to 9 (the last one clamped).
+  expect(withButtons([], [button(70, 22, 120, 58)])[0]!.rows).toEqual([{ row: 1, x0: 7, x1: 9 }, { row: 2, x0: 7, x1: 9 }])
+  expect(withButtons([], [button(10, 90, 30, 110)])).toEqual([])
+})
+
+test('copy buttons go in order with the other targets, by their first row and column', () => {
+  const href = 'https://x.dev'
+  const items = [word(0, 'see', 0, 0, { href }), word(1, 'npm', 0, 2, { code: 'npm' })]
+  const got = withButtons(items, [button(62, 22, 88, 38, { code: 'a' }), button(62, 62, 88, 78, { code: 'b' })])
+  expect(got.map(t => t.target)).toEqual([
+    { kind: 'web', href }, { kind: 'code', text: 'a' }, { kind: 'command', text: 'npm' }, { kind: 'code', text: 'b' },
+  ])
+  // On the row of a target, right of it: after it; left of it: before it.
+  expect(withButtons(items, [button(62, 2, 88, 18, { code: 'c' })]).map(t => t.target.kind)).toEqual(['web', 'code', 'command'])
+  const right = [word(0, 'see', 70, 0, { href })]
+  expect(withButtons(right, [button(2, 2, 28, 18, { code: 'c' })]).map(t => t.target.kind)).toEqual(['code', 'web'])
+  expect(targetAt(got, 7, 1)).toBe(1)
+  expect(targetAt(got, 0, 2)).toBe(2)
+  expect(targetAt(got, 8, 3)).toBe(3)
 })
 
 test('the cells scale with the box the page is drawn at', () => {
