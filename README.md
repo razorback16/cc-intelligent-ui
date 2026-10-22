@@ -1,4 +1,8 @@
-<img alt="Introducing Intelligent UI" src="outcomes/samples/intelligent-ui.png" width="100%">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="outcomes/out/hero-dark.gif">
+  <source media="(prefers-color-scheme: light)" srcset="outcomes/out/hero-light.gif">
+  <img alt="Claude Code: a prompt asks Claude to show what Markdown it can draw, and the answer draws as one rendered picture: a cover image, a heading, a table, LaTeX math, a code block with syntax colours, a task list and a note" src="outcomes/out/hero-light.gif" width="100%">
+</picture>
 
 # Intelligent UI for Claude Code
 
