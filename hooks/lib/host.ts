@@ -309,9 +309,13 @@ async function rioFont($: EngineInterface, isMac: boolean): Promise<string> {
   return (await installedFamily($, isMac, RIO_OLD_FONT)) ? RIO_OLD_FONT : RIO_DEFAULT_FONT
 }
 
+// iTerm2, or herdr in iTerm2 (its profile and font; S.isIterm stays false
+// there, so the setup question for iTerm2 is not asked).
+const isItermHere = () => S.isIterm || S.herdrHost === 'iterm'
+
 // The font that the terminal's own config or profile names.
 async function configFontOf($: EngineInterface, isMac: boolean): Promise<string> {
-  if (S.isIterm && isMac) {
+  if (isItermHere() && isMac) {
     const profile = await envGet($, 'ITERM_PROFILE')
     const [marks, guid] = await Promise.all([
       processRun($, ['sh', '-c', ITERM_BOOKMARKS_SH], { timeoutMs: 5000 }).catch(() => null),
@@ -384,7 +388,7 @@ export async function readHostMode($: EngineInterface): Promise<HostMode | null>
 
 // The background of the iTerm2 profile in use, on a Mac.
 async function readItermMode($: EngineInterface): Promise<HostMode | null> {
-  if (!S.isIterm || S.hostOs !== 'Darwin') return null
+  if (!isItermHere() || S.hostOs !== 'Darwin') return null
   const got = await processRun($, ['sh', '-c', ITERM_MODE_SH], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
   if (!got || got.exitCode !== 0) return null
   const [style = '', guid = '', marks = ''] = got.stdout.split(/^@\n/m)
@@ -401,9 +405,10 @@ export async function probeOsc11($: EngineInterface): Promise<{ reply: string } 
 }
 
 // The background of Ghostty's config. A `light:A,dark:B` theme follows the OS
-// (in cmux, cmux's appearance). In cmux, cmux's own config is read as well.
+// (in cmux, cmux's appearance). In cmux, cmux's own config is read as well;
+// herdr in Ghostty reads Ghostty's.
 async function readGhosttyMode($: EngineInterface): Promise<HostMode | null> {
-  if (!/ghostty/i.test(S.termProgram + S.termName)) return null
+  if (!/ghostty/i.test(S.termProgram + S.termName) && S.herdrHost !== 'ghostty') return null
   const got = await processRun($, ['sh', '-c', GHOSTTY_SH], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
   if (!got || got.exitCode !== 0) return null
   const home = (await envGet($, 'HOME')) ?? ''

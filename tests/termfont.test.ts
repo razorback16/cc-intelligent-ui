@@ -215,6 +215,48 @@ fontTest("cmux: a font-family in cmux's own config counts", async ($, on) => {
   expect(await details($)).toContain('terminal font Fira Code.')
 })
 
+// ---- herdr ----------------------------------------------------------------------
+
+fontTest("herdr in Ghostty (GHOSTTY_RESOURCES_DIR kept): Ghostty's font-family; the details name herdr and Ghostty", async ($, on) => {
+  world(on, {
+    isMac: true,
+    env: { TERM_PROGRAM: 'herdr', TERM_PROGRAM_VERSION: '0.9.5', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_RESOURCES_DIR: '/R', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' },
+    families: ['Iosevka'],
+    run: shows('font-family = Iosevka\n'),
+  })
+  const text = await details($)
+  expect(text).toContain('terminal font Iosevka.')
+  expect(text).toContain('terminal herdr 0.9.5 (in Ghostty): this terminal draws pictures.')
+})
+
+fontTest("herdr in kitty (KITTY_INSTALLATION_DIR kept): kitty's font_family", async ($, on) => {
+  world(on, {
+    isMac: true,
+    env: { TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', KITTY_INSTALLATION_DIR: '/K', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' },
+    families: ['Iosevka'],
+    files: { '/h/.config/kitty/kitty.conf': 'font_family Iosevka\n' },
+  })
+  const text = await details($)
+  expect(text).toContain('terminal font Iosevka.')
+  expect(text).toContain('terminal herdr (in kitty): ')
+})
+
+fontTest('herdr in a terminal it does not know: no font, as before; the details say so', async ($, on) => {
+  const w = world(on, { isMac: true, env: { TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' }, run: shows('font-family = Iosevka\n') })
+  const text = await details($)
+  expect(text).toContain('terminal font not known (Menlo assumed)')
+  expect(text).toContain('terminal herdr (outer terminal not known): this terminal draws pictures.')
+  expect(w.ran.some(argv => argv.join(' ').includes('+show-config'))).toBe(false)
+})
+
+fontTest('herdr with pictures off: the details point to /iui setup', async ($, on) => {
+  world(on, { isMac: true, env: { TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_BIN_DIR: '/B' }, run: shows('font-family = Iosevka\n') })
+  // The setup question (pictures are off in herdr) is dismissed.
+  on('tool.call', { tool: 'AskUserQuestion' }, async () => ({ deny: 'dismissed' }))
+  const text = await details($)
+  expect(text).toContain('terminal herdr (in Ghostty): Claude Code draws no pictures in herdr until CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 is set when it starts (run /iui setup)')
+})
+
 // ---- kitty ----------------------------------------------------------------------
 
 const kittyConf = (line: string) => ({ '/h/.config/kitty/kitty.conf': `${line}\n` })

@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { hasSetup, SETUP_END, SETUP_START, setupBlock, shellRcOf, withoutSetup, withSetup } from '../hooks/register'
+import { hasNewSetup, hasSetup, SETUP_END, SETUP_START, setupBlock, setupWordsOf, shellRcOf, withoutSetup, withSetup } from '../hooks/register'
 
 test('the setup writes the start file of the login shell', () => {
   expect(shellRcOf({ shell: '/bin/zsh', home: '/h', isMac: true })).toEqual({ path: '/h/.zshrc', kind: 'sh' })
@@ -19,12 +19,40 @@ test('the start file: an empty ZDOTDIR or XDG_CONFIG_HOME is not used, a shell w
   expect(shellRcOf({ shell: '/bin/zsh-5.9', home: '/h', isMac: true })).toBe(null)
 })
 
-test('the block sets the variable in iTerm2 only, not in tmux or screen', () => {
+test('the block sets the variable in iTerm2 and herdr only, not in tmux or screen', () => {
   const sh = setupBlock('sh')
   expect(sh.startsWith(`${SETUP_START}\n`)).toBe(true)
   expect(sh.endsWith(`${SETUP_END}\n`)).toBe(true)
-  expect(sh).toContain('[ "$TERM_PROGRAM" = "iTerm.app" ] && [ -z "$TMUX" ] && [ -z "$STY" ]; then export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1; fi')
-  expect(setupBlock('fish')).toContain('set -gx CLAUDE_CODE_FORCE_TERMINAL_IMAGES 1')
+  expect(sh).toContain(
+    'if { [ "$TERM_PROGRAM" = "iTerm.app" ] || [ "$TERM_PROGRAM" = "herdr" ]; } && [ -z "$TMUX" ] && [ -z "$STY" ]; then export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1; fi',
+  )
+  const fish = setupBlock('fish')
+  expect(fish.startsWith(`${SETUP_START}\n`)).toBe(true)
+  expect(fish).toContain(
+    'if test "$TERM_PROGRAM" = "iTerm.app" -o "$TERM_PROGRAM" = "herdr"; and not set -q TMUX; and not set -q STY; set -gx CLAUDE_CODE_FORCE_TERMINAL_IMAGES 1; end',
+  )
+})
+
+// The block of 0.3.2 and before: iTerm2 only.
+const OLD_SH = `${SETUP_START}\nif [ "$TERM_PROGRAM" = "iTerm.app" ] && [ -z "$TMUX" ] && [ -z "$STY" ]; then export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1; fi\n${SETUP_END}\n`
+const OLD_FISH = `${SETUP_START}\nif test "$TERM_PROGRAM" = "iTerm.app"; and not set -q TMUX; and not set -q STY; set -gx CLAUDE_CODE_FORCE_TERMINAL_IMAGES 1; end\n${SETUP_END}\n`
+
+test('an old block (iTerm2 only) is a block, but not the new one; adding the block replaces it', () => {
+  const rc = `export A=1\n\n${OLD_SH}`
+  expect(hasSetup(rc)).toBe(true)
+  expect(hasNewSetup(rc, 'sh')).toBe(false)
+  const now = withSetup(rc, 'sh')
+  expect(now).toBe(`export A=1\n\n${setupBlock('sh')}`)
+  expect(hasNewSetup(now, 'sh')).toBe(true)
+  expect(hasNewSetup(withSetup(OLD_FISH, 'fish'), 'fish')).toBe(true)
+  expect(hasNewSetup(OLD_FISH, 'fish')).toBe(false)
+  // The sh block is not the fish one.
+  expect(hasNewSetup(setupBlock('sh'), 'fish')).toBe(false)
+})
+
+test('the words for the terminal: herdr panes, iTerm2 tabs', () => {
+  expect(setupWordsOf(true)).toEqual({ app: 'herdr', tab: 'pane' })
+  expect(setupWordsOf(false)).toEqual({ app: 'iTerm2', tab: 'tab' })
 })
 
 test('adding the block twice keeps one; removing it gives the file back', () => {
@@ -57,8 +85,9 @@ test('a block of the other kind is replaced, not added next to the first', () =>
   expect(sh.startsWith('set -x A 1\n\n')).toBe(true)
 })
 
-// An iTerm2 session on a Mac with the engine's pictures off and a zsh user.
-const iterm = (on: any, files: Record<string, string>, answer: string | null, o: { env?: Record<string, string>; stored?: Record<string, unknown> } = {}) => {
+// An iTerm2 session on a Mac with the engine's pictures off and a zsh user
+// (`os`: another OS, `answer`: the option chosen, any question).
+const iterm = (on: any, files: Record<string, string>, answer: string | null, o: { env?: Record<string, string>; stored?: Record<string, unknown>; os?: string } = {}) => {
   const store = new Map(Object.entries(o.stored ?? {}))
   on('store.get', async ($: any, e: any) => ({ value: store.get(e.key) }))
   on('store.set', async ($: any, e: any) => (store.set(e.key, e.value), { value: undefined }))
@@ -80,7 +109,7 @@ const iterm = (on: any, files: Record<string, string>, answer: string | null, o:
   on('process.run', async ($: any, e: any, next: any) => {
     if (e.argv[0] === 'mkdir') return mkdirs.push(e.argv.slice(1).join(' ')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     return e.argv[0] === 'sh' && /cc-intelligent-ui-/.test(e.argv.join(' '))
-      ? { value: { exitCode: 0, stdout: '/tmp/mdp\nDarwin\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      ? { value: { exitCode: 0, stdout: `/tmp/mdp\n${o.os ?? 'Darwin'}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
       : next(e)
   })
   on('fs.read', async ($: any, e: any, next: any) => (e.path in files ? { value: files[e.path] } : e.path.startsWith('/h/') ? { deny: 'no such file' } : next(e)))
@@ -223,4 +252,92 @@ test('a yes with a shell it does not know changes no file; the toast points to t
   // The shell is not known: the question was asked, a yes changes no file.
   expect(files['/h/.zshrc']).toBe('')
   expect(toasts.filter(t => /transcript|tab/.test(t))).toEqual(['See the transcript for the setup.'])
+})
+
+// ---- herdr ------------------------------------------------------------------------
+
+// A herdr pane (in no known terminal) with the engine's pictures off.
+const HERDR = { TERM_PROGRAM: 'herdr', TERM_PROGRAM_VERSION: '0.9.5', HERDR_ENV: '1', TERM: 'xterm-256color', ITERM_PROFILE: '' }
+
+test('in herdr with pictures off, the plugin asks once and adds the block on yes; the texts name herdr panes', async ($, on) => {
+  const files: Record<string, string> = { '/h/.zshrc': 'export A=1\n' }
+  const { asked, clock, toasts, logs } = iterm(on, files, 'Add the line', { env: HERDR })
+  const shown = await $.command.run({ command: 'iui', args: '' } as any)
+  expect(shown.text).toContain('In herdr, run /iui setup once to show pictures.')
+  await clock.settle()
+  expect(asked.length).toBe(1)
+  expect(asked[0]).toContain('in herdr Claude Code needs CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1')
+  expect(asked[0]).toContain('Add one line to ~/.zshrc that sets it in iTerm2 and herdr only')
+  expect(files['/h/.zshrc']).toBe(`export A=1\n\n${setupBlock('sh')}`)
+  expect(toasts.filter(t => /pane|tab/.test(t))).toEqual(['Close this pane and open a new herdr pane to see pictures.'])
+  expect(logs.some(l => l.includes('Added the Intelligent UI block to /h/.zshrc. Close this pane, open a new herdr pane, and start Claude Code there'))).toBe(true)
+  const again = await $.command.run({ command: 'iui', args: 'setup' } as any)
+  expect(again.text).toBe('/h/.zshrc already has the Intelligent UI block. Close this pane, open a new herdr pane, and start Claude Code there to see pictures.')
+  const removed = await $.command.run({ command: 'iui', args: 'setup remove' } as any)
+  expect(removed.text).toBe('Removed the Intelligent UI block from /h/.zshrc. New herdr panes show answers as text.')
+  expect(files['/h/.zshrc']).toBe('export A=1\n')
+})
+
+test('in herdr, an old block (iTerm2 only) is not enough: the question asks to update it, and a yes replaces it', async ($, on) => {
+  const files: Record<string, string> = { '/h/.zshrc': `export A=1\n\n${OLD_SH}` }
+  const { asked, clock, toasts, logs } = iterm(on, files, 'Update the line', { env: HERDR })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await clock.settle()
+  expect(asked.length).toBe(1)
+  expect(asked[0]).toContain('Update the Intelligent UI line in ~/.zshrc so that it sets it in herdr too')
+  expect(files['/h/.zshrc']).toBe(`export A=1\n\n${setupBlock('sh')}`)
+  expect(toasts.filter(t => /pane|tab/.test(t))).toEqual(['Close this pane and open a new herdr pane to see pictures.'])
+  expect(logs.some(l => l.startsWith('Updated the Intelligent UI block in /h/.zshrc. Close this pane'))).toBe(true)
+})
+
+test('in herdr with the new block already there, no question', async ($, on) => {
+  const files: Record<string, string> = { '/h/.zshrc': withSetup('export A=1\n', 'sh') }
+  const { asked, clock } = iterm(on, files, 'Add the line', { env: HERDR })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await clock.settle()
+  expect(asked).toEqual([])
+})
+
+test('in iTerm2, an old block is enough (no question); /iui setup updates it', async ($, on) => {
+  const files: Record<string, string> = { '/h/.zshrc': OLD_SH }
+  const { asked, clock } = iterm(on, files, 'Add the line')
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await clock.settle()
+  expect(asked).toEqual([])
+  expect(files['/h/.zshrc']).toBe(OLD_SH)
+  const ran = await $.command.run({ command: 'iui', args: 'setup' } as any)
+  expect(ran.text).toBe('Updated the Intelligent UI block in /h/.zshrc. Close this tab, open a new iTerm2 tab, and start Claude Code there to see pictures. Undo with /iui setup remove.')
+  expect(files['/h/.zshrc']).toBe(setupBlock('sh'))
+})
+
+test('in herdr on Linux, /iui setup writes the block to .bashrc for bash (herdr starts no login shell there)', async ($, on) => {
+  const files: Record<string, string> = { '/h/.bashrc': 'export A=1\n' }
+  const { asked, clock } = iterm(on, files, 'Not now', { os: 'Linux', env: { ...HERDR, SHELL: '/bin/bash' } })
+  const shown = await $.command.run({ command: 'iui', args: '' } as any)
+  expect(shown.text).toContain('In herdr, run /iui setup once to show pictures.')
+  await clock.settle()
+  expect(asked.length).toBe(1)
+  const ran = await $.command.run({ command: 'iui', args: 'setup' } as any)
+  expect(ran.text).toBe('Added the Intelligent UI block to /h/.bashrc. Close this pane, open a new herdr pane, and start Claude Code there to see pictures. Undo with /iui setup remove.')
+  expect(files['/h/.bashrc']).toBe(`export A=1\n\n${setupBlock('sh')}`)
+})
+
+test('herdr with pictures on (the variable set): no question, no setup line', async ($, on) => {
+  const files: Record<string, string> = { '/h/.zshrc': '' }
+  const { asked, clock } = iterm(on, files, 'Add the line', { env: { ...HERDR, CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' } })
+  const shown = await $.command.run({ command: 'iui', args: '' } as any)
+  expect(shown.text).not.toContain('/iui setup once')
+  await clock.settle()
+  expect(asked).toEqual([])
+})
+
+test('herdr in iTerm2 (ITERM_PROFILE kept) asks the herdr question, never the iTerm2 one', async ($, on) => {
+  const files: Record<string, string> = { '/h/.zshrc': '' }
+  const { asked, clock } = iterm(on, files, 'Not now', { env: { ...HERDR, ITERM_PROFILE: 'Default' } })
+  const shown = await $.command.run({ command: 'iui', args: '' } as any)
+  expect(shown.text).toContain('In herdr, run /iui setup once')
+  await clock.settle()
+  expect(asked.length).toBe(1)
+  expect(asked[0]).toContain('in herdr Claude Code needs')
+  expect(asked[0]).not.toContain('in iTerm2 Claude Code needs')
 })

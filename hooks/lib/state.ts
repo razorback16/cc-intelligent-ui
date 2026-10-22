@@ -12,6 +12,7 @@ import type { GridMetrics } from './grid'
 import type { Checked } from './updates'
 import type { ClipWay } from './clipboard'
 import type { PdfFacts, PixelBox } from './images'
+import type { HerdrHost } from './terminal'
 import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } from './settings'
 import { invalidate } from './api'
 
@@ -57,6 +58,8 @@ export type Env = {
   canDraw: boolean
   // Over ssh: pictures go as `{ png }` bytes, not as a file name.
   inline: boolean
+  // Under herdr: pages are cut smaller (herdrBudget), so herdr sends them.
+  herdr?: boolean
   cache: string
   cwd: string
   root: string
@@ -176,6 +179,11 @@ export const S = {
   // iTerm2 (isItermIn) and cmux (Ghostty inside, with its CMUX_* variables), set in setUp.
   isIterm: false,
   isCmux: false,
+  // herdr (isHerdrIn), its version ('' not known) and the terminal it runs in
+  // (herdrHostOf; '' outside herdr or not known), set in setUp.
+  isHerdr: false,
+  herdrVersion: '',
+  herdrHost: '' as HerdrHost,
   // A font folder for Typst (TYPST_FONT_PATHS): the font a terminal carries
   // in its program (Ghostty's, Rio's), when it draws it. '' for none.
   fontPaths: '',
@@ -186,7 +194,7 @@ export const S = {
   isRemote: false,
   // IUI_DEBUG is set (setUp): trace lines go to the debug log.
   debug: false,
-  // iTerm2 with the engine's pictures off at start: /iui setup can help
+  // iTerm2 or herdr with the engine's pictures off at start: /iui setup can help
   // (`setupNeeded`); the question is asked once per load (`setupAsked`).
   setupNeeded: false,
   setupAsked: false,

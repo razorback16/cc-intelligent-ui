@@ -107,7 +107,7 @@ export async function pagesOf($: EngineInterface, o: PagesInput): Promise<Drawin
   const room = await roomOf($, { hasRoom, textHash, base, env, rows, widthPt, rowPt, isLive: liveNow() })
   const key = renderKey({
     textHash, columns, cell, size: S.size, mode: S.theme, termFont: env.termFont,
-    columnPt, templateStamp: env.stamp, look: active, inline: env.inline, base, room, grid: S.grid, fauxBold: fauxBoldOf(env.metrics),
+    columnPt, templateStamp: env.stamp, look: active, inline: env.inline, herdr: env.herdr, base, room, grid: S.grid, fauxBold: fauxBoldOf(env.metrics),
   })
   const seen = lastText.get(id)
   const changed = seen !== text

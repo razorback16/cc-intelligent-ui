@@ -1,8 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import {
-  alignFirstLine, scaledBulletRow, base64Bytes, canDrawIn, COMMIT_MIN_MS, DEFAULT_CELL, fileHref, fitsInline, INLINE_MAX_BYTES, INLINE_MAX_SIDE, inlineBudget, renderKey,
-  RESIZE_QUIET_MS, resolveLinks, SEGMENT_ROWS, WATCH_PL,
+  alignFirstLine, scaledBulletRow, base64Bytes, canDrawIn, COMMIT_MIN_MS, DEFAULT_CELL, fileHref, fitsInline, herdrBudget, HERDR_MAX_PAGE_BYTES, INLINE_MAX_BYTES,
+  INLINE_MAX_SIDE, inlineBudget, renderKey, RESIZE_QUIET_MS, resolveLinks, SEGMENT_ROWS, segmentBudget, sizing, WATCH_PL,
 } from '../hooks/register'
 import { TABLE_GRID } from './table-fixture'
 // This file's own copy of the drawing code, called with a fake `$`.
@@ -55,6 +55,42 @@ test('over ssh a segment is cut so its page stays under 4096 px tall', () => {
   expect(inlineBudget({ width: 8, height: 16 })).toBe(SEGMENT_ROWS)
   expect(inlineBudget({ width: 40, height: 200 })).toBe(20)
   expect(inlineBudget(DEFAULT_CELL) * DEFAULT_CELL.height).toBeLessThan(INLINE_MAX_SIDE)
+})
+
+test('under herdr a segment is cut so its page stays under 16 MiB of RGBA', () => {
+  // The page is as wide as its columns in device pixels (sizing).
+  expect(sizing(187, { width: 16, height: 34 }, 6).widthPx).toBe(2992)
+  // A wide page on a Retina screen: 41 rows fit, 30 with the room for the rough count.
+  expect(herdrBudget(187, { width: 16, height: 34 })).toBe(30)
+  expect(herdrBudget(187, { width: 16, height: 34 }) * 34 * 2992 * 4 / 0.75).toBeLessThanOrEqual(HERDR_MAX_PAGE_BYTES)
+  // A small page keeps the normal budget; a huge one at least 20 rows.
+  expect(herdrBudget(80, { width: 8, height: 16 })).toBe(SEGMENT_ROWS)
+  expect(herdrBudget(255, { width: 40, height: 80 })).toBe(20)
+  // The cell width counts as sizing rounds it.
+  expect(herdrBudget(100, { width: 15.5, height: 30 })).toBe(Math.floor((HERDR_MAX_PAGE_BYTES / (4 * 1550 * 30)) * 0.75))
+})
+
+test('the segment budget: the smaller of the ssh and herdr ones that apply', () => {
+  const big = { width: 16, height: 34 }
+  expect(segmentBudget({ inline: false }, 187, big)).toBe(SEGMENT_ROWS)
+  expect(segmentBudget({ inline: false, herdr: false }, 187, big)).toBe(SEGMENT_ROWS)
+  expect(segmentBudget({ inline: false, herdr: true }, 187, big)).toBe(herdrBudget(187, big))
+  expect(segmentBudget({ inline: true }, 187, big)).toBe(inlineBudget(big))
+  // Over ssh into herdr: the herdr budget (30) is under the ssh one (90).
+  expect(inlineBudget(big)).toBe(90)
+  expect(segmentBudget({ inline: true, herdr: true }, 187, big)).toBe(30)
+  // A narrow page: the ssh budget is the smaller one.
+  expect(segmentBudget({ inline: true, herdr: true }, 40, big)).toBe(inlineBudget(big))
+})
+
+test('pages cut for herdr have keys of their own; other keys do not change', () => {
+  const o = {
+    textHash: 'h', columns: 100, cell: DEFAULT_CELL, size: 100, mode: 'dark' as const, termFont: '', columnPt: 6,
+    templateStamp: '1', look: { name: 'vscode', dir: '/t', stamp: '0' },
+  }
+  expect(renderKey({ ...o, herdr: false })).toBe(renderKey(o))
+  expect(renderKey({ ...o, herdr: true })).not.toBe(renderKey(o))
+  expect(renderKey({ ...o, herdr: true })).not.toBe(renderKey({ ...o, inline: true }))
 })
 
 test('pages cut for ssh have keys of their own; local keys do not change', () => {

@@ -2,10 +2,10 @@
 // answer's segments to PNG pages (with a retry in safe mode).
 import type { EngineInterface } from 'claude-code'
 
-import { COMPILE_TIMEOUT_MS, MAX_IMAGE_ROWS, NO_NETWORK, SEGMENT_ROWS, TOUCH_FLUSH_MS, TYPST_FALLBACKS } from './settings'
+import { COMPILE_TIMEOUT_MS, MAX_IMAGE_ROWS, NO_NETWORK, TOUCH_FLUSH_MS, TYPST_FALLBACKS } from './settings'
 import { DEFAULT_METRICS, fauxBoldOf, S, type Cell, type FontMetrics, type Job, type LeanFonts, type Metrics, type Page, type Result } from './state'
 import { firstLine, imagePathOf, localImages, plainOf, splitInTwo, splitSegments } from './markdown'
-import { inlineBudget } from './terminal'
+import { segmentBudget } from './terminal'
 import { fontFit, placeFirstLine, sizing } from './draw'
 import { DEFAULT_GRID, gridOf } from './grid'
 import { HEADERS_SH } from './host'
@@ -467,7 +467,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
   // The room height of a drawing in rows (less the pt rounding); unknown
   // without a room (the default applies).
   const roomRows = job.room ? Math.ceil(job.room.heightPt / rowPt - 0.01) : undefined
-  let segments = splitSegments(job.text, job.columns, job.env.inline ? inlineBudget(job.cell) : SEGMENT_ROWS, job.size, roomRows)
+  let segments = splitSegments(job.text, job.columns, segmentBudget(job.env, job.columns, job.cell), job.size, roomRows)
   const base = job.base ?? job.env.cwd
   const images = await existingImages($, segments, base)
   await fsWrite($, `${dir}/doc.json`, JSON.stringify({ base, segments, images }))

@@ -13,10 +13,10 @@ import type {
 export type EnvName =
   | 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC' | 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES' | 'CLAUDE_CODE_SESSION_KIND' | 'CLAUDE_CODE_TMPDIR'
   | 'CMUX_SOCKET_PATH' | 'CMUX_SURFACE_ID' | 'CMUX_WORKSPACE_ID' | 'COLORFGBG' | 'DISABLE_AUTOUPDATER' | 'DISABLE_UPDATES' | 'DISPLAY'
-  | 'GHOSTTY_RESOURCES_DIR' | 'HOME'
-  | 'ITERM_PROFILE' | 'ITERM_SESSION_ID' | 'IUI_DEBUG' | 'IUI_FORCE' | 'KITTY_CONFIG_DIRECTORY' | 'KITTY_PID'
+  | 'GHOSTTY_BIN_DIR' | 'GHOSTTY_RESOURCES_DIR' | 'HERDR_ENV' | 'HOME'
+  | 'ITERM_PROFILE' | 'ITERM_SESSION_ID' | 'IUI_DEBUG' | 'IUI_FORCE' | 'KITTY_CONFIG_DIRECTORY' | 'KITTY_INSTALLATION_DIR' | 'KITTY_PID'
   | 'KITTY_WINDOW_ID' | 'LC_TERMINAL' | 'RIO_CONFIG_HOME' | 'SHELL' | 'SSH_CONNECTION' | 'SSH_TTY' | 'STY'
-  | 'TERM' | 'TERM_PROGRAM' | 'TMUX' | 'TYPST_FONT_PATHS' | 'WAYLAND_DISPLAY' | 'XDG_CONFIG_HOME' | 'XDG_CURRENT_DESKTOP' | 'ZDOTDIR'
+  | 'TERM' | 'TERM_PROGRAM' | 'TERM_PROGRAM_VERSION' | 'TMUX' | 'TYPST_FONT_PATHS' | 'WAYLAND_DISPLAY' | 'XDG_CONFIG_HOME' | 'XDG_CURRENT_DESKTOP' | 'ZDOTDIR'
 
 export function clockAfter($: EngineInterface, ms: number, fn: () => void) {
   return $.clock.after(ms, fn)
@@ -55,13 +55,16 @@ export function envGet($: EngineInterface, name: EnvName): Promise<string | unde
     case 'DISABLE_AUTOUPDATER': return $.env.get('DISABLE_AUTOUPDATER')
     case 'DISABLE_UPDATES': return $.env.get('DISABLE_UPDATES')
     case 'DISPLAY': return $.env.get('DISPLAY')
+    case 'GHOSTTY_BIN_DIR': return $.env.get('GHOSTTY_BIN_DIR')
     case 'GHOSTTY_RESOURCES_DIR': return $.env.get('GHOSTTY_RESOURCES_DIR')
+    case 'HERDR_ENV': return $.env.get('HERDR_ENV')
     case 'HOME': return $.env.get('HOME')
     case 'ITERM_PROFILE': return $.env.get('ITERM_PROFILE')
     case 'ITERM_SESSION_ID': return $.env.get('ITERM_SESSION_ID')
     case 'IUI_DEBUG': return $.env.get('IUI_DEBUG')
     case 'IUI_FORCE': return $.env.get('IUI_FORCE')
     case 'KITTY_CONFIG_DIRECTORY': return $.env.get('KITTY_CONFIG_DIRECTORY')
+    case 'KITTY_INSTALLATION_DIR': return $.env.get('KITTY_INSTALLATION_DIR')
     case 'KITTY_PID': return $.env.get('KITTY_PID')
     case 'KITTY_WINDOW_ID': return $.env.get('KITTY_WINDOW_ID')
     case 'LC_TERMINAL': return $.env.get('LC_TERMINAL')
@@ -72,6 +75,7 @@ export function envGet($: EngineInterface, name: EnvName): Promise<string | unde
     case 'STY': return $.env.get('STY')
     case 'TERM': return $.env.get('TERM')
     case 'TERM_PROGRAM': return $.env.get('TERM_PROGRAM')
+    case 'TERM_PROGRAM_VERSION': return $.env.get('TERM_PROGRAM_VERSION')
     case 'TMUX': return $.env.get('TMUX')
     case 'TYPST_FONT_PATHS': return $.env.get('TYPST_FONT_PATHS')
     case 'WAYLAND_DISPLAY': return $.env.get('WAYLAND_DISPLAY')

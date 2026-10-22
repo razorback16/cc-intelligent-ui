@@ -2,6 +2,24 @@
 
 All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Code finds a new version by the `version` in `.claude-plugin/plugin.json`. To get it, refer to [Update](docs/install.md#update).
 
+## Unreleased
+
+### New
+
+- **herdr support** (the terminal multiplexer). In a herdr pane, Claude Code needs `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` to show pictures. The mod asks one time to add the shell line, as in iTerm2. `/iui setup` also adds it. Then close the pane and open a new herdr pane. herdr must run in a terminal that shows kitty pictures (kitty or Ghostty). Refer to [Terminals](docs/install.md#terminals).
+- `/iui setup` works in herdr on Linux too.
+- `/iui details` names herdr, its version and the terminal that it runs in, for example `herdr 0.9.5 (in Ghostty)`.
+
+### Changed
+
+- The shell line of `/iui setup` sets the variable in iTerm2 and in herdr. `/iui setup` replaces the line of an older version. In herdr, the mod asks to update an older line. In iTerm2, the older line still works, and the mod does not ask.
+- In herdr, pages are shorter, so that each page is at most 16 MiB as pixels.
+
+### Fixed
+
+- In herdr, the mod now uses the font and the background of the terminal that herdr runs in (Ghostty, kitty or iTerm2). Before, it used Menlo and the OS appearance, so the text could be dark on a dark background.
+- In herdr, a tall page of a long answer did not show (herdr does not send an image that is too large to the terminal). Refer to [Limitations](docs/limitations.md).
+
 ## 0.3.2 (2026-10-21)
 
 ### New

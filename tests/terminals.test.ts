@@ -1,7 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
-  cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, ghosttyBackgroundOf, ghosttyHasColors, ghosttyThemesOf, ghosttyValueOf, isItermIn, jsoncOf,
+  cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, ghosttyBackgroundOf, ghosttyHasColors, ghosttyThemesOf, ghosttyValueOf, herdrHostOf, herdrText,
+  isHerdrIn, isItermIn, jsoncOf, needsSetup,
   KITTY_DEFAULT_BG, kittyAutoFileOf, kittyBackgroundOf, kittyConfigDirsOf, kittyEntriesOf, kittyFontOf, kittyIncludePath, kittyLinesOf,
   kittySchemeOfGnome, kittyValueOf,
   RIO_DEFAULT_BG, RIO_DEFAULT_FONT, rioBackgroundOf, rioConfigDirOf, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf,
@@ -206,6 +207,52 @@ test('iTerm2: TERM_PROGRAM, else (no TERM_PROGRAM) ITERM_PROFILE, ITERM_SESSION_
   expect(isItermIn({ program: '', lcTerminal: 'other' })).toBe(false)
   // Another terminal started from iTerm2 keeps its variables: TERM_PROGRAM wins.
   expect(isItermIn({ program: 'ghostty', profile: 'Default', lcTerminal: 'iTerm2' })).toBe(false)
+})
+
+// ---- herdr ----------------------------------------------------------------------
+
+test('herdr: TERM_PROGRAM, else (no TERM_PROGRAM) HERDR_ENV; another TERM_PROGRAM wins', () => {
+  expect(isHerdrIn({ program: 'herdr' })).toBe(true)
+  expect(isHerdrIn({ program: 'Herdr', herdrEnv: '1' })).toBe(true)
+  expect(isHerdrIn({ program: '', herdrEnv: '1' })).toBe(true)
+  expect(isHerdrIn({ program: '', herdrEnv: '0' })).toBe(false)
+  expect(isHerdrIn({ program: '' })).toBe(false)
+  expect(isHerdrIn({ program: 'iTerm.app' })).toBe(false)
+  // tmux in a herdr pane, or a terminal started from one.
+  expect(isHerdrIn({ program: 'tmux', herdrEnv: '1' })).toBe(false)
+  expect(isHerdrIn({ program: 'ghostty', herdrEnv: '1' })).toBe(false)
+})
+
+test("herdr's terminal: Ghostty, then kitty, then iTerm2, by the variables of the terminal that started it", () => {
+  expect(herdrHostOf({})).toBe('')
+  expect(herdrHostOf({ ghosttyResources: '/Applications/Ghostty.app/Contents/Resources/ghostty' })).toBe('ghostty')
+  expect(herdrHostOf({ ghosttyBin: '/Applications/Ghostty.app/Contents/MacOS' })).toBe('ghostty')
+  expect(herdrHostOf({ kittyPid: '123' })).toBe('kitty')
+  expect(herdrHostOf({ kittyDir: '/Applications/kitty.app/Contents/Resources/kitty' })).toBe('kitty')
+  expect(herdrHostOf({ itermProfile: 'Default' })).toBe('iterm')
+  expect(herdrHostOf({ ghosttyResources: '/g', kittyPid: '1', itermProfile: 'Default' })).toBe('ghostty')
+  expect(herdrHostOf({ kittyPid: '1', itermProfile: 'Default' })).toBe('kitty')
+  expect(herdrHostOf({ ghosttyResources: '', kittyPid: '', itermProfile: '' })).toBe('')
+})
+
+test('herdr in /iui details: its version and its terminal', () => {
+  expect(herdrText('0.9.5', 'ghostty')).toBe('herdr 0.9.5 (in Ghostty)')
+  expect(herdrText('0.9.5', 'kitty')).toBe('herdr 0.9.5 (in kitty)')
+  expect(herdrText('', 'iterm')).toBe('herdr (in iTerm2)')
+  expect(herdrText('', '')).toBe('herdr (outer terminal not known)')
+})
+
+test('/iui setup is offered in iTerm2 on a Mac and in herdr (macOS or Linux), with pictures off, not in ssh, tmux, screen or a background session', () => {
+  const off = { iterm: false, herdr: false, draws: false, ssh: false, os: 'Darwin', tmux: false, background: false }
+  expect(needsSetup({ ...off, iterm: true })).toBe(true)
+  expect(needsSetup({ ...off, iterm: true, os: 'Linux' })).toBe(false)
+  expect(needsSetup({ ...off, herdr: true })).toBe(true)
+  expect(needsSetup({ ...off, herdr: true, os: 'Linux' })).toBe(true)
+  expect(needsSetup(off)).toBe(false)
+  for (const no of [{ draws: true }, { ssh: true }, { tmux: true }, { background: true }]) {
+    expect(needsSetup({ ...off, herdr: true, ...no })).toBe(false)
+    expect(needsSetup({ ...off, iterm: true, ...no })).toBe(false)
+  }
 })
 
 test('JSONC: comments and trailing commas go, strings stay', () => {

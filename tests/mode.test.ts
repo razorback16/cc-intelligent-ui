@@ -127,6 +127,69 @@ test('with the theme on auto, Ghostty draws as its background is', async ($, on)
   expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode dark (auto, from Ghostty: theme Night background)')
 })
 
+// herdr in Ghostty on a light Mac: herdr's TERM_PROGRAM hides Ghostty, but
+// its GHOSTTY_RESOURCES_DIR is kept, so Ghostty's dark config counts.
+test('with the theme on auto, herdr in Ghostty draws as the Ghostty background is', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_RESOURCES_DIR: '/R', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
+  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', async ($: any, e: any, next: any) => {
+    const argv: string[] = e.argv
+    const cmd = argv.join(' ')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && cmd.includes('+show-config')) return ok('background = #1d1f21\n')
+    if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
+    return next(e)
+  })
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(ran.text).toContain('mode dark (auto, from Ghostty: config background)')
+})
+
+// herdr in iTerm2 on a light Mac: ITERM_PROFILE is kept, so the profile counts.
+test('with the theme on auto, herdr in iTerm2 draws as the iTerm2 profile is', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', ITERM_PROFILE: 'Default', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
+  const dark = { 'Red Component': 0.11, 'Green Component': 0.15, 'Blue Component': 0.17 }
+  const marks = JSON.stringify([{ Name: 'Default', Guid: 'G1', 'Background Color': dark }])
+  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', async ($: any, e: any, next: any) => {
+    const argv: string[] = e.argv
+    const cmd = argv.join(' ')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && cmd.includes('TabStyleWithAutomaticOption')) return ok(`0\n@\nG1\n@\n${marks}\n`)
+    if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
+    return next(e)
+  })
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(ran.text).toContain('mode dark (auto, from iTerm2: profile Default background)')
+  expect(ran.text).toContain('terminal herdr (in iTerm2): ')
+})
+
+// herdr with no hint of its terminal: as before, COLORFGBG, then the OS.
+test('with the theme on auto, herdr in a terminal it does not know follows the OS', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
+  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const ran: string[] = []
+  on('process.run', async ($: any, e: any, next: any) => {
+    const argv: string[] = e.argv
+    const cmd = argv.join(' ')
+    ran.push(cmd)
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
+    return next(e)
+  })
+  const got = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(got.text).toContain('mode light (auto, from macOS)')
+  expect(ran.some(c => c.includes('+show-config') || c.includes('TabStyleWithAutomaticOption'))).toBe(false)
+})
+
 // kitty on a light Mac: kitty.conf's included theme is dark; once auto theme
 // files exist, the one for the OS scheme is used.
 test('with the theme on auto, kitty draws as its config or auto theme is', async ($, on) => {

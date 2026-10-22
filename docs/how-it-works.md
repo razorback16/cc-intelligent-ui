@@ -88,4 +88,6 @@ Claude Code finds the light or dark mode for `auto` by asking the terminal for i
 
 The terminal comes before the OS: a dark terminal on a light Mac is dark.
 
+In **herdr**, `TERM_PROGRAM` is `herdr`, so it does not name the terminal that herdr runs in. Intelligent UI finds that terminal from the variables that herdr keeps of the terminal that started the herdr server: `GHOSTTY_RESOURCES_DIR` or `GHOSTTY_BIN_DIR` for Ghostty, `KITTY_PID` or `KITTY_INSTALLATION_DIR` for kitty, `ITERM_PROFILE` for iTerm2. It then uses that terminal's sources above (and its font for the text size). If it finds none, it uses `COLORFGBG`, then the OS appearance.
+
 Intelligent UI checks every 3 s. After a change, each mode's pictures compile once. `/iui probe` asks the terminal for its background with OSC 11 (5 times) and shows the raw answers. This is a test of whether the answer can reach the mod. The 3 s check does not use OSC 11 yet.

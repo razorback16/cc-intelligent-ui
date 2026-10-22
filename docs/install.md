@@ -12,7 +12,10 @@
 ## Terminals
 
 - **kitty (0.28 or later), Ghostty and cmux (Ghostty inside, macOS only):** pictures work with no setting. kitty and Ghostty work on macOS and on Linux.
-- **iTerm2 3.6 or later (3.7.5 tested, macOS only):** Claude Code needs `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` when it starts. A mod cannot set it early enough. The first time the mod runs in iTerm2, it asks to add one line to your shell's start file (`~/.zshrc`, `~/.bash_profile` or a fish `conf.d` file). The line sets the variable in iTerm2 only, not in tmux or screen. Then close the tab, open a new iTerm2 tab, and start Claude Code there. You can also run `/iui setup` (undo: `/iui setup remove`).
+- **iTerm2 3.6 or later (3.7.5 tested, macOS only):** Claude Code needs `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` when it starts. A mod cannot set it early enough. The first time the mod runs in iTerm2, it asks to add one line to your shell's start file (`~/.zshrc`, `~/.bash_profile` or a fish `conf.d` file). The line sets the variable in iTerm2 and herdr only, not in tmux or screen. Then close the tab, open a new iTerm2 tab, and start Claude Code there. You can also run `/iui setup` (undo: `/iui setup remove`).
+- **herdr (0.9.5 tested, in Ghostty):** herdr is a terminal multiplexer. It draws the pictures of its panes in the terminal that it runs in, so that terminal must show kitty pictures (kitty or Ghostty). Claude Code needs `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` in herdr too. The first time the mod runs in a herdr pane, it asks to add the same line to your shell's start file. If the file has the line of an older version (iTerm2 only), the mod asks to update it. Then close the pane, open a new herdr pane, and start Claude Code there. You can also run `/iui setup` (undo: `/iui setup remove`). herdr works on macOS and on Linux.
+  - herdr hides the name of the terminal that it runs in. The mod finds that terminal from the variables that herdr keeps of the terminal that started the herdr server (`GHOSTTY_RESOURCES_DIR` for Ghostty, `KITTY_PID` for kitty, `ITERM_PROFILE` for iTerm2). The mod then reads the font and the background of that terminal. If you attach to the herdr server from a different terminal, the font and the `auto` mode can be wrong. `/iui details` shows the terminal that the mod found, for example `herdr 0.9.5 (in Ghostty)`.
+  - Pages are shorter in herdr, so that herdr can send each one to the terminal. Refer to [Limitations](limitations.md).
 - **Rio 0.5.27 or later (not tested):** set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` before you start Claude Code. Rio works on macOS and on Linux.
 - Do not put the variable in the `env` of `~/.claude/settings.json`. It then applies in every terminal, also where pictures cannot show.
 - **Warp (not yet):** Warp does not draw kitty pictures with Unicode placeholders yet. The pull request [warpdotdev/warp#16312](https://github.com/warpdotdev/warp/pull/16312) adds them. The mod will support Warp when that pull request is merged.
@@ -67,7 +70,7 @@ The mod works on Linux with X11 and with Wayland. It uses these tools. Most Linu
 - **"Edit the plan"** (refer to [Plan approval](usage.md#plan-approval)): VS Code (`code --wait`), else the first of VSCodium, Zed, Sublime Text, Kate, gedit and gvim that is on the `PATH`. These editors can wait until you close the file. If none is installed, the option does not show.
 - **The cache folder** is in `$TMPDIR`, else in `/tmp`.
 
-`/iui setup` is for iTerm2 only. On Linux it changes no file.
+`/iui setup` is for iTerm2 and herdr. On Linux it changes no file, but in a herdr pane it adds the line (to `~/.bashrc` for bash, because herdr does not start a login shell on Linux).
 
 To install the clipboard tools, for example:
 

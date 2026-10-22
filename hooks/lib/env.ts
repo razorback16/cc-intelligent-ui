@@ -9,7 +9,7 @@ import {
 import { DEFAULT_METRICS, refresh, S, type Env } from './state'
 import { resolveMode, settingOf } from './mode'
 import { isItermIn } from './terminals'
-import { canDrawIn, isSet } from './terminal'
+import { canDrawIn, herdrHostOf, isHerdrIn, isSet, needsSetup } from './terminal'
 import { claudeTmpOf } from './images'
 import { applyTheme } from './themes'
 import { registerCommand } from './command'
@@ -70,7 +70,18 @@ export function setUp($: EngineInterface): Promise<Env> {
     S.termProgram = program
     S.termName = term
     S.itermProfile = (await envGet($, 'ITERM_PROFILE')) || undefined
-    S.isKitty = /kitty/i.test(term) || !!(await envGet($, 'KITTY_WINDOW_ID')) || !!(await envGet($, 'KITTY_PID'))
+    S.isHerdr = isHerdrIn({ program, herdrEnv: await envGet($, 'HERDR_ENV') })
+    S.herdrVersion = S.isHerdr ? ((await envGet($, 'TERM_PROGRAM_VERSION')) ?? '').trim() : ''
+    S.herdrHost = S.isHerdr
+      ? herdrHostOf({
+        ghosttyResources: await envGet($, 'GHOSTTY_RESOURCES_DIR'),
+        ghosttyBin: await envGet($, 'GHOSTTY_BIN_DIR'),
+        kittyPid: await envGet($, 'KITTY_PID'),
+        kittyDir: await envGet($, 'KITTY_INSTALLATION_DIR'),
+        itermProfile: S.itermProfile,
+      })
+      : ''
+    S.isKitty = /kitty/i.test(term) || !!(await envGet($, 'KITTY_WINDOW_ID')) || !!(await envGet($, 'KITTY_PID')) || S.herdrHost === 'kitty'
     S.isRemote = ssh
     S.debug = isSet(await envGet($, 'IUI_DEBUG'))
     S.isIterm = isItermIn({
@@ -79,8 +90,15 @@ export function setUp($: EngineInterface): Promise<Env> {
       session: (await envGet($, 'ITERM_SESSION_ID')) || undefined,
       lcTerminal: (await envGet($, 'LC_TERMINAL')) || undefined,
     })
-    S.setupNeeded = S.isIterm && !terminalDraws && !ssh && S.hostOs === 'Darwin' &&
-      !(await envGet($, 'TMUX')) && !(await envGet($, 'STY')) && (await envGet($, 'CLAUDE_CODE_SESSION_KIND')) !== 'bg'
+    S.setupNeeded = needsSetup({
+      iterm: S.isIterm,
+      herdr: S.isHerdr,
+      draws: terminalDraws,
+      ssh,
+      os: S.hostOs,
+      tmux: !!(await envGet($, 'TMUX')) || !!(await envGet($, 'STY')),
+      background: (await envGet($, 'CLAUDE_CODE_SESSION_KIND')) === 'bg',
+    })
     if (S.setupNeeded) void offerSetup($).catch(() => undefined)
     S.isCmux = !!(await envGet($, 'CMUX_SURFACE_ID')) || !!(await envGet($, 'CMUX_WORKSPACE_ID')) || !!(await envGet($, 'CMUX_SOCKET_PATH'))
     S.colorFgBg = (await envGet($, 'COLORFGBG')) ?? ''
@@ -131,6 +149,7 @@ export function setUp($: EngineInterface): Promise<Env> {
       typst,
       canDraw,
       inline: ssh && canDraw,
+      herdr: S.isHerdr,
       cache,
       cwd: await sessionCwd($).catch(() => '/'),
       root,

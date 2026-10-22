@@ -49,7 +49,7 @@ You can also start the skill yourself: type `/cc-intelligent-ui:intelligent-ui` 
 | `/iui` | Shows the state, the theme, the text size, the width, the image height and the row grid, a problem that keeps pictures away, and a new version when there is one |
 | `/iui details` | Shows all that the mod found: where the mode comes from, the terminal font, the Typst path, why the terminal can or cannot show pictures, if picture select is on (`Picture select:`), if the `/iui grab` toast is on (`/iui grab hint:`), and the state of the update check (`Update checks:`) |
 | `/iui on` / `off` | Turns the pictures on or off (kept for later sessions) |
-| `/iui setup` / `setup remove` | iTerm2 (macOS only): adds or removes the shell line that turns pictures on (then close the tab and open a new one). On Linux, it changes no file. |
+| `/iui setup` / `setup remove` | iTerm2 (macOS only) and herdr (macOS and Linux): adds or removes the shell line that turns pictures on (then close the tab or pane and open a new one). An older line (iTerm2 only) is updated. On Linux outside herdr, it changes no file. |
 | `/iui size <80–200>` | Text size in percent. 100 is the same visual size as your terminal text. |
 | `/iui width` | Shows the width: the most columns that a picture can use |
 | `/iui width <40–400>` | Sets the most columns that a picture can use (kept for later sessions) |

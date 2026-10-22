@@ -38,6 +38,7 @@ You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15, and macO
 |---|---|---|
 | kitty 0.28+, Ghostty, cmux (macOS) | Yes | Nothing |
 | iTerm2 3.6+ (macOS) | Yes | Run `/iui setup` one time |
+| herdr, in kitty or Ghostty | Yes | Run `/iui setup` one time |
 | Rio 0.5.27+ | Yes (not tested) | Set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` |
 | ssh | Yes, from kitty or Ghostty | Refer to [Install](docs/install.md#terminals) |
 | tmux, screen | No | — |
@@ -95,7 +96,7 @@ More in the [gallery](docs/gallery.md): plots, fractals and a tour of all the Ma
 | `/iui select on` / `off` | Claude Code 2.1.298+, fullscreen: the mod selects and copies picture text with the mouse (on by default) |
 | `/iui updates on` / `off` | Turns the daily check for a new version on or off (on by default) |
 | `/iui details` | Shows the terminal, font, mode and Typst that the mod found |
-| `/iui setup` | iTerm2 (macOS): adds the shell line that turns pictures on |
+| `/iui setup` | iTerm2 (macOS) and herdr: adds the shell line that turns pictures on |
 | `/iui grab` | Copies the text under your last mouse selection of pictures |
 | `/iui dump` | Shows how the mod read the last clipboard with picture cells (for a bug report) |
 

@@ -46,11 +46,44 @@ export function sizeOf(stdout: string, padded = false): { rows: number; columns:
 
 // Ghostty, or cmux (Ghostty's engine): its tty pixels include the window
 // padding (iTerm2, kitty and WezTerm do not), and it draws its own font when
-// its config names none.
-export const isGhosttyHere = () => /ghostty/i.test(S.termProgram + S.termName) || S.isCmux
+// its config names none. herdr in Ghostty uses Ghostty's font and config (its
+// tty pixels are whole cells, so the round down changes nothing).
+export const isGhosttyHere = () => /ghostty/i.test(S.termProgram + S.termName) || S.isCmux || S.herdrHost === 'ghostty'
 
 // A set flag: anything but empty, 0, false, no or off.
 export const isSet = (value: string | undefined) => !!value && !/^(0|false|no|off)$/i.test(value.trim())
+
+// herdr (a multiplexer with a terminal of its own per pane): TERM_PROGRAM, or
+// HERDR_ENV with no TERM_PROGRAM. Another TERM_PROGRAM (tmux in a pane, a
+// terminal started from one) wins.
+export function isHerdrIn(env: { program: string; herdrEnv?: string }): boolean {
+  if (env.program) return /^herdr$/i.test(env.program)
+  return isSet(env.herdrEnv)
+}
+
+// The terminal herdr runs in, from the variables it keeps of the terminal
+// that started its server (most often the one attached now): Ghostty's
+// GHOSTTY_*_DIR, kitty's KITTY_PID or KITTY_INSTALLATION_DIR, iTerm2's
+// ITERM_PROFILE; '' when none.
+export type HerdrHost = 'ghostty' | 'kitty' | 'iterm' | ''
+export function herdrHostOf(env: { ghosttyResources?: string; ghosttyBin?: string; kittyPid?: string; kittyDir?: string; itermProfile?: string }): HerdrHost {
+  if (env.ghosttyResources || env.ghosttyBin) return 'ghostty'
+  if (env.kittyPid || env.kittyDir) return 'kitty'
+  if (env.itermProfile) return 'iterm'
+  return ''
+}
+const HERDR_HOSTS = { ghostty: 'Ghostty', kitty: 'kitty', iterm: 'iTerm2' } as const
+// herdr in /iui details: `herdr 0.9.5 (in Ghostty)`.
+export const herdrText = (version: string, host: HerdrHost) =>
+  `herdr${version ? ` ${version}` : ''} (${host ? `in ${HERDR_HOSTS[host]}` : 'outer terminal not known'})`
+
+// Whether /iui setup can turn pictures on: they are off, and this is iTerm2
+// on a Mac or herdr (macOS or Linux), not over ssh, tmux, screen or a
+// background session.
+export function needsSetup(o: { iterm: boolean; herdr: boolean; draws: boolean; ssh: boolean; os: string; tmux: boolean; background: boolean }): boolean {
+  if (o.draws || o.ssh || o.tmux || o.background) return false
+  return (o.iterm && o.os === 'Darwin') || o.herdr
+}
 
 // Whether the engine draws pictures here; elsewhere an Image shows only its
 // alt, so the text is better. Claude Code turns kitty graphics on by itself
@@ -81,3 +114,14 @@ export const fitsInline = (page: { width: number; height: number }, base64?: str
 // Over ssh, a segment's budget in rows so that its page stays under
 // INLINE_MAX_SIDE pixels tall (with room for the rough row count).
 export const inlineBudget = (px: Cell) => Math.max(20, Math.min(SEGMENT_ROWS, Math.floor((INLINE_MAX_SIDE / px.height) * 0.75)))
+// herdr skips an image whose RGBA (4 bytes a pixel), sent as base64, is over
+// its 30 MiB transfer budget: a page stays under 16 MiB decoded.
+export const HERDR_MAX_PAGE_BYTES = 16 * 1024 * 1024
+// Under herdr, a segment's budget in rows so that its page (the columns'
+// width in device pixels, as sizing makes it) stays under HERDR_MAX_PAGE_BYTES
+// (with room for the rough row count).
+export const herdrBudget = (columns: number, px: Cell) =>
+  Math.max(20, Math.min(SEGMENT_ROWS, Math.floor((HERDR_MAX_PAGE_BYTES / (4 * Math.round(columns * px.width) * px.height)) * 0.75)))
+// A segment's budget in rows: the smaller of the ssh and herdr ones that apply.
+export const segmentBudget = (env: { inline: boolean; herdr?: boolean }, columns: number, px: Cell) =>
+  Math.min(env.inline ? inlineBudget(px) : SEGMENT_ROWS, env.herdr ? herdrBudget(columns, px) : SEGMENT_ROWS)
