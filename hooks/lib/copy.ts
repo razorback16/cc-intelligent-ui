@@ -146,8 +146,9 @@ export type Item = {
   href?: string; code?: string
 }
 // A block: paragraph, heading, code, quote, cell (`cx` its column), item
-// (`prefix`); `first` its first item.
-export type TextBlock = { kind: string; prefix: string; cx?: number; first: number }
+// (`prefix`, and `mx` the x of its marker's centre in pixels, on its first
+// word's line); `first` its first item.
+export type TextBlock = { kind: string; prefix: string; cx?: number; mx?: number; first: number }
 // A probe's words by page (0-based: PNG page N+1), and its blocks.
 export type Positions = { ppi: number; blocks: TextBlock[]; pages: Item[][] }
 
@@ -171,7 +172,8 @@ function isMarker(marks: readonly Mark[], j: number): boolean {
 }
 
 // The probe's marks (document order) as boxes in pixels at `ppi`. A list's
-// marker is dropped (isMarker). A block mark with no word since the last one
+// marker is dropped (isMarker), its centre kept as its item's `mx` (a
+// checkbox drawn as a shape: 0.8 of the text size left of the item). A block mark with no word since the last one
 // (an item, then its paragraph) adds to that block. A word of only
 // invisible characters is dropped. A link's URL and an inline code's text go
 // to its words.
@@ -184,12 +186,17 @@ export function positionsOf(marks: readonly Mark[], ppi: number): Positions {
   marks.forEach((m, j) => {
     if (m.k === 'b') {
       const cur = blocks[blocks.length - 1]
+      const before = marks[j - 1]
+      const mx =
+        m.kind !== 'item' ? undefined
+        : before && isMarker(marks, j - 1) ? round((before.x + (before.w ?? 0) / 2) * k)
+        : round(Math.max(0, m.x - 0.8 * (m.s ?? 11)) * k)
       if (cur && !hasItems) {
-        cur.prefix ||= m.prefix ?? ''
+        if (!cur.prefix && m.prefix) Object.assign(cur, { prefix: m.prefix }, mx === undefined ? {} : { mx })
         if (m.kind === 'cell') Object.assign(cur, { kind: 'cell', cx: m.cx ?? 0 })
         else if (cur.kind !== 'item' && cur.kind !== 'cell') cur.kind = m.kind ?? cur.kind
       } else {
-        blocks.push({ kind: m.kind ?? 'par', prefix: m.prefix ?? '', ...(m.kind === 'cell' ? { cx: m.cx ?? 0 } : {}), first: -1 })
+        blocks.push({ kind: m.kind ?? 'par', prefix: m.prefix ?? '', ...(m.kind === 'cell' ? { cx: m.cx ?? 0 } : {}), ...(mx === undefined ? {} : { mx }), first: -1 })
         hasItems = false
       }
       return
@@ -354,21 +361,24 @@ export function pickPages(segments: readonly Segment[], drawn: readonly Drawn[],
 // height / rows PNG pixels (a page drawn smaller has larger cells). A word is under the run when its box's centre is in a selected
 // cell (its row by the vertical centre, its column by the horizontal one):
 // half a word selected copies the word when the selection covers its middle.
-// A code line is cut by characters, each by its own centre.
+// A code line is cut by characters, each by its own centre. An item's
+// prefix is copied only when its marker's centre (`mx`) is selected too.
 export function textOfRun(
   lines: readonly RunLine[], items: readonly Item[], blocks: readonly TextBlock[], page: { width: number; height: number; columns: number; rows: number },
 ): string {
   const colW = page.width / page.columns
   const rowH = page.height / page.rows
   const sel = new Map(lines.map(l => [l.row, l]))
+  const lineOf = (item: Item) => sel.get(Math.floor((item.y0 + item.y1) / 2 / rowH))
+  const within = (line: RunLine, x: number) => {
+    const col = Math.floor(x / colW)
+    return col >= line.colStart && col <= line.colEnd
+  }
   const picked: { item: Item; text: string }[] = []
   for (const item of items) {
-    const line = sel.get(Math.floor((item.y0 + item.y1) / 2 / rowH))
+    const line = lineOf(item)
     if (!line) continue
-    const inside = (x: number) => {
-      const col = Math.floor(x / colW)
-      return col >= line.colStart && col <= line.colEnd
-    }
+    const inside = (x: number) => within(line, x)
     if (item.adv) {
       const chars = Array.from(item.text)
       const kept = chars.filter((_, c) => inside(item.x0 + (c + 0.5) * item.adv!))
@@ -377,7 +387,13 @@ export function textOfRun(
       picked.push({ item, text: chars.slice(first, first + kept.length).join('') })
     } else if (inside((item.x0 + item.x1) / 2)) picked.push({ item, text: item.text })
   }
-  return joinItems(picked, blocks)
+  const marked = (b: number) => {
+    const mx = blocks[b]?.mx
+    const first = mx === undefined ? undefined : picked.find(p => p.item.i === blocks[b]!.first)
+    const line = first && lineOf(first.item)
+    return mx === undefined || (!!line && within(line, mx))
+  }
+  return joinItems(picked, blocks, marked)
 }
 
 // Joins picked words: a new line between blocks (a tab between the cells of
@@ -386,15 +402,18 @@ export function textOfRun(
 // the pieces of one word (boxes on one line closer than 0.15 of the text
 // size, not counting the padding beside inline code: a space is 0.22-0.32
 // of it; none before a glued character that follows the one before it),
-// none after a - or / that ends a line. Not of the line height: that is the
+// none after a - or / that ends a line. `marked`: whether a block's marker
+// is selected (its prefix is copied only then; all when absent). Not of the line height: that is the
 // font's (Noto Sans: 1.36 of the size) or the grid's rows. Items with no
 // text size: a fifth of the line height.
-export function joinItems(picked: readonly { item: Item; text: string }[], blocks: readonly TextBlock[]): string {
+export function joinItems(
+  picked: readonly { item: Item; text: string }[], blocks: readonly TextBlock[], marked: (block: number) => boolean = () => true,
+): string {
   let out = ''
   let prev: { item: Item; text: string } | null = null
   const prefixOf = (item: Item) => {
     const b = blocks[item.block]
-    return b?.prefix && b.first === item.i ? b.prefix : ''
+    return b?.prefix && b.first === item.i && marked(item.block) ? b.prefix : ''
   }
   for (const p of picked) {
     if (!prev) out += prefixOf(p.item)

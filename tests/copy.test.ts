@@ -78,7 +78,8 @@ test('probe marks become pixel boxes; a list number is dropped and an item takes
     { k: 'c', p: 2, x: 10, y: 60, t: 'ab', w: 12, n: 2, a: 8, d: 2 },
   ]
   const got = positionsOf(marks, 144)
-  expect(got.blocks).toEqual([{ kind: 'par', prefix: '', first: 0 }, { kind: 'item', prefix: '1. ', first: 1 }])
+  // The item keeps its number's centre (`mx`): (20 + 3) pt at 2 px/pt.
+  expect(got.blocks).toEqual([{ kind: 'par', prefix: '', first: 0 }, { kind: 'item', prefix: '1. ', mx: 46, first: 1 }])
   expect(got.pages[0]).toEqual([{ i: 0, text: 'Hi', block: 0, x0: 0, x1: 20, y0: 0, y1: 24 }])
   expect(got.pages[1]).toEqual([
     { i: 1, text: 'one', block: 1, x0: 60, x1: 90, y0: 60, y1: 84 },
@@ -100,7 +101,7 @@ test("a word keeps its link's URL and its inline code's text", () => {
   const got = positionsOf(marks, 72)
   expect(got.blocks).toEqual([
     { kind: 'par', prefix: '', first: 0 },
-    { kind: 'item', prefix: '- ', first: 2 },
+    { kind: 'item', prefix: '- ', mx: 0, first: 2 },
     { kind: 'code', prefix: '', first: 3 },
   ])
   expect(got.pages[0]!.map(w => [w.text, w.href, w.code])).toEqual([
@@ -297,6 +298,28 @@ test('a real probe: a selection from mid-paragraph into the code block', () => {
   )
   // Part of the second item: no prefix.
   expect(textOfRun([{ row: 9, colStart: 10, colEnd: 97 }], REAL.pages[0]!, REAL.blocks, SMALL_PAGE)).toBe('item')
+})
+
+test('a real probe: an item from its first word copies no marker; with the marker, the prefix', () => {
+  // The "-" is in column 4, "second" starts in column 5.
+  expect(textOfRun([{ row: 9, colStart: 5, colEnd: 97 }], REAL.pages[0]!, REAL.blocks, SMALL_PAGE)).toBe('second item')
+  expect(textOfRun([{ row: 9, colStart: 4, colEnd: 97 }], REAL.pages[0]!, REAL.blocks, SMALL_PAGE)).toBe('- second item')
+  // From the first item's first word on: the second item's marker is selected.
+  expect(textOfRun([{ row: 7, colStart: 5, colEnd: 97 }, ALL_COLUMNS(8), ALL_COLUMNS(9)], REAL.pages[0]!, REAL.blocks, SMALL_PAGE)).toBe(
+    'first item\n- second item',
+  )
+})
+
+test('a numbered item from its first word copies no number', () => {
+  const marks: Mark[] = [
+    { k: 'w', p: 1, x: 20, y: 0, s: 11, t: '12.', w: 12, h: 12 },
+    { k: 'b', p: 1, x: 40, y: 0, s: 11, kind: 'item', prefix: '12. ' },
+    { k: 'w', p: 1, x: 40, y: 0, s: 11, t: 'twelve', w: 30, h: 12 },
+  ]
+  const got = positionsOf(marks, 72)
+  const page = { width: 100, height: 20, columns: 10, rows: 1 }
+  expect(textOfRun([{ row: 0, colStart: 4, colEnd: 9 }], got.pages[0]!, got.blocks, page)).toBe('twelve')
+  expect(textOfRun([{ row: 0, colStart: 2, colEnd: 9 }], got.pages[0]!, got.blocks, page)).toBe('12. twelve')
 })
 
 test('a real probe on a page drawn at half its box: a cell is twice as large', () => {
