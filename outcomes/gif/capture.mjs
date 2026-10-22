@@ -1,18 +1,22 @@
 // Records the site's first hero answer (its animation from site/index.html) as PNG
-// frames, one theme at a time. Usage: node capture.mjs <repo> <out dir> <theme> [fps] [scale] [density]
+// frames, one theme at a time, with no header and the answer cut at `cut` (its height
+// as a part of its width; 0: all of it).
+// Usage: node capture.mjs <repo> <out dir> <theme> [fps] [scale] [density] [cut]
 // The frames are drawn from a timeline (frameAt), not in real time, so none is dropped.
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 const require = createRequire(process.env.PW_ROOT + "/");
 const { chromium } = require("playwright");
+const sharp = require("sharp");
 
-const [repo, out, theme, fpsArg, scaleArg, dsfArg] = process.argv.slice(2);
-const fps = Number(fpsArg || 25), scale = Number(scaleArg || 0.8), dsf = Number(dsfArg || 2);
+const [repo, out, theme, fpsArg, scaleArg, dsfArg, cutArg] = process.argv.slice(2);
+const fps = Number(fpsArg || 25), scale = Number(scaleArg || 0.8), dsf = Number(dsfArg || 2), cut = Number(cutArg || 0);
 const html = readFileSync(`${repo}/site/index.html`, "utf8");
 const css = html.slice(html.indexOf("<style>") + 7, html.indexOf("</style>"));
 const js = readFileSync(`${repo}/site/assets/answers.js`, "utf8");
 const answers = JSON.parse(js.slice(js.indexOf("["), js.lastIndexOf("]") + 1));
-const a = answers.find((x) => x.group === "hero");
+const hero = answers.find((x) => x.group === "hero");
+const a = { ...hero, ratio: cut || hero.ratio };
 // GitHub's page colours, so the window sits on the README as on the site.
 const pageBg = theme === "dark" ? "#0d1117" : "#ffffff";
 const W = 1000, PAD = 28;
@@ -26,6 +30,8 @@ const page = `<!doctype html><html data-theme="${theme}"><head><meta charset="ut
   /* The raw render is taller than the site's (empty room under the answer): cut at the box. */
   .t-pic { overflow: hidden; }
   .t-pic img { height: auto; bottom: auto; }
+  /* No empty room between the answer and the input box. */
+  .t-status { padding-top: calc(var(--pt) * 10); }
   :root[data-theme="dark"] { --shadow: 0 18px 40px -18px rgba(0,0,0,.8); }
   :root[data-theme="light"] { --shadow: 0 18px 40px -18px rgba(0,0,0,.28); }
 </style></head><body><div id="box"></div></body></html>`;
@@ -40,13 +46,11 @@ const raw = `${repo}/outcomes/out/raw/${a.name}-${theme}-1.png`;
 const pic = `file://${existsSync(raw) ? raw : `${repo}/site/assets/render/${a.name}-${theme}.webp`}`;
 const length = await tab.evaluate(({ a, pic, scale }) => {
   const w = a.frame * scale;
-  const mascot = '<svg viewBox="0 0 75 48"><g fill="#d77757"><rect x="9" width="57" height="36"/><rect y="20" width="75" height="8"/><rect x="9" y="36" width="4" height="12"/><rect x="18" y="36" width="4" height="12"/><rect x="52" y="36" width="4" height="12"/><rect x="61" y="36" width="4" height="12"/></g><g fill="#050302"><rect x="18" y="8" width="4" height="12"/><rect x="52" y="8" width="4" height="12"/></g></svg>';
   const tri = '<svg viewBox="0 0 4.2 5.2"><path d="M0 0l4.2 2.6L0 5.2z"/></svg>';
   document.getElementById("box").innerHTML = `<div class="t-wrap">
     <div class="term full" style="--f:${a.frame + 40};--w:${w};--ar:${1 / a.ratio};--dot:calc(var(--pt) * ${w * a.bullet})">
       <div class="t-bar"><span class="t-lights"><i></i><i></i><i></i></span><span class="t-title">Claude Code</span><span class="t-key">⌥⌘1</span></div>
       <div class="t-body"><div class="t-scroll">
-        <div class="t-head">${mascot}<div><b>Claude Code</b> <span class="t-dim">v2.1.301</span><br><span class="t-dim">Opus 5.5 with high effort · Claude Max</span><br><span class="t-dim">~/projects/cc-intelligent-ui ·</span> <span class="t-green">/rc</span></div></div>
         <div class="t-ask">❯ <span class="q"></span></div>
         <div class="t-answer">
           <span class="t-spin"><b>✻</b> <i>Brewing…</i> <span></span></span>
@@ -96,6 +100,11 @@ const length = await tab.evaluate(({ a, pic, scale }) => {
   return done + HOLD;
 }, { a, pic, scale });
 
+// The picture made as wide as its box in pixels (Lanczos), as Chrome's own downscale
+// of a large render loses the top rows of its first line.
+const px = await tab.evaluate((dsf) => Math.round(document.querySelector(".t-pic").getBoundingClientRect().width * dsf), dsf);
+await sharp(new URL(pic).pathname).resize({ width: px, kernel: "lanczos3" }).png().toFile(`${out}/pic.png`);
+await tab.evaluate((src) => { document.querySelector(".t-pic img").src = src; }, `file://${out}/pic.png`);
 await tab.waitForFunction(() => document.querySelector(".t-pic img").complete);
 await tab.evaluate(() => document.fonts.ready);
 mkdirSync(out, { recursive: true });
