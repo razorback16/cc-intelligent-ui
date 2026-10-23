@@ -4,7 +4,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { IuiTheme } from '../../types'
-import { CLIP_WAKE_MS, HERDR_POLL_MS, HERDR_SCAN_MS, HOST_CHECK_MS, HOST_POLL_MS, MODES } from './settings'
+import { CLIP_WAKE_MS, HERDR_POLL_MS, HERDR_SCAN_MS, HOST_CHECK_MS, HOST_POLL_MS, MODES, OSC11_QUIET_MS } from './settings'
 import { S } from './state'
 import { beginEpoch } from './epoch'
 import { keptOsc11, luminanceOf, modeOfColorFgBg, modeOfLuminance, modeOfMacAppearance, parseOsc11, resolveMode, schemeOfPortal, type HostMode } from './mode'
@@ -769,8 +769,11 @@ export async function pollHost($: EngineInterface, modeNow = false) {
     const moved = herdr && (await checkHerdrClient($).catch(() => false))
     if (moved) await setOuter($)
     const due = !herdr || modeNow || moved || ++S.hostTicks >= HOST_POLL_MS / HERDR_POLL_MS
-    if (due) S.hostTicks = 0
-    if (S.setting === 'auto' && due) S.host = (await readHostMode($).catch(() => null)) ?? S.host
+    // Under herdr a timed read asks the tty (OSC 11): not while the mod is off,
+    // nor just after a key in the prompt (it stays due: a later poll reads).
+    const asks = !S.isHerdr || modeNow || moved || (!S.isOff && (await nowMs($).catch(() => Date.now())) - S.keyAt >= OSC11_QUIET_MS)
+    if (due && asks) S.hostTicks = 0
+    if (S.setting === 'auto' && due && asks) S.host = (await readHostMode($).catch(() => null)) ?? S.host
     if (moved) refonted = await refont($).catch(() => false)
   } finally {
     S.checking = false

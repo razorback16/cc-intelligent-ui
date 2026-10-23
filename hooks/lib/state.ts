@@ -222,6 +222,8 @@ export const S = {
   herdrDraws: false,
   isOff: false,
   hostEnded: false,
+  // The clock time of the last key in the prompt box (register.tsx; OSC11_QUIET_MS).
+  keyAt: Number.NEGATIVE_INFINITY,
   checking: false,
   // Linux: the tool that reads the desktop portal's colour scheme (host.ts;
   // null: not tried yet, '': none works, so GNOME's gsettings is read).

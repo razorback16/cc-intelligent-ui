@@ -208,6 +208,44 @@ test('with the theme on auto, herdr takes the OSC 11 background first, and keeps
   expect(probes).toBe(5)
 })
 
+// The OSC 11 probe reads the pane's tty, as Claude Code does: a key typed
+// then can go to the probe. A timed probe waits for 2 s with no key in the
+// prompt, and none runs while the mod is off.
+test('under herdr, no timed OSC 11 probe just after a key in the prompt, nor with the mod off', async ($, on) => {
+  mock.store(on)
+  const clock = mock.clock(on)
+  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_RESOURCES_DIR: '/R', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
+  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  let probes = 0
+  on('process.run', async ($: any, e: any, next: any) => {
+    const argv: string[] = e.argv
+    const cmd = argv.join(' ')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'perl' && cmd.includes('11;?')) return (probes++, ok('\x1b]11;rgb:ffff/ffff/ffff\x1b\\'))
+    if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
+    return next(e)
+  })
+  on('prompt.edit', async ($: any, e: any) => ({ text: e.text + e.inputText, cursor: e.text.length + e.inputText.length }))
+  await $.command.run({ command: 'iui', args: '' } as any)
+  expect(probes).toBe(1)
+  // A key each 500 ms for 6 s: no timed probe.
+  let text = ''
+  for (let i = 0; i < 12; i++) {
+    await ($ as any).prompt.edit({ origin: { kind: 'composer' }, text, cursor: text.length, start: text.length, end: text.length, inputText: 'a' })
+    text += 'a'
+    await clock.advance(500)
+  }
+  expect(probes).toBe(1)
+  // 2 s with no key: the next poll asks.
+  await clock.advance(3000)
+  expect(probes).toBe(2)
+  // The mod off: none.
+  await $.command.run({ command: 'iui', args: 'off' } as any)
+  await clock.advance(9000)
+  expect(probes).toBe(2)
+})
+
 // herdr --remote: the pane is over ssh (the mod runs on the remote
 // computer), but herdr's OSC 11 answer is still the user's terminal.
 test('with the theme on auto, a remote herdr pane takes the OSC 11 background first, then COLORFGBG', async ($, on) => {

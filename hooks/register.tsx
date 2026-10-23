@@ -871,6 +871,7 @@ export const register: Register = on => {
   on('prompt.edit', async ($, e, next) => {
     const isEdit = !!e.inputText || e.end > e.start
     if (picked.now && isEdit) clearSelection($)
+    void Promise.resolve().then(() => nowMs($)).then(t => void (S.keyAt = t), () => undefined)
     const box = await next(e)
     if (isEdit && e.origin.kind === 'composer') noteDraft($, box.text)
     return box
