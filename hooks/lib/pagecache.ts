@@ -301,8 +301,10 @@ async function slice($: EngineInterface, epoch: number) {
     if (want.paused) {
       b = want.paused
       want.paused = undefined
-      // Ready, and its frames dropped since: nothing to go on with.
+      // Ready, and its frames dropped since: nothing to go on with. A down
+      // still waits for them: built again from the start.
       if (b.isReady && !pages.frames.has(want.key)) {
+        if (pages.waiters.has(want.key)) pages.wants.set(want.key, want)
         later($)
         return
       }

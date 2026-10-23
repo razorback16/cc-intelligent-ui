@@ -202,11 +202,14 @@ export const S = {
   stepsLive: 0,
   // The plan (plan.tsx): the main loop's running turn (`turn.start`), the
   // verdict the mod's question gave for the PermissionRequest that follows
-  // (null: none, the engine's dialog asks), the question asked now ('': none),
-  // and the `code` command's path (null: not looked up yet; '': none), and
-  // on Linux a GUI editor that waits (its path and flag; [] none).
+  // (null: none, the engine's dialog asks), the main loop's ExitPlanMode
+  // calls in flight (a verdict is used only while one runs), the question
+  // asked now ('': none), and the `code` command's path (null: not looked
+  // up yet; '': none), and on Linux a GUI editor that waits (its path and
+  // flag; [] none).
   mainTurnId: '',
   planVerdict: null as PlanVerdict | null,
+  plansLive: 0,
   planAsking: '',
   planCode: null as string | null,
   planGui: null as string[] | null,
@@ -223,11 +226,17 @@ export const S = {
   updateDone: false,
   updateBusy: false,
 }
+// The settings an /iui command set in this load (`size`, `enabled`, ...): the
+// start (setUp) does not read them from the store, which may answer with the
+// value from before the command.
+export const settingsSet = new Set<string>()
 // The compile results by key (an LRU: set with `keep` at RESULTS_KEPT).
 export const results = new Map<string, Result | 'failed'>()
 // Streaming: model requests of the main loop in flight (`S.stepsLive`), the
-// blocks drawn blank while their text streams (with the job to compile once
-// final), and the blocks a request made final (they stay final).
+// text each block last drew, the blocks drawn blank while their text streams
+// (with the job to compile once final), and the blocks a request made final
+// (they stay final). The texts and the final ones go past RESULTS_KEPT, as
+// `results` (an id gone draws as one not seen yet).
 export const lastText = new Map<string, string>()
 export const live = new Map<string, { job: Job; still: { cancel: () => void } }>()
 export const finalized = new Set<string>()
@@ -322,6 +331,16 @@ export function keep<T>(cache: Map<string, T>, key: string, value: T, max: numbe
   for (const old of cache.keys()) {
     if (cache.size <= max) break
     cache.delete(old)
+  }
+}
+
+// The same for a set: `key` as the newest; the oldest go past `max`.
+export function keepIn(set: Set<string>, key: string, max: number) {
+  set.delete(key)
+  set.add(key)
+  for (const old of set) {
+    if (set.size <= max) break
+    set.delete(old)
   }
 }
 

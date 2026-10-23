@@ -6,7 +6,7 @@ import type { EngineInterface } from 'claude-code'
 import {
   BASE_THEME, DEFAULT_HEIGHT, DEFAULT_SIZE, DESIGNS_KEPT_DAYS, DEFAULT_THEME, DEFAULT_WIDTH, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, noTypstOf,
 } from './settings'
-import { DEFAULT_METRICS, refresh, S, type Env } from './state'
+import { DEFAULT_METRICS, refresh, S, settingsSet, type Env } from './state'
 import { resolveMode, settingOf } from './mode'
 import { isItermIn } from './terminals'
 import { canDrawIn, isSet } from './terminal'
@@ -88,18 +88,26 @@ export function setUp($: EngineInterface): Promise<Env> {
     if (S.setting === 'auto') S.host = (await readHostMode($).catch(() => null)) ?? S.host
     S.theme = resolveMode(S.setting, S.host)
     watchHost($)
+    // The stored settings, but not one an /iui command set meanwhile (settingsSet).
     const kept = Number(await storeGet($, 'size').catch(() => undefined))
-    S.size = kept >= MIN_SIZE && kept <= MAX_SIZE ? kept : DEFAULT_SIZE
+    if (!settingsSet.has('size')) S.size = kept >= MIN_SIZE && kept <= MAX_SIZE ? kept : DEFAULT_SIZE
     const width = await storeGet($, 'width').catch(() => undefined)
-    S.width = width === 'full' ? 'full' : Number.isInteger(width) && Number(width) >= MIN_WIDTH && Number(width) <= MAX_WIDTH ? Number(width) : DEFAULT_WIDTH
+    if (!settingsSet.has('width')) {
+      S.width = width === 'full' ? 'full' : Number.isInteger(width) && Number(width) >= MIN_WIDTH && Number(width) <= MAX_WIDTH ? Number(width) : DEFAULT_WIDTH
+    }
     const height = await storeGet($, 'height').catch(() => undefined)
-    S.height = height === 'half' || height === 'full' ? height
-      : Number.isInteger(height) && Number(height) >= MIN_HEIGHT && Number(height) <= MAX_HEIGHT ? Number(height) : DEFAULT_HEIGHT
-    S.grid = (await storeGet($, 'grid').catch(() => undefined)) !== false
-    S.select = (await storeGet($, 'select').catch(() => undefined)) !== false
+    if (!settingsSet.has('height')) {
+      S.height = height === 'half' || height === 'full' ? height
+        : Number.isInteger(height) && Number(height) >= MIN_HEIGHT && Number(height) <= MAX_HEIGHT ? Number(height) : DEFAULT_HEIGHT
+    }
+    const grid = (await storeGet($, 'grid').catch(() => undefined)) !== false
+    if (!settingsSet.has('grid')) S.grid = grid
+    const select = (await storeGet($, 'select').catch(() => undefined)) !== false
+    if (!settingsSet.has('select')) S.select = select
     // An engine with no version call is older than picture select.
     S.engine = await Promise.resolve().then(() => sessionVersion($)).then(v => v.base ?? v.version, () => '')
-    if ((await storeGet($, 'enabled').catch(() => undefined)) === false) await update($, isOn, () => false).catch(() => undefined)
+    const enabled = await storeGet($, 'enabled').catch(() => undefined)
+    if (enabled === false && !settingsSet.has('enabled')) await update($, isOn, () => false).catch(() => undefined)
     const isMac = os.trim() === 'Darwin'
     // Linux, on this computer: the clipboard tools, for the copy.
     if (S.hostOs === 'Linux' && !ssh) void findClipWay($).catch(() => undefined)

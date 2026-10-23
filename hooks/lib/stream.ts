@@ -6,7 +6,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { BLANK_AFTER_LIVE_MS, MAX_RUNNING, RESULTS_KEPT } from './settings'
-import { finalized, keep, live, pending, queue, refresh, results, running, S, type Job } from './state'
+import { finalized, keep, keepIn, live, pending, queue, refresh, results, running, S, type Job } from './state'
 import { hashOf } from './draw'
 import { noteDesign, recordDesign } from './designs'
 import { compile, logDebug } from './typst'
@@ -91,7 +91,7 @@ export function finalize($: EngineInterface, requestId: string, isForGood: boole
   if (!was) return
   was.still.cancel()
   live.delete(requestId)
-  if (isForGood) finalized.add(requestId)
+  if (isForGood) keepIn(finalized, requestId, RESULTS_KEPT)
   enqueue($, was.job)
   waitBlank($, requestId, hashOf([was.job.text]), BLANK_AFTER_LIVE_MS)
   refresh($)

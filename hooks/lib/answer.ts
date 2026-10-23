@@ -111,7 +111,7 @@ export async function pagesOf($: EngineInterface, o: PagesInput): Promise<Drawin
   })
   const seen = lastText.get(id)
   const changed = seen !== text
-  lastText.set(id, text)
+  keep(lastText, id, text, RESULTS_KEPT)
   const job: Job = {
     key, requestId: id, text, columns, cell, theme: S.theme, size: S.size, grid: S.grid, themeDir: active.dir, env, epoch: S.epoch,
     ...(base ? { base } : {}), ...(room ? { room } : {}), ...(o.onScreen !== undefined ? { onScreen: o.onScreen } : {}),

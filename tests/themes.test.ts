@@ -85,3 +85,56 @@ test('a stored theme that is gone falls back to claude-code, with one toast', as
   expect(ran.text).toContain('- claude-code (in use)')
   expect(toasts.filter(t => t.includes('Intelligent UI: theme gone not found, using claude-code')).length).toBe(1)
 })
+
+// An fs.stat of Sun.Light's files that waits for `release` (an older
+// /iui theme Sun.Light still stamping its files).
+const slowSunLight = (on: any) => {
+  let release!: () => void
+  const gate = new Promise<void>(r => (release = r))
+  on('fs.stat', async ($: any, e: any) => {
+    if (e.path.includes('Sun.Light')) await gate
+    return { value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }
+  })
+  on('ui.toast', async () => ({ value: undefined }))
+  return () => release()
+}
+const flush = async () => {
+  for (let i = 0; i < 50; i++) await Promise.resolve()
+}
+// Until `run` ends, or 5000 turns of the microtask queue (a run that waits for an older one).
+const settled = async (run: Promise<unknown>) => {
+  let isDone = false
+  void run.then(() => (isDone = true))
+  for (let i = 0; i < 5000 && !isDone; i++) await Promise.resolve()
+}
+
+test('/iui theme runs one at a time: an older one that ends late does not write over a newer one', async ($, on) => {
+  const store = withThemes(on)
+  const release = slowSunLight(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const older = $.command.run({ command: 'iui', args: 'theme Sun.Light' } as any)
+  await flush()
+  const newer = $.command.run({ command: 'iui', args: 'theme nord' } as any)
+  await settled(newer)
+  release()
+  expect((await older).text).toContain('Theme set to Sun.Light.')
+  expect((await newer).text).toContain('Theme set to nord.')
+  // The last command the person ran wins: the look and the stored name.
+  expect(store['theme-name']).toBe('nord')
+  expect((await $.command.run({ command: 'iui', args: '' } as any)).text).toContain('theme nord')
+})
+
+test('/iui theme with no name, run while a theme is set, lists the one set as in use', async ($, on) => {
+  const store = withThemes(on)
+  const release = slowSunLight(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  const set = $.command.run({ command: 'iui', args: 'theme Sun.Light' } as any)
+  await flush()
+  const listed = $.command.run({ command: 'iui', args: 'theme' } as any)
+  await settled(listed)
+  release()
+  await set
+  expect((await listed).text).toContain('- Sun.Light (yours, in use)')
+  expect(store['theme-name']).toBe('Sun.Light')
+  expect((await $.command.run({ command: 'iui', args: '' } as any)).text).toContain('theme Sun.Light')
+})

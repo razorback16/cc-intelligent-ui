@@ -24,7 +24,7 @@ import {
   DEFAULT_THEME, gridText, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_WIDTH, MIN_HEIGHT, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
   SELECT_SINCE, selectText, typstHintOf, widthText,
 } from './lib/settings'
-import { clip, DEFAULT_METRICS, drawnAnswers, editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env, type Job } from './lib/state'
+import { clip, DEFAULT_METRICS, drawnAnswers, editedPlans, keep, queue, refresh, running, S, settingsSet, subagentPlans, writesLive, type Env, type Job } from './lib/state'
 import { beginEpoch } from './lib/epoch'
 import { escapeControls, luminanceOf, modeLine, modeOfLuminance, parseOsc11, settingOf } from './lib/mode'
 import { applyTheme, themeListing, userThemesOf } from './lib/themes'
@@ -655,6 +655,35 @@ function releaseSelect($: EngineInterface) {
   forgetPages()
 }
 
+// `/iui theme [name]`, one at a time (`themeRuns`): an older one still
+// reading the themes or measuring fonts would write its look, metrics,
+// epoch and stored name over a newer one's.
+let themeRuns: Promise<unknown> = Promise.resolve()
+function runTheme($: EngineInterface, name: string | undefined): Promise<string> {
+  const run = themeRuns.then(() => setTheme($, name))
+  themeRuns = run.catch(() => undefined)
+  return run
+}
+
+async function setTheme($: EngineInterface, name: string | undefined): Promise<string> {
+  const ready = await setUp($)
+  const was = S.look
+  const wanted = name ?? S.look?.name ?? DEFAULT_THEME
+  const { themes, problems, chosen } = await applyTheme($, ready.root, ready.home, wanted)
+  if (name && chosen.isFallback) {
+    if (was) S.look = was
+    return `No usable theme named ${name}.\n\n${themeListing(themes, problems, was?.name ?? DEFAULT_THEME, userThemesOf(ready.home), ready.home)}`
+  }
+  if (S.look?.name !== was?.name || S.look?.dir !== was?.dir || S.look?.stamp !== was?.stamp) {
+    // The theme's fonts set the column width and the code size.
+    if (ready.typst && S.look) ready.metrics = await measureFonts($, ready.typst, ready.root, ready.cache, ready.termFont, S.look.dir)
+    beginEpoch($)
+  }
+  if (name) await storeSet($, 'theme-name', chosen.name)
+  const head = name ? `Theme set to ${chosen.name}.\n\n` : ''
+  return `${head}${themeListing(themes, problems, chosen.name, userThemesOf(ready.home), ready.home)}`
+}
+
 // ---- Hooks ----------------------------------------------------------------
 
 export const register: Register = on => {
@@ -753,6 +782,7 @@ export const register: Register = on => {
     if (asked.kind === 'grab') return { text: await grab($) }
     if (asked.kind === 'dump') return { text: await dump($, await read($, isOn)) }
     if (asked.kind === 'on' || asked.kind === 'off') {
+      settingsSet.add('enabled')
       await update($, isOn, () => asked.kind === 'on')
       // On: the clipboard part starts with the next picture drawn.
       if (asked.kind === 'off') {
@@ -766,6 +796,7 @@ export const register: Register = on => {
       // The epoch begins with the setting, so no row draws it with no epoch
       // open (the store write waits for the host).
       S.size = asked.percent
+      settingsSet.add('size')
       beginEpoch($)
       await storeSet($, 'size', S.size)
       return { text: `Intelligent UI draws text at ${S.size}% of the terminal's text size (100% matches it).` }
@@ -774,6 +805,7 @@ export const register: Register = on => {
       if (asked.width === undefined) await setUp($).catch(() => null)
       else {
         S.width = asked.width
+        settingsSet.add('width')
         beginEpoch($)
         await storeSet($, 'width', S.width)
       }
@@ -785,6 +817,7 @@ export const register: Register = on => {
       if (asked.height === undefined) await setUp($).catch(() => null)
       else {
         S.height = asked.height
+        settingsSet.add('height')
         beginEpoch($)
         await storeSet($, 'height', S.height)
       }
@@ -795,6 +828,7 @@ export const register: Register = on => {
       if (asked.grid === undefined) await setUp($).catch(() => null)
       else {
         S.grid = asked.grid
+        settingsSet.add('grid')
         beginEpoch($)
         await storeSet($, 'grid', S.grid)
       }
@@ -805,6 +839,7 @@ export const register: Register = on => {
       if (asked.on === undefined) await setUp($).catch(() => null)
       else {
         S.select = asked.on
+        settingsSet.add('select')
         if (!S.select) releaseSelect($)
         refresh($)
         await storeSet($, 'select', S.select)
@@ -839,24 +874,7 @@ export const register: Register = on => {
       }
       return { text: `OSC 11 probe (the terminal's background), ${PROBE_RUNS} runs:\n${lines.join('\n')}\nThe poll uses it: ${USE_OSC11 ? 'yes' : 'no (off)'}.` }
     }
-    if (asked.kind === 'theme') {
-      const ready = await setUp($)
-      const was = S.look
-      const wanted = asked.name ?? S.look?.name ?? DEFAULT_THEME
-      const { themes, problems, chosen } = await applyTheme($, ready.root, ready.home, wanted)
-      if (asked.name && chosen.isFallback) {
-        if (was) S.look = was
-        return { text: `No usable theme named ${asked.name}.\n\n${themeListing(themes, problems, was?.name ?? DEFAULT_THEME, userThemesOf(ready.home), ready.home)}` }
-      }
-      if (S.look?.name !== was?.name || S.look?.dir !== was?.dir || S.look?.stamp !== was?.stamp) {
-        // The theme's fonts set the column width and the code size.
-        if (ready.typst && S.look) ready.metrics = await measureFonts($, ready.typst, ready.root, ready.cache, ready.termFont, S.look.dir)
-        beginEpoch($)
-      }
-      if (asked.name) await storeSet($, 'theme-name', chosen.name)
-      const head = asked.name ? `Theme set to ${chosen.name}.\n\n` : ''
-      return { text: `${head}${themeListing(themes, problems, chosen.name, userThemesOf(ready.home), ready.home)}` }
-    }
+    if (asked.kind === 'theme') return { text: await runTheme($, asked.name) }
     const state = (await read($, isOn)) ? 'on' : 'off'
     const ready = await setUp($)
     const bad = asked.kind === 'bad' ? `Not understood: "${e.args.trim()}".\n` : ''
@@ -1198,56 +1216,66 @@ export const register: Register = on => {
   // behind it). The person's words deny the call (Claude revises the plan);
   // a verdict waits for the PermissionRequest below, and is dropped once the
   // call resolves, so it never reaches a later call. No env, no plan, or a
-  // failure: no verdict, and the engine's dialog asks.
+  // failure: no verdict, and the engine's dialog asks. The engine may run
+  // two calls at once, and a PermissionRequest does not say which call it
+  // is for: a call that begins while another runs asks nothing (the
+  // engine's dialog asks), and no verdict is used while two run.
   on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
     if (e.agentId) {
       subagentPlans.add(e.tool_use_id)
       return next(e)
     }
-    S.planVerdict = null
-    let verdict: PlanVerdict | null = null
+    S.plansLive++
     try {
-      const ready = await planEnv($)
-      const callPlan = ready ? planInputOf(e) : ''
-      if (ready && callPlan) {
-        const id = e.tool_use_id
-        const file = planFileOf(e)
-        const plan = await currentPlan($, file, callPlan)
-        // Always: the row's input is the message's copy, read before an Edit in the same message.
-        editedPlans.set(id, plan)
-        refresh($)
-        const outcome = await decidePlan($, {
-          plan, callPlan, file, isMac: ready.isMac, isRemote: S.isRemote,
-          onEdited: text => {
-            editedPlans.set(id, text)
-            refresh($)
-          },
-        })
-        if (outcome.kind === 'feedback') return { deny: outcome.message }
-        verdict = outcome.verdict
-      }
-    } catch {
-      verdict = null
-    }
-    S.planVerdict = verdict
-    const turnId = S.mainTurnId
-    let got: Awaited<ReturnType<typeof next>>
-    try {
-      got = await next(e)
-    } finally {
+      if (S.plansLive > 1) return await next(e)
       S.planVerdict = null
+      let verdict: PlanVerdict | null = null
+      try {
+        const ready = await planEnv($)
+        const callPlan = ready ? planInputOf(e) : ''
+        if (ready && callPlan) {
+          const id = e.tool_use_id
+          const file = planFileOf(e)
+          const plan = await currentPlan($, file, callPlan)
+          // Always: the row's input is the message's copy, read before an Edit in the same message.
+          editedPlans.set(id, plan)
+          refresh($)
+          const outcome = await decidePlan($, {
+            plan, callPlan, file, isMac: ready.isMac, isRemote: S.isRemote,
+            onEdited: text => {
+              editedPlans.set(id, text)
+              refresh($)
+            },
+          })
+          if (outcome.kind === 'feedback') return { deny: outcome.message }
+          verdict = outcome.verdict
+        }
+      } catch {
+        verdict = null
+      }
+      S.planVerdict = verdict
+      const turnId = S.mainTurnId
+      let got: Awaited<ReturnType<typeof next>>
+      try {
+        got = await next(e)
+      } finally {
+        S.planVerdict = null
+      }
+      // The call has run: a failure to schedule changes nothing of its result.
+      try {
+        if (verdict?.kind === 'allow' && verdict.clear && got && typeof got === 'object' && !('deny' in got)) scheduleClear($, verdict.plan, turnId)
+      } catch {}
+      return got
+    } finally {
+      S.plansLive--
     }
-    // The call has run: a failure to schedule changes nothing of its result.
-    try {
-      if (verdict?.kind === 'allow' && verdict.clear && got && typeof got === 'object' && !('deny' in got)) scheduleClear($, verdict.plan, turnId)
-    } catch {}
-    return got
   }).catch(($, e, next) => next(e))
 
   // The PermissionRequest of that call: Intelligent UI's verdict at once (the
-  // engine's dialog never shows), else the engine's flow.
+  // engine's dialog never shows), else the engine's flow (also while two
+  // calls run: the verdict may be the other call's).
   on('classic.PermissionRequest', async ($, e, next) => {
-    if (e.tool_name !== 'ExitPlanMode' || e.agent_id || !S.planVerdict) return next(e)
+    if (e.tool_name !== 'ExitPlanMode' || e.agent_id || !S.planVerdict || S.plansLive !== 1) return next(e)
     const verdict = S.planVerdict
     S.planVerdict = null
     return { decision: decisionOf(verdict, e.tool_input) }

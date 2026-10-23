@@ -342,6 +342,35 @@ test('a ready build a down puts aside is paused: its tinted rows are made in the
   expect(f.reads.length).toBe(2)
 })
 
+test('a down on a page whose paused ready build lost its frames builds it again: its frames come', async () => {
+  const f = fake()
+  pages.budget = Math.floor(bytesFor(pageOf(0)) * 1.5)
+  notePages(f.$, drawn('a', 1, [0, 1], { first: 0, last: 15, of: 32 }), COLOR)
+  await f.tick()
+  await f.tick()
+  // A down on page 0 while it builds: promoted.
+  void needFrames(f.$, pageOf(0), COLOR, { id: 'a', index: 0, seq: 1 })
+  for (let n = 0; n < 100000 && !(pages.frames.has(key(0)) && pages.build?.want.key === key(0)); n++) await f.tick()
+  expect(pages.build?.want.key).toBe(key(0))
+  // A down on page 1: page 0's ready build is paused (promoted, so it stays queued).
+  void needFrames(f.$, pageOf(1), COLOR, { id: 'a', index: 1, seq: 1 })
+  // Scrolled: page 0 off screen, page 1 on screen; page 0's frames go while page 1 builds.
+  notePages(f.$, drawn('a', 1, [0, 1], { first: 16, last: 31, of: 32 }), COLOR)
+  for (let n = 0; n < 100000 && !(pages.frames.has(key(1)) && pages.build?.want.key === key(1)); n++) await f.tick()
+  expect(pages.frames.has(key(0))).toBe(false)
+  expect(pages.wants.get(key(0))?.paused?.isReady).toBe(true)
+  // Scrolled back, a down on page 0.
+  notePages(f.$, drawn('a', 1, [0, 1], { first: 0, last: 31, of: 32 }), COLOR)
+  let got: { frames: unknown } | undefined
+  void needFrames(f.$, pageOf(0), COLOR, { id: 'a', index: 0, seq: 1 }).then(r => (got = r))
+  await f.drain()
+  expect((got?.frames as { plain: unknown[] } | undefined)?.plain.length).toBe(16)
+  expect(pages.waiters.has(key(0))).toBe(false)
+  expect(pages.isPumping).toBe(false)
+  // Read again: its build began anew.
+  expect(files(f.reads).filter(r => r === pageOf(0).file).length).toBe(2)
+})
+
 test("a frame makes tinted rows for its time at most (one at least), the rest drawn plain; the next frames make them, the same frame in the end", () => {
   const png = Uint8Array.from(atob(PNGS[0]!), c => c.charCodeAt(0))
   const f = framesOf(decodePng(png), pageOf(0), rgbOf(COLOR))

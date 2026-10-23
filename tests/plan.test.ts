@@ -153,6 +153,7 @@ function world($: any, on: any, o: {
   raise?: boolean
   onAsk?: () => Promise<void>
   hold?: Promise<void>
+  before?: (id: string) => Promise<void>
 } = {}) {
   mock.store(on)
   const clock = mock.clock(on)
@@ -236,6 +237,8 @@ function world($: any, on: any, o: {
   })
   on('tool.call', { tool: 'ExitPlanMode' }, async (_: any, e: any) => {
     if (o.raise === false) return { result: { plan: e.plan, isAgent: false, filePath: FILE } }
+    // The engine's own work before PermissionRequest (PreToolUse hooks, tool.check).
+    await o.before?.(e.tool_use_id)
     const got: any = await $.classic.PermissionRequest({
       tool_name: 'ExitPlanMode', tool_input: { plan: e.plan, planFilePath: e.planFilePath }, permission_mode: 'plan',
       ...(e.agentId ? { agent_id: e.agentId } : {}),
@@ -575,6 +578,82 @@ test('a verdict whose PermissionRequest never came does not reach a later call',
   expect(w.asked.length).toBe(1)
   await $.classic.PermissionRequest({ tool_name: 'ExitPlanMode', tool_input: { plan: PLAN }, permission_mode: 'plan' } as any)
   expect(w.engineAsks()).toBe(1)
+})
+
+// ExitPlanMode is concurrency safe: two calls may run at once, and a
+// PermissionRequest does not say which call it is for.
+const ticks = async () => {
+  for (let i = 0; i < 200; i++) await Promise.resolve()
+}
+
+test('two calls at once: the second asks nothing, and no verdict is used while both run', async ($, on) => {
+  const gates: Record<string, () => void> = {}
+  const waits: Record<string, Promise<void>> = { A: new Promise(r => (gates.A = r)), B: new Promise(r => (gates.B = r)) }
+  const w = world($, on, { answers: [null, PLAN_AUTO], before: id => waits[id] ?? Promise.resolve() })
+  await ready($)
+  // A is rejected (Esc), and waits for its PermissionRequest; B begins.
+  const a = exitPlan($, { tool_use_id: 'A' })
+  await ticks()
+  const b = exitPlan($, { tool_use_id: 'B' })
+  await ticks()
+  expect(w.asked.length).toBe(1)
+  gates.A!()
+  await ticks()
+  gates.B!()
+  await a.catch(() => undefined)
+  await b.catch(() => undefined)
+  // A's verdict reaches no call: the engine's dialog asks for each.
+  expect(w.decisions).toEqual([undefined, undefined])
+  expect(w.engineAsks()).toBe(2)
+  // Both ended: a call on its own is asked about and its verdict used again.
+  await exitPlan($, { tool_use_id: 'C' })
+  expect(w.asked.length).toBe(2)
+  expect(w.decisions[2]).toEqual({ behavior: 'allow', updatedInput: { plan: PLAN, planFilePath: FILE }, updatedPermissions: setMode('acceptEdits') })
+  expect(w.engineAsks()).toBe(2)
+})
+
+test('a call that begins while the question is open asks nothing; once it ends, the verdict is used', async ($, on) => {
+  let second: Promise<unknown> | null = null
+  const w = world($, on, {
+    answers: [PLAN_AUTO],
+    onAsk: async () => {
+      if (second) return
+      second = exitPlan($, { tool_use_id: 'B' })
+      await second
+    },
+  })
+  await ready($)
+  const got: any = await exitPlan($, { tool_use_id: 'A' })
+  expect(second).not.toBe(null)
+  expect(w.asked.length).toBe(1)
+  // B: the engine's dialog; A: the verdict, as B ended before A's PermissionRequest.
+  expect(w.decisions).toEqual([undefined, { behavior: 'allow', updatedInput: { plan: PLAN, planFilePath: FILE }, updatedPermissions: setMode('acceptEdits') }])
+  expect(w.engineAsks()).toBe(1)
+  expect(got.result.plan).toBe(PLAN)
+})
+
+test('a call that begins while the question is open and still runs at the PermissionRequest: the engine asks for both', async ($, on) => {
+  let release!: () => void
+  const gate = new Promise<void>(r => (release = r))
+  let second: Promise<unknown> | null = null
+  const w = world($, on, {
+    answers: [null],
+    before: id => (id === 'B' ? gate : Promise.resolve()),
+    onAsk: async () => {
+      if (second) return
+      second = exitPlan($, { tool_use_id: 'B' })
+      await ticks()
+    },
+  })
+  await ready($)
+  // A is rejected (Esc) while B runs: the deny is not used, the engine asks.
+  await exitPlan($, { tool_use_id: 'A' })
+  expect(w.decisions).toEqual([undefined])
+  release()
+  await second
+  expect(w.asked.length).toBe(1)
+  expect(w.decisions).toEqual([undefined, undefined])
+  expect(w.engineAsks()).toBe(2)
 })
 
 test('the line above the dialog is for the Intelligent UI question alone', async ($, on) => {
