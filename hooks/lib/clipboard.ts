@@ -9,7 +9,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { S } from './state'
-import { envGet, processRun } from './api'
+import { getenv, exec } from './api'
 
 // The tools the choice looks for, in the order it prefers them. `gtk` is
 // python3 when it can load GTK 3 (gi).
@@ -161,11 +161,11 @@ export function findClipWay($: EngineInterface): Promise<ClipWay> {
   return p
 }
 async function lookUp($: EngineInterface): Promise<ClipWay> {
-  const got = await processRun($, ['sh', '-c', FIND_SH], { timeoutMs: 5000 }).catch(() => null)
+  const got = await exec($, ['sh', '-c', FIND_SH], { timeoutMs: 5000 }).catch(() => null)
   S.clipWay = clipWayOf({
-    wayland: !!(await envGet($, 'WAYLAND_DISPLAY')),
-    x11: !!(await envGet($, 'DISPLAY')),
-    desktop: (await envGet($, 'XDG_CURRENT_DESKTOP')) ?? '',
+    wayland: !!(await getenv($, 'WAYLAND_DISPLAY')),
+    x11: !!(await getenv($, 'DISPLAY')),
+    desktop: (await getenv($, 'XDG_CURRENT_DESKTOP')) ?? '',
     found: clipToolsOf(got?.stdout ?? ''),
   })
   return S.clipWay
@@ -176,12 +176,12 @@ async function lookUp($: EngineInterface): Promise<ClipWay> {
 // password manager's copy, which is never read).
 export async function clipboardNow($: EngineInterface): Promise<string | null> {
   if (S.env?.isMac) {
-    const got = await processRun($, ['/usr/bin/perl', '-e', READ_PL], { timeoutMs: 2000 }).catch(() => null)
+    const got = await exec($, ['/usr/bin/perl', '-e', READ_PL], { timeoutMs: 2000 }).catch(() => null)
     return got && got.exitCode === 0 ? got.stdout : null
   }
   const way = S.clipWay
   if (!way || !('read' in way)) return null
-  const got = await processRun($, way.read, { timeoutMs: 2000 }).catch(() => null)
+  const got = await exec($, way.read, { timeoutMs: 2000 }).catch(() => null)
   return got && got.exitCode === 0 ? got.stdout : null
 }
 

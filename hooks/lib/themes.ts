@@ -4,7 +4,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { BASE_THEME, DEFAULT_THEME, MODES } from './settings'
 import { S } from './state'
-import { fsExists, fsList, fsRead, fsStat } from './api'
+import { exists, ls, cat, stat } from './api'
 
 // A theme folder's name: letters, digits, `.`, `_`, `-`.
 export const isThemeName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)
@@ -110,11 +110,11 @@ export function themeListing(themes: ReadonlyMap<string, ThemeInfo>, problems: r
 export async function scanThemes($: EngineInterface, root: string, home: string) {
   const found: (ThemeInfo | ThemeProblem)[] = []
   for (const [base, isUser] of [[`${root}/render/themes`, false], [userThemesOf(home), true]] as const) {
-    const entries = await fsList($, base).catch(() => [])
+    const entries = await ls($, base).catch(() => [])
     for (const entry of entries) {
       if (entry.kind === 'file') continue
       const dir = `${base}/${entry.name}`
-      const json = await fsRead($, `${dir}/theme.json`).catch(() => null)
+      const json = await cat($, `${dir}/theme.json`).catch(() => null)
       if (json === null) continue
       const one = themeEntry(entry.name, dir, isUser, json)
       const lost = 'reason' in one ? [] : await missingSyntax($, one)
@@ -129,7 +129,7 @@ export async function missingSyntax($: EngineInterface, theme: ThemeInfo) {
   const lost: string[] = []
   for (const mode of MODES) {
     const file = theme.syntax[mode]
-    if (file && !(await fsExists($, `${theme.dir}/${file}`).catch(() => false))) lost.push(file)
+    if (file && !(await exists($, `${theme.dir}/${file}`).catch(() => false))) lost.push(file)
   }
   return lost
 }
@@ -141,8 +141,8 @@ export const userThemesOf = (home: string) => `${home || '~'}/.claude/cc-intelli
 export async function stampTheme($: EngineInterface, files: readonly string[]): Promise<string> {
   const times: string[] = []
   for (const file of files) {
-    const stat = await fsStat($, file).catch(() => null)
-    times.push(String(stat?.mtimeMs ?? 0))
+    const st = await stat($, file).catch(() => null)
+    times.push(String(st?.mtimeMs ?? 0))
   }
   return times.join(',')
 }

@@ -13,7 +13,7 @@ import type { Checked } from './updates'
 import type { ClipWay } from './clipboard'
 import type { PdfFacts, PixelBox } from './images'
 import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } from './settings'
-import { invalidate } from './api'
+import { redraw } from './api'
 
 // The `done` atom (see types/index.d.ts) for refresh. The state scan of
 // `claude plugin validate` reads an atom only from a const in the file that
@@ -346,5 +346,5 @@ export function keepIn(set: Set<string>, key: string, max: number) {
 
 // Redraws every reader of `done`; an invalidate where the write is refused.
 export function refresh($: EngineInterface) {
-  void update($, done, n => n + 1).catch(() => invalidate($, 'ui.render'))
+  void update($, done, n => n + 1).catch(() => redraw($, 'ui.render'))
 }

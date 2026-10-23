@@ -12,7 +12,7 @@ import { leanDirs, type Env, type LeanFonts } from './state'
 import { FENCE, isTypstInfo } from './markdown'
 import { hashOf } from './draw'
 import { logDebug } from './log'
-import { fsExists, processRun } from './api'
+import { exists, exec } from './api'
 
 // The CJK and emoji fonts: large to read, and plain text never needs them.
 export const SKIPPED_FONTS = /emoji|cjk|pingfang|hiragino|gothic|han sans|han serif|yahei|jhenghei|meiryo|malgun|simsun|simhei|wenquanyi|droid sans fallback/i
@@ -156,7 +156,7 @@ export async function leanFontsFor($: EngineInterface, env: Env, segments: reado
   if (!dir) return ''
   // The cleanup at start removes the folders not used for 2 days: one gone
   // is made again.
-  if (!(await fsExists($, dir).catch(() => false))) {
+  if (!(await exists($, dir).catch(() => false))) {
     leanDirs.delete(want)
     return ''
   }
@@ -167,14 +167,14 @@ export async function leanFontsFor($: EngineInterface, env: Env, segments: reado
 // files of the lean set. A failure is kept: no lean set for these fonts in
 // this session.
 async function makeLean($: EngineInterface, env: Env, typst: string, fonts: LeanFonts, want: string, vars: Record<string, string>) {
-  const listed = await processRun($, [typst, 'fonts', '--variants'], { timeoutMs: 10000, env: vars }).catch(() => null)
+  const listed = await exec($, [typst, 'fonts', '--variants'], { timeoutMs: 10000, env: vars }).catch(() => null)
   const files = listed?.exitCode === 0 ? leanFiles(fontListOf(listed.stdout), env.termFont, fonts) : null
   if (!files) {
     await logDebug($, env.cache, 'lean fonts: not used (the font list does not allow it)')
     return
   }
   const dir = leanDirOf(env.cache, files)
-  const made = await processRun($, ['sh', '-c', LEAN_SH, 'sh', dir, ...files], { timeoutMs: 10000 }).catch(() => null)
+  const made = await exec($, ['sh', '-c', LEAN_SH, 'sh', dir, ...files], { timeoutMs: 10000 }).catch(() => null)
   if (made?.exitCode !== 0) {
     await logDebug($, env.cache, `lean fonts: the folder ${dir} was not made:\n${made?.stderr ?? ''}`)
     return

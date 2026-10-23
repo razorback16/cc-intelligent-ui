@@ -15,7 +15,7 @@ import { designInMemory, designKey, loadDesign } from './designs'
 import { resultOf, touchLater } from './typst'
 import { enqueue, finalize, forget, waitBlank } from './stream'
 import { extendEpoch } from './epoch'
-import { clockAfter, fsRead } from './api'
+import { delay, cat } from './api'
 
 // `pages`: draw these (with `bytes` over ssh); `blank`: draw an empty box;
 // `text`: draw the engine's own row.
@@ -78,7 +78,7 @@ async function roomOf($: EngineInterface, o: { hasRoom: boolean; textHash: strin
 async function fromDisk($: EngineInterface, env: Env, key: string): Promise<Result | null> {
   if (!S.onDisk.has(key)) return null
   const dir = `${env.cache}/${key}`
-  const text = await fsRead($, `${dir}/pages.json`).catch(() => null)
+  const text = await cat($, `${dir}/pages.json`).catch(() => null)
   const got = text ? resultOf(text) : null
   if (!got) {
     S.onDisk.delete(key)
@@ -158,7 +158,7 @@ export async function pagesOf($: EngineInterface, o: PagesInput): Promise<Drawin
     const was = live.get(id)
     if (!was || changed) {
       was?.still.cancel()
-      const still = clockAfter($, S.stepsLive > 0 ? LIVE_STILL_MS : SETTLE_MS, () => finalize($, id, false))
+      const still = delay($, S.stepsLive > 0 ? LIVE_STILL_MS : SETTLE_MS, () => finalize($, id, false))
       live.set(id, { job, still })
     } else live.set(id, { job, still: was.still })
     pending.get(id)?.timer.cancel()

@@ -12,7 +12,7 @@ import { HEADERS_SH } from './host'
 import { logDebug } from './log'
 import { positionsOf, type Mark, type Positions } from './copy'
 import { hasBoldFace, leanFontsFor } from './fonts'
-import { clockAfter, envGet, fsExists, fsList, fsRead, fsWrite, processRun, spawn } from './api'
+import { delay, getenv, exists, ls, cat, write, exec, spawn } from './api'
 
 // The typst command and its environment. Network off (see NO_NETWORK) and a
 // package cache of our own, so only the vendored packages load, and the
@@ -143,7 +143,7 @@ export function svgLinksOf(svg: string, full: string): string[] {
 async function svgLinks($: EngineInterface, images: readonly string[]): Promise<string[]> {
   const found: string[] = []
   for (const full of new Set(imageFullsOf(images).filter(p => /\.svg$/i.test(p)))) {
-    const svg = await fsRead($, full).catch(() => '')
+    const svg = await cat($, full).catch(() => '')
     if (typeof svg === 'string') found.push(...svgLinksOf(svg, full))
   }
   return found
@@ -161,12 +161,12 @@ const runFolderIn = (dir: string) => `${dir}/r-${(++runs).toString(36)}${Math.ra
 export async function inRoot<T>($: EngineInterface, job: Job, dir: string, doc: Doc, use: (run: string) => Promise<T>): Promise<T> {
   const run = runFolderIn(dir)
   const args = stageArgs(run, job.env.root, `${dir}/doc.json`, job.themeDir, doc.images, await svgLinks($, doc.images))
-  const made = await processRun($, ['sh', '-c', STAGE_SH, 'sh', ...args], { stdin: JSON.stringify(doc), timeoutMs: 10000 }).catch(() => null)
+  const made = await exec($, ['sh', '-c', STAGE_SH, 'sh', ...args], { stdin: JSON.stringify(doc), timeoutMs: 10000 }).catch(() => null)
   if (made?.exitCode !== 0) await logDebug($, job.env.cache, `the root ${run} could not be made: ${made?.stderr ?? 'sh did not run'}`)
   try {
     return await use(run)
   } finally {
-    if (made?.exitCode === 0) void Promise.resolve(processRun($, ['rm', '-rf', run], { timeoutMs: 10000 })).catch(() => undefined)
+    if (made?.exitCode === 0) void Promise.resolve(exec($, ['rm', '-rf', run], { timeoutMs: 10000 })).catch(() => undefined)
   }
 }
 
@@ -254,15 +254,15 @@ export function shouldRetrySafe(exitCode: number): boolean {
 
 export async function findTypst($: EngineInterface): Promise<string | null> {
   for (const flag of ['-lc', '-c']) {
-    const got = await processRun($, ['sh', flag, 'command -v typst'], { timeoutMs: 5000 }).catch(() => null)
+    const got = await exec($, ['sh', flag, 'command -v typst'], { timeoutMs: 5000 }).catch(() => null)
     const path = got?.exitCode === 0 ? firstLine(got.stdout) : ''
     if (path.startsWith('/')) return path
   }
-  const home = (await envGet($, 'HOME').catch(() => undefined)) ?? ''
+  const home = (await getenv($, 'HOME').catch(() => undefined)) ?? ''
   for (const each of TYPST_FALLBACKS) {
     if (each.startsWith('~/') && !home) continue
     const path = each.startsWith('~/') ? `${home}${each.slice(1)}` : each
-    if (await fsExists($, path).catch(() => false)) return path
+    if (await exists($, path).catch(() => false)) return path
   }
   return null
 }
@@ -288,8 +288,8 @@ export async function measureFonts($: EngineInterface, typst: string, root: stri
   const argv = measureCall(typst, root, family, themeDir)
   const env = noNetworkEnv(cache)
   const [got, listed] = await Promise.all([
-    processRun($, argv, { timeoutMs: 10000, env }).catch(() => null),
-    family ? processRun($, [typst, 'fonts', '--variants'], { timeoutMs: 10000, env }).catch(() => null) : null,
+    exec($, argv, { timeoutMs: 10000, env }).catch(() => null),
+    family ? exec($, [typst, 'fonts', '--variants'], { timeoutMs: 10000, env }).catch(() => null) : null,
   ])
   try {
     const m = JSON.parse(got?.stdout ?? '') as Metrics
@@ -311,7 +311,7 @@ export async function existingImages($: EngineInterface, segments: readonly stri
   const found: string[] = []
   for (const path of new Set(segments.flatMap(localImages))) {
     const full = imagePathOf(path, base)
-    if (await fsExists($, full).catch(() => false)) found.push(path, full)
+    if (await exists($, full).catch(() => false)) found.push(path, full)
   }
   return found
 }
@@ -354,11 +354,11 @@ export function touchLater($: EngineInterface, path: string) {
   if (toTouch.size >= TOUCH_KEPT && !toTouch.has(path)) return
   toTouch.add(path)
   if (touchTimer) return
-  touchTimer = clockAfter($, TOUCH_FLUSH_MS, () => {
+  touchTimer = delay($, TOUCH_FLUSH_MS, () => {
     touchTimer = null
     const paths = [...toTouch].slice(0, TOUCH_BATCH)
     for (const each of paths) toTouch.delete(each)
-    if (paths.length) void Promise.resolve(processRun($, ['touch', '-c', ...paths], { timeoutMs: 5000 })).catch(() => undefined)
+    if (paths.length) void Promise.resolve(exec($, ['touch', '-c', ...paths], { timeoutMs: 5000 })).catch(() => undefined)
     if (toTouch.size) touchLater($, toTouch.values().next().value!)
   })
 }
@@ -397,7 +397,7 @@ export async function runKillable(
   const killNow = () => {
     if (!why || !pid || isKillSent) return
     isKillSent = true
-    void Promise.resolve(processRun($, ['kill', pid], { timeoutMs: 5000 })).catch(() => undefined)
+    void Promise.resolve(exec($, ['kill', pid], { timeoutMs: 5000 })).catch(() => undefined)
   }
   const stop = (reason: 'cancel' | 'timeout') => {
     if (why) return
@@ -406,7 +406,7 @@ export async function runKillable(
   }
   const onAbort = () => stop('cancel')
   o.signal?.addEventListener('abort', onAbort, { once: true })
-  const timer = clockAfter($, o.timeoutMs, () => stop('timeout'))
+  const timer = delay($, o.timeoutMs, () => stop('timeout'))
   let code: number | null = 1
   try {
     const child = spawn($, { argv: wrapPid(argv), ...(o.env ? { env: o.env } : {}) })
@@ -538,7 +538,7 @@ export async function probePage(
 ): Promise<Positions | null> {
   let kept: Partial<Doc> | null = null
   try {
-    kept = JSON.parse((await fsRead($, `${dir}/doc.json`)) as string) as Partial<Doc>
+    kept = JSON.parse((await cat($, `${dir}/doc.json`)) as string) as Partial<Doc>
   } catch {
     return null
   }
@@ -567,13 +567,13 @@ export async function probePage(
 // The pages of one run: its PNGs (by tag) in order, with their sizes and
 // the box each takes. Null when there are none or a size can not be read.
 async function pagesOfRun($: EngineInterface, job: Job, dir: string, tag: string, segments: readonly string[]): Promise<Page[] | null> {
-  const files = (await fsList($, dir))
+  const files = (await ls($, dir))
     .filter(f => f.kind === 'file' && f.name.startsWith(`${tag}-`) && f.name.endsWith('.png'))
     .map(f => f.name)
     .sort((x, y) => Number(x.replace(/\D/g, '')) - Number(y.replace(/\D/g, '')))
     .map(name => `${dir}/${name}`)
   if (!files.length) return null
-  const heads = await processRun($, ['sh', '-c', HEADERS_SH, 'sh', ...files])
+  const heads = await exec($, ['sh', '-c', HEADERS_SH, 'sh', ...files])
   const sizes = parseOd(heads.stdout).map(pngSize)
   if (sizes.length !== files.length || sizes.some(s => !s)) {
     await logDebug($, job.env.cache, `compile ${job.key}: could not read PNG sizes`)
@@ -589,7 +589,7 @@ async function pagesOfRun($: EngineInterface, job: Job, dir: string, tag: string
 // result: nothing is kept).
 export async function compile($: EngineInterface, job: Job, signal?: AbortSignal): Promise<Result | 'failed' | 'cancelled'> {
   const dir = `${job.env.cache}/${job.key}`
-  const kept = await fsRead($, `${dir}/pages.json`).catch(() => null)
+  const kept = await cat($, `${dir}/pages.json`).catch(() => null)
   const keptResult = kept ? resultOf(kept) : null
   if (keptResult) {
     touchLater($, dir)
@@ -604,7 +604,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
   let segments = splitSegments(job.text, job.columns, job.env.inline ? inlineBudget(job.cell) : SEGMENT_ROWS, job.size, roomRows)
   const base = job.base ?? job.env.cwd
   const images = await existingImages($, segments, base)
-  await fsWrite($, `${dir}/doc.json`, JSON.stringify({ base, segments, images }))
+  await write($, `${dir}/doc.json`, JSON.stringify({ base, segments, images }))
 
   let tag = 'a'
   let isSafe = false
@@ -635,7 +635,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     const cut = segments.flatMap((seg, i) => (pages![i]!.rows > MAX_IMAGE_ROWS ? splitInTwo(seg, job.columns, job.size, roomRows) : [seg]))
     if (cut.length > segments.length) {
       if (signal?.aborted) return 'cancelled'
-      await fsWrite($, `${dir}/doc.json`, JSON.stringify({ base, segments: cut, images }))
+      await write($, `${dir}/doc.json`, JSON.stringify({ base, segments: cut, images }))
       const again = await runTypst($, job, { base, segments: cut, images }, dir, isSafe ? 'd' : 'c', isSafe, signal)
       if (again.isCancelled) return 'cancelled'
       const split = again.exitCode === 0 ? await pagesOfRun($, job, dir, isSafe ? 'd' : 'c', cut) : null
@@ -648,6 +648,6 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
   }
   const { bulletRow } = firstLinePlace(job, segments)
   const result: Result = { pages, bulletRow, ...(note ? { note } : {}) }
-  await fsWrite($, `${dir}/pages.json`, JSON.stringify(result))
+  await write($, `${dir}/pages.json`, JSON.stringify(result))
   return result
 }

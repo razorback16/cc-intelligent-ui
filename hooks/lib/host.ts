@@ -17,7 +17,7 @@ import {
 } from './terminals'
 import { firstLine } from './markdown'
 import { isGhosttyHere } from './terminal'
-import { clockEvery, envGet, fsExists, fsRead, processRun } from './api'
+import { every, getenv, exists, cat, exec } from './api'
 
 // One tty size read: `rows cols xpixel ypixel` (TIOCGWINSZ); exit 1 with no tty.
 export const CELL_SH = `perl -e 'open(T, "</dev/tty") or exit 1; my $w = " " x 8; ioctl(T, ($^O eq "darwin" ? 0x40087468 : 0x5413), $w) or exit 1; print join(" ", unpack("S4", $w))'`
@@ -214,20 +214,20 @@ export const fcPatternOf = (family: string) => family.replace(/[\\\-:,]/g, '\\$&
 // A family fontconfig gives for a pattern (the first of its names), '' when
 // fc-match fails. `fc-match` always gives a font, the nearest one.
 async function fcFamily($: EngineInterface, pattern: string): Promise<string> {
-  const got = await processRun($, ['fc-match', pattern, '-f', '%{family}'], { timeoutMs: 5000 }).catch(() => null)
+  const got = await exec($, ['fc-match', pattern, '-f', '%{family}'], { timeoutMs: 5000 }).catch(() => null)
   return got?.exitCode === 0 ? familyOfFc(got.stdout) : ''
 }
 
 // The family of the first font that fontconfig lists for a pattern (only
 // fonts that match it), '' for none.
 async function fcListFamily($: EngineInterface, pattern: string): Promise<string> {
-  const got = await processRun($, ['fc-list', pattern, 'family'], { timeoutMs: 5000 }).catch(() => null)
+  const got = await exec($, ['fc-list', pattern, 'family'], { timeoutMs: 5000 }).catch(() => null)
   return got?.exitCode === 0 ? familyOfFc(firstLine(got.stdout)) : ''
 }
 
 // What CoreText says of a family (HAS_FAMILY_JXA), '' when it can't be read.
 async function macFamily($: EngineInterface, family: string, mono = false): Promise<string> {
-  const got = await processRun($, ['osascript', '-l', 'JavaScript', '-e', HAS_FAMILY_JXA, family, ...(mono ? ['mono'] : [])], { timeoutMs: 5000 }).catch(() => null)
+  const got = await exec($, ['osascript', '-l', 'JavaScript', '-e', HAS_FAMILY_JXA, family, ...(mono ? ['mono'] : [])], { timeoutMs: 5000 }).catch(() => null)
   return got?.exitCode === 0 ? firstLine(got.stdout) : ''
 }
 
@@ -237,7 +237,7 @@ async function macFamily($: EngineInterface, family: string, mono = false): Prom
 // installed; null when that can't be read (then the name is taken as is).
 async function installedFamily($: EngineInterface, isMac: boolean, family: string, exact = false): Promise<string | null> {
   if (isMac && exact) {
-    const got = await processRun($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_NOCASE_JXA, family], { timeoutMs: 5000 }).catch(() => null)
+    const got = await exec($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_NOCASE_JXA, family], { timeoutMs: 5000 }).catch(() => null)
     const line = got?.exitCode === 0 ? firstLine(got.stdout) : ''
     return line.startsWith('=') ? line.slice(1) : line === 'no' ? '' : null
   }
@@ -245,7 +245,7 @@ async function installedFamily($: EngineInterface, isMac: boolean, family: strin
     const seen = await macFamily($, family)
     return seen === 'yes' ? family : seen === 'no' ? '' : null
   }
-  const got = await processRun($, ['fc-list', exact ? ':' : fcPatternOf(family), 'family'], { timeoutMs: 5000 }).catch(() => null)
+  const got = await exec($, ['fc-list', exact ? ':' : fcPatternOf(family), 'family'], { timeoutMs: 5000 }).catch(() => null)
   if (got?.exitCode !== 0) return null
   // Each line is a font's family names, split by commas, with `\` escapes.
   const names = got.stdout.split('\n').flatMap(line => line.split(/(?<!\\),/).map(name => name.replace(/\\(.)/g, '$1').trim())).filter(Boolean)
@@ -258,7 +258,7 @@ async function installedFamily($: EngineInterface, isMac: boolean, family: strin
 // such font) or 'failed' (no program, or the copy failed).
 async function programFont($: EngineInterface, isMac: boolean, o: { tag: string; family: string; name: string; paths: readonly string[] }): Promise<'copied' | 'none' | 'failed'> {
   const argv = ['sh', '-c', PROGRAM_FONTS_SH, 'sh', perlFor(isMac), PROGRAM_FONTS_PL, o.tag, o.family, o.name, ...o.paths]
-  const made = await processRun($, argv, { timeoutMs: 10000 }).catch(() => null)
+  const made = await exec($, argv, { timeoutMs: 10000 }).catch(() => null)
   const dir = made?.exitCode === 0 ? firstLine(made.stdout) : ''
   // No copy now: an older folder (maybe gone) is not given to Typst.
   if (!dir) S.fontPaths = ''
@@ -273,7 +273,7 @@ async function programFont($: EngineInterface, isMac: boolean, o: { tag: string;
 // when fontconfig has it (Linux), else from a copy of the one in Ghostty's
 // program (S.fontPaths).
 async function ghosttyDefaultFont($: EngineInterface, isMac: boolean): Promise<string> {
-  const got = await processRun($, ['fc-list', '-q', GHOSTTY_DEFAULT_FONT], { timeoutMs: 5000 }).catch(() => null)
+  const got = await exec($, ['fc-list', '-q', GHOSTTY_DEFAULT_FONT], { timeoutMs: 5000 }).catch(() => null)
   if (got?.exitCode === 0) return GHOSTTY_DEFAULT_FONT
   const o = { tag: 'ghostty', family: GHOSTTY_DEFAULT_FONT, name: 'ghostty', paths: GHOSTTY_PROGRAMS }
   return (await programFont($, isMac, o)) === 'copied' ? GHOSTTY_DEFAULT_FONT : ''
@@ -302,7 +302,7 @@ async function rioFont($: EngineInterface, isMac: boolean): Promise<string> {
   const named = rioFontOf((await readRioConfig($)).config)
   const found = named === RIO_DEFAULT_FONT ? '' : await installedFamily($, isMac, named, true)
   if (found !== '') return found ?? named
-  const home = (await envGet($, 'HOME')) ?? ''
+  const home = (await getenv($, 'HOME')) ?? ''
   const copy = await programFont($, isMac, { tag: 'rio', family: RIO_DEFAULT_FONT, name: 'rio', paths: rioProgramsOf(home) })
   if (copy === 'copied') return RIO_DEFAULT_FONT
   if (copy === 'none') return RIO_OLD_FONT
@@ -312,22 +312,22 @@ async function rioFont($: EngineInterface, isMac: boolean): Promise<string> {
 // The font that the terminal's own config or profile names.
 async function configFontOf($: EngineInterface, isMac: boolean): Promise<string> {
   if (S.isIterm && isMac) {
-    const profile = await envGet($, 'ITERM_PROFILE')
+    const profile = await getenv($, 'ITERM_PROFILE')
     const [marks, guid] = await Promise.all([
-      processRun($, ['sh', '-c', ITERM_BOOKMARKS_SH], { timeoutMs: 5000 }).catch(() => null),
-      processRun($, ['sh', '-c', ITERM_DEFAULT_SH], { timeoutMs: 5000 }).catch(() => null),
+      exec($, ['sh', '-c', ITERM_BOOKMARKS_SH], { timeoutMs: 5000 }).catch(() => null),
+      exec($, ['sh', '-c', ITERM_DEFAULT_SH], { timeoutMs: 5000 }).catch(() => null),
     ])
     // A read that failed or no profile: not known.
     const font = marks?.exitCode === 0 ? itermFontOf(marks.stdout, profile, guid?.stdout ?? '') : null
     if (font === null) return ''
     // An empty or bad profile font, or one that is not installed: iTerm2 draws the user's fixed-pitch font.
-    const named = await processRun($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_JXA, parseFontSpec(font)?.name ?? '', 'user'], { timeoutMs: 5000 }).catch(() => null)
+    const named = await exec($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_JXA, parseFontSpec(font)?.name ?? '', 'user'], { timeoutMs: 5000 }).catch(() => null)
     return named?.exitCode === 0 ? firstLine(named.stdout) : ''
   }
   if (isGhosttyHere()) {
-    const shown = await processRun($, ['sh', '-c', GHOSTTY_SH], { timeoutMs: 5000 }).catch(() => null)
+    const shown = await exec($, ['sh', '-c', GHOSTTY_SH], { timeoutMs: 5000 }).catch(() => null)
     // cmux loads its own config after Ghostty's; +show-config does not read it.
-    const own = S.isCmux ? ((await readText($, cmuxGhosttyConfigPath((await envGet($, 'HOME')) ?? ''))) ?? '') : ''
+    const own = S.isCmux ? ((await readText($, cmuxGhosttyConfigPath((await getenv($, 'HOME')) ?? ''))) ?? '') : ''
     return ghosttyFont($, isMac, ghosttyFontsOf(cmuxConfigOf(shown?.stdout ?? '', own)))
   }
   if (S.isKitty) {
@@ -343,7 +343,7 @@ async function configFontOf($: EngineInterface, isMac: boolean): Promise<string>
       const seen = 'family' in font ? await macFamily($, name, true) : 'no'
       if (seen === 'yes' || seen === '') return name
       if (seen === 'proportional') return KITTY_MAC_FONT
-      const named = await processRun($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_JXA, name], { timeoutMs: 5000 }).catch(() => null)
+      const named = await exec($, ['osascript', '-l', 'JavaScript', '-e', FAMILY_JXA, name], { timeoutMs: 5000 }).catch(() => null)
       return named?.exitCode === 0 ? firstLine(named.stdout) || KITTY_MAC_FONT : ''
     }
     const found = 'family' in font ? await installedFamily($, isMac, name) : ''
@@ -385,7 +385,7 @@ export async function readHostMode($: EngineInterface): Promise<HostMode | null>
 // The background of the iTerm2 profile in use, on a Mac.
 async function readItermMode($: EngineInterface): Promise<HostMode | null> {
   if (!S.isIterm || S.hostOs !== 'Darwin') return null
-  const got = await processRun($, ['sh', '-c', ITERM_MODE_SH], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
+  const got = await exec($, ['sh', '-c', ITERM_MODE_SH], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
   if (!got || got.exitCode !== 0) return null
   const [style = '', guid = '', marks = ''] = got.stdout.split(/^@\n/m)
   const appearance = itermAppearanceOf(style) ?? (await readOsMode($).catch(() => null))?.mode ?? null
@@ -396,7 +396,7 @@ async function readItermMode($: EngineInterface): Promise<HostMode | null> {
 // One OSC 11 question to the terminal: its raw answer ('' for none), or null
 // when the tty could not be opened.
 export async function probeOsc11($: EngineInterface): Promise<{ reply: string } | null> {
-  const got = await processRun($, ['perl', '-e', OSC11_PL], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
+  const got = await exec($, ['perl', '-e', OSC11_PL], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
   return got && got.exitCode === 0 ? { reply: got.stdout } : null
 }
 
@@ -404,9 +404,9 @@ export async function probeOsc11($: EngineInterface): Promise<{ reply: string } 
 // (in cmux, cmux's appearance). In cmux, cmux's own config is read as well.
 async function readGhosttyMode($: EngineInterface): Promise<HostMode | null> {
   if (!/ghostty/i.test(S.termProgram + S.termName)) return null
-  const got = await processRun($, ['sh', '-c', GHOSTTY_SH], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
+  const got = await exec($, ['sh', '-c', GHOSTTY_SH], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
   if (!got || got.exitCode !== 0) return null
-  const home = (await envGet($, 'HOME')) ?? ''
+  const home = (await getenv($, 'HOME')) ?? ''
   const own = S.isCmux ? ((await readText($, cmuxGhosttyConfigPath(home))) ?? '') : ''
   const config = cmuxConfigOf(got.stdout, own)
   if (S.isCmux && !ghosttyHasColors(config)) {
@@ -419,13 +419,13 @@ async function readGhosttyMode($: EngineInterface): Promise<HostMode | null> {
   if (pair) {
     appearance = S.isCmux ? ((await readCmuxAppearance($).catch(() => null))?.mode ?? null) : ((await readOsMode($).catch(() => null))?.mode ?? null)
     const where = {
-      xdgConfig: (await envGet($, 'XDG_CONFIG_HOME')) || undefined,
+      xdgConfig: (await getenv($, 'XDG_CONFIG_HOME')) || undefined,
       home,
-      resources: (await envGet($, 'GHOSTTY_RESOURCES_DIR')) || undefined,
+      resources: (await getenv($, 'GHOSTTY_RESOURCES_DIR')) || undefined,
     }
     for (const mode of MODES) {
       for (const path of ghosttyThemePaths(pair[mode], where)) {
-        const text = await fsRead($, path).catch(() => null)
+        const text = await cat($, path).catch(() => null)
         if (typeof text !== 'string') continue
         themeBg[mode] = ghosttyValueOf(text, 'background')
         break
@@ -443,7 +443,7 @@ async function readGhosttyMode($: EngineInterface): Promise<HostMode | null> {
 // (terminal.adaptiveDefaultTheme, on unless cmux.json turns it off) follows
 // cmux's appearance, the OS's when that is system. Null when it is off.
 async function readCmuxMode($: EngineInterface): Promise<HostMode | null> {
-  const home = (await envGet($, 'HOME')) ?? ''
+  const home = (await getenv($, 'HOME')) ?? ''
   const settings = cmuxSettingsOf(jsoncOf((await readText($, `${home}/.config/cmux/cmux.json`)) ?? ''))
   if (settings.adaptive === false) return null
   const seen = await readCmuxAppearance($, settings.appearance)
@@ -454,12 +454,12 @@ async function readCmuxMode($: EngineInterface): Promise<HostMode | null> {
 // mode it gives: the OS's when it is system. Null when that is not known.
 async function readCmuxAppearance($: EngineInterface, file?: CmuxAppearance): Promise<{ mode: IuiTheme; appearance: CmuxAppearance } | null> {
   if (file === undefined) {
-    const home = (await envGet($, 'HOME')) ?? ''
+    const home = (await getenv($, 'HOME')) ?? ''
     file = cmuxSettingsOf(jsoncOf((await readText($, `${home}/.config/cmux/cmux.json`)) ?? '')).appearance
   }
   let saved = ''
   if (!file && S.hostOs === 'Darwin') {
-    const got = await processRun($, ['defaults', 'read', 'com.cmuxterm.app', 'appearanceMode'], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
+    const got = await exec($, ['defaults', 'read', 'com.cmuxterm.app', 'appearanceMode'], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
     saved = got?.exitCode === 0 ? got.stdout : ''
   }
   const appearance = cmuxAppearanceOf(file, saved)
@@ -472,23 +472,23 @@ const isRioHere = () => /^rio$/i.test(S.termProgram) || /^rio$/i.test(S.termName
 
 // A file's text, or null when it can't be read.
 export async function readText($: EngineInterface, path: string): Promise<string | null> {
-  const text = await fsRead($, path).catch(() => null)
+  const text = await cat($, path).catch(() => null)
   return typeof text === 'string' ? text : null
 }
 
 // kitty's config folder and kitty.conf with its includes: the first folder
 // that has a kitty.conf, else the first folder (auto theme files can be there).
 async function readKittyConfig($: EngineInterface): Promise<{ dir: string; entries: KittyEntries; home: string }> {
-  const home = (await envGet($, 'HOME')) ?? ''
+  const home = (await getenv($, 'HOME')) ?? ''
   const dirs = kittyConfigDirsOf({
-    kittyDir: (await envGet($, 'KITTY_CONFIG_DIRECTORY')) || undefined,
-    xdgConfig: (await envGet($, 'XDG_CONFIG_HOME')) || undefined,
+    kittyDir: (await getenv($, 'KITTY_CONFIG_DIRECTORY')) || undefined,
+    xdgConfig: (await getenv($, 'XDG_CONFIG_HOME')) || undefined,
     home,
     isMac: S.hostOs === 'Darwin',
   })
   const o = { home, vars: { KITTY_OS: S.hostOs === 'Darwin' ? 'macos' : S.hostOs.toLowerCase() } }
   for (const dir of dirs) {
-    if (!(await fsExists($, `${dir}/kitty.conf`).catch(() => false))) continue
+    if (!(await exists($, `${dir}/kitty.conf`).catch(() => false))) continue
     return { dir, entries: await kittyEntriesOf(`${dir}/kitty.conf`, path => readText($, path), o), home }
   }
   return { dir: dirs[0]!, entries: [], home }
@@ -500,7 +500,7 @@ async function readKittyMode($: EngineInterface): Promise<HostMode | null> {
   if (!S.isKitty) return null
   const { dir, entries, home } = await readKittyConfig($)
   const schemes = ['dark', 'light', 'no-preference'] as const
-  const found = await Promise.all(schemes.map(s => fsExists($, `${dir}/${kittyAutoFileOf(s)}`).catch(() => false)))
+  const found = await Promise.all(schemes.map(s => exists($, `${dir}/${kittyAutoFileOf(s)}`).catch(() => false)))
   let auto: { file: string; entries: KittyEntries } | null = null
   if (found.some(Boolean)) {
     let scheme: (typeof schemes)[number] | null = null
@@ -519,9 +519,9 @@ async function readKittyMode($: EngineInterface): Promise<HostMode | null> {
 // Rio's config folder and its config.toml's string values.
 async function readRioConfig($: EngineInterface): Promise<{ dir: string; config: Record<string, string> }> {
   const dir = rioConfigDirOf({
-    rioHome: (await envGet($, 'RIO_CONFIG_HOME')) || undefined,
-    xdgConfig: (await envGet($, 'XDG_CONFIG_HOME')) || undefined,
-    home: (await envGet($, 'HOME')) ?? '',
+    rioHome: (await getenv($, 'RIO_CONFIG_HOME')) || undefined,
+    xdgConfig: (await getenv($, 'XDG_CONFIG_HOME')) || undefined,
+    home: (await getenv($, 'HOME')) ?? '',
     isMac: S.hostOs === 'Darwin',
   })
   return { dir, config: tomlStringsOf((await readText($, `${dir}/config.toml`)) ?? '') }
@@ -545,7 +545,7 @@ async function readRioMode($: EngineInterface): Promise<HostMode | null> {
 // (readLinuxScheme; no preference is light, as GNOME's default is).
 async function readOsMode($: EngineInterface): Promise<HostMode | null> {
   if (S.hostOs === 'Darwin') {
-    const got = await processRun($, ['defaults', 'read', '-g', 'AppleInterfaceStyle'], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
+    const got = await exec($, ['defaults', 'read', '-g', 'AppleInterfaceStyle'], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
     return got ? { mode: modeOfMacAppearance(got.exitCode, got.stdout), source: 'macOS' } : null
   }
   if (S.hostOs === 'Linux') {
@@ -569,7 +569,7 @@ type LinuxScheme = { scheme: 'dark' | 'light' | 'no-preference'; source: 'deskto
 async function readLinuxScheme($: EngineInterface): Promise<LinuxScheme | null> {
   const tools = S.portalTool === null ? (['gdbus', 'busctl'] as const) : S.portalTool ? [S.portalTool] : []
   for (const tool of tools) {
-    const got = await processRun($, PORTAL_ARGS[tool], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
+    const got = await exec($, PORTAL_ARGS[tool], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
     const scheme = got && got.exitCode === 0 ? schemeOfPortal(got.stdout) : null
     if (scheme) {
       S.portalTool = tool
@@ -578,7 +578,7 @@ async function readLinuxScheme($: EngineInterface): Promise<LinuxScheme | null> 
   }
   if (S.portalTool === null) S.portalTool = ''
   if (S.portalTool) return null
-  const got = await processRun($, ['gsettings', 'get', 'org.gnome.desktop.interface', 'color-scheme'], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
+  const got = await exec($, ['gsettings', 'get', 'org.gnome.desktop.interface', 'color-scheme'], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
   const scheme = got && got.exitCode === 0 ? kittySchemeOfGnome(got.stdout) : null
   return scheme ? { scheme, source: 'GNOME' } : null
 }
@@ -608,7 +608,7 @@ export function showMode($: EngineInterface) {
 export function watchHost($: EngineInterface) {
   if (S.setting === 'auto' && !S.watch) {
     try {
-      S.watch = clockEvery($, HOST_POLL_MS, () => void pollHost($).catch(() => undefined))
+      S.watch = every($, HOST_POLL_MS, () => void pollHost($).catch(() => undefined))
     } catch {
       S.watch = null
     }

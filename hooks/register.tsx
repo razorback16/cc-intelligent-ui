@@ -52,7 +52,7 @@ import { roomColumns } from './lib/terminal'
 import { onScreenOf, pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
 import { drawPageField, pasteDir, pdfPagesOf, rowsAfter, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
 import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
-import { clockNow, fsWrite, sessionSurfaces, storeSet, uiCopy, uiLog, uiResolve, uiSelection, uiToast } from './lib/api'
+import { nowMs, write, surf, save, copy, uiSelection, toast } from './lib/api'
 import {
   currentPlan, decidePlan, decisionOf, drawAskLine, drawPlanResult, drawPlanUse, isPlanQuestion, planFileOf, planInputOf, planOf,
   planShownOf, scheduleClear, type PlanVerdict,
@@ -138,7 +138,7 @@ async function pictureEnv($: EngineInterface, e: { viewport?: RenderViewport }):
 function tellFullscreen($: EngineInterface) {
   if (S.fullscreenTold) return
   S.fullscreenTold = true
-  uiToast($, 'Intelligent UI works best in fullscreen mode: run /tui fullscreen', { timeoutMs: 12000 })
+  toast($, 'Intelligent UI works best in fullscreen mode: run /tui fullscreen', { timeoutMs: 12000 })
 }
 
 // The env to draw Markdown pictures with (an answer, a plan): as
@@ -224,7 +224,7 @@ async function planDrawing(
 // dialog asks, as with no mod.
 async function planEnv($: EngineInterface): Promise<Env | null> {
   if (!(await read($, isOn))) return null
-  const surfaces = await sessionSurfaces($).catch(() => [] as readonly string[])
+  const surfaces = await surf($).catch(() => [] as readonly string[])
   if (!surfaces.includes('terminal')) return null
   const ready = S.env ?? (await setUp($).catch(() => null))
   return ready?.typst && ready.canDraw ? ready : null
@@ -310,7 +310,7 @@ function hintGrab($: EngineInterface, text: string) {
   clip.raw = text
   clip.rawRow = undefined
   if (S.debug) traceDebug($, `select: native copy seen: ${decodeSelection(text).filter(seg => seg.kind === 'image').length} picture run(s) on the clipboard`)
-  uiToast($, 'Intelligent UI: picture cells copied; /iui grab puts their text on the clipboard')
+  toast($, 'Intelligent UI: picture cells copied; /iui grab puts their text on the clipboard')
 }
 
 // The clipboard changed: one read (clipboardNow). A clipboard with no
@@ -370,7 +370,7 @@ function hintOf(isOn: boolean): string {
 // The update check's state now, for /iui, /iui details and /iui updates.
 async function updateState($: EngineInterface): Promise<UpdateState> {
   await loadUpdates($)
-  const now = await clockNow($).catch(() => Date.now())
+  const now = await nowMs($).catch(() => Date.now())
   return { on: S.updates, off: S.updatesOff, own: S.ownVersion, checked: S.updateChecked, now }
 }
 
@@ -426,7 +426,7 @@ async function grab($: EngineInterface): Promise<string> {
   if (!read.resolved) return `Intelligent UI: found ${read.runs} picture run(s) but could not read them (see /iui dump).`
   clip.wrote = read.text
   clip.seen = read.text
-  const copied = await uiCopy($, { text: read.text })
+  const copied = await copy($, { text: read.text })
   return copied.isCopied
     ? `Intelligent UI: copied ${read.text.length} chars (${read.resolved} of ${read.runs} picture runs read${row ? `, row ${row}` : ''}).`
     : `Intelligent UI: the copy failed: ${copied.reason}.`
@@ -462,7 +462,7 @@ async function dump($: EngineInterface, on: boolean): Promise<string> {
   const cache = S.env?.cache ?? ''
   if (cache) {
     const full = { raw: clip.raw, codePoints: codePointsOf(clip.raw, 100000), ...(clip.last as object) }
-    await fsWrite($, `${cache}/copy-debug.json`, JSON.stringify(full, null, 1)).catch(() => undefined)
+    await write($, `${cache}/copy-debug.json`, JSON.stringify(full, null, 1)).catch(() => undefined)
   }
   return [
     `Intelligent UI: last clipboard with picture cells (${Array.from(clip.raw).length} code points; grab hint ${hint}):`,
@@ -575,8 +575,8 @@ async function copyTarget($: EngineInterface, target: Target, surface: RenderSur
   // The clipboard change of this text is not read again.
   clip.wrote = text
   clip.seen = text
-  const copied = await uiCopy($, { text, surface })
-  uiToast($, copied.isCopied ? `Intelligent UI: copied the ${name}` : `Intelligent UI: the copy failed: ${copied.reason}`)
+  const copied = await copy($, { text, surface })
+  toast($, copied.isCopied ? `Intelligent UI: copied the ${name}` : `Intelligent UI: the copy failed: ${copied.reason}`)
 }
 
 // The text of a selection's cells, page by page, as a copy of those cells
@@ -604,15 +604,15 @@ async function copySelection($: EngineInterface, d: Drawn & { job?: Job }, sel: 
   if (!(await isNewest($, turn))) return
   const read = performance.now() - t
   if (text === null) {
-    uiToast($, 'Intelligent UI: could not read the selected picture')
+    toast($, 'Intelligent UI: could not read the selected picture')
     return
   }
   if (!text) return
   // The clipboard change of this text is not read again.
   clip.wrote = text
   clip.seen = text
-  const copied = await uiCopy($, { text, surface })
-  uiToast($, copied.isCopied ? `Intelligent UI: copied ${text.length} chars of text` : `Intelligent UI: the copy failed: ${copied.reason}`)
+  const copied = await copy($, { text, surface })
+  toast($, copied.isCopied ? `Intelligent UI: copied ${text.length} chars of text` : `Intelligent UI: the copy failed: ${copied.reason}`)
   if (S.debug) void traceCopy($, text, performance.now() - t, read, probed)
 }
 
@@ -679,7 +679,7 @@ async function setTheme($: EngineInterface, name: string | undefined): Promise<s
     if (ready.typst && S.look) ready.metrics = await measureFonts($, ready.typst, ready.root, ready.cache, ready.termFont, S.look.dir)
     beginEpoch($)
   }
-  if (name) await storeSet($, 'theme-name', chosen.name)
+  if (name) await save($, 'theme-name', chosen.name)
   const head = name ? `Theme set to ${chosen.name}.\n\n` : ''
   return `${head}${themeListing(themes, problems, chosen.name, userThemesOf(ready.home), ready.home)}`
 }
@@ -713,7 +713,7 @@ export const register: Register = on => {
       return next(e)
     }
     if (S.debug) traceDebug($, 'select: native copy seen: a $.ui.copy with picture cells (read as their text)')
-    const selection = uiSelection($).catch(() => undefined)
+    const selection = $.ui.selection().catch(() => undefined)
     const turn = takeTurn($, selection.then(nativeKey))
     const selected = await selection
     clip.raw = e.text
@@ -746,7 +746,7 @@ export const register: Register = on => {
       releaseSelect($)
       // The rows drawn again with no Client.
       refresh($)
-      void Promise.resolve(uiLog($, `Intelligent UI: picture select is off (${e.phase}: ${e.reason})`, { to: 'debug' })).catch(() => undefined)
+      void Promise.resolve($.ui.log(`Intelligent UI: picture select is off (${e.phase}: ${e.reason})`, { to: 'debug' })).catch(() => undefined)
     }
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -789,7 +789,7 @@ export const register: Register = on => {
         stopClipboard($)
         releaseSelect($)
       }
-      await storeSet($, 'enabled', asked.kind === 'on')
+      await $.store.set('enabled', asked.kind === 'on')
       return { text: `Intelligent UI is ${asked.kind}.` }
     }
     if (asked.kind === 'size') {
@@ -798,7 +798,7 @@ export const register: Register = on => {
       S.size = asked.percent
       settingsSet.add('size')
       beginEpoch($)
-      await storeSet($, 'size', S.size)
+      await $.store.set('size', S.size)
       return { text: `Intelligent UI draws text at ${S.size}% of the terminal's text size (100% matches it).` }
     }
     if (asked.kind === 'width') {
@@ -807,7 +807,7 @@ export const register: Register = on => {
         S.width = asked.width
         settingsSet.add('width')
         beginEpoch($)
-        await storeSet($, 'width', S.width)
+        await $.store.set('width', S.width)
       }
       const most = typeof S.width === 'number' && S.width > IMAGE_MAX_COLUMNS ? ` (a picture is ${IMAGE_MAX_COLUMNS} columns at most)` : ''
       const head = asked.width === undefined ? 'The most columns a picture takes' : 'Intelligent UI pictures now take at most'
@@ -819,7 +819,7 @@ export const register: Register = on => {
         S.height = asked.height
         settingsSet.add('height')
         beginEpoch($)
-        await storeSet($, 'height', S.height)
+        await $.store.set('height', S.height)
       }
       const head = asked.height === undefined ? 'The most rows an image or a Typst drawing takes' : 'Intelligent UI images and Typst drawings now take at most'
       return { text: `${head}: ${heightText(S.height)}. This applies to images (sent or pasted) and to Typst drawings in answers. Use /iui height half (the default), /iui height full, or /iui height <${MIN_HEIGHT}-${MAX_HEIGHT}> (never more than full).` }
@@ -830,7 +830,7 @@ export const register: Register = on => {
         S.grid = asked.grid
         settingsSet.add('grid')
         beginEpoch($)
-        await storeSet($, 'grid', S.grid)
+        await $.store.set('grid', S.grid)
       }
       const head = asked.grid === undefined ? 'The row grid is' : 'The row grid is now'
       return { text: `${head} ${gridText(S.grid)}. With the grid on, a mouse selection over a picture covers the lines it copies. Use /iui grid on (the default), or /iui grid off.` }
@@ -842,7 +842,7 @@ export const register: Register = on => {
         settingsSet.add('select')
         if (!S.select) releaseSelect($)
         refresh($)
-        await storeSet($, 'select', S.select)
+        await $.store.set('select', S.select)
       }
       const head = asked.on === undefined ? 'Picture select is' : 'Picture select is now'
       return { text: `${head} ${selectText(S.select)}. When on, a mouse drag over a picture selects its text and copies it. Use /iui select on (the default), or /iui select off.` }
@@ -851,7 +851,7 @@ export const register: Register = on => {
       await loadUpdates($)
       if (asked.on !== undefined) {
         S.updates = asked.on
-        await storeSet($, 'updates', S.updates)
+        await $.store.set('updates', S.updates)
         // On: the check of this load, if it did not run (it waits 24 h after the last one).
         if (S.updates) void checkUpdates($)
       }
@@ -1018,7 +1018,7 @@ export const register: Register = on => {
     }
     answers.delete(e.requestId)
     if (drawing.kind === 'text') return next(e)
-    const { Box } = uiResolve($, e)
+    const { Box } = $.ui.resolve(e)
     return <Box />
   })
 

@@ -12,7 +12,7 @@ import { drawnAnswers, S } from './state'
 import { compareVersions } from './updates'
 import { joinSegments, pageTopsOf, textOfRun, type Drawn, type Item, type RunLine, type TextBlock } from './copy'
 import { endFold, foldNew, FRAME_MS, pokeFold, showSelection, startFold } from './blit'
-import { clockAfter, clockEvery, uiSelection } from './api'
+import { delay, every, uiSelection } from './api'
 import { targetAt, type PageTarget } from './targets'
 import type { ShownLink } from './draw'
 
@@ -57,7 +57,7 @@ export const clickLinks = new Map<string, readonly ShownLink[]>()
 let fold = foldNew()
 export function redrawSelection($: EngineInterface) {
   const next = pokeFold(fold, performance.now(), FRAME_MS)
-  if (next.kind === 'wait') clockAfter($, next.ms, () => void runSelection($))
+  if (next.kind === 'wait') delay($, next.ms, () => void runSelection($))
   else if (next.kind === 'run') void runSelection($)
 }
 
@@ -120,7 +120,7 @@ export function watchNative($: EngineInterface, clear: () => void) {
   if (native.timer) return
   native.last = UNREAD
   try {
-    native.timer = clockEvery($, NATIVE_POLL_MS, () => void pollNative($, clear).catch(() => undefined))
+    native.timer = every($, NATIVE_POLL_MS, () => void pollNative($, clear).catch(() => undefined))
   } catch {
     native.timer = null
     return

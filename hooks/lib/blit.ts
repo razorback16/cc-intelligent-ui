@@ -23,7 +23,7 @@ import type { DrawnPage } from './copy'
 import type { SelRow } from './select'
 import { perlFor } from './host'
 import { traceDebug } from './log'
-import { clockNow, processRun, uiBlit, uiLog } from './api'
+import { nowMs, exec, paint, log } from './api'
 
 export { bandOf, edgesOf, frameOf, framesOf, over, rgbOf, selectColor, type Frames, type Rgb } from './frames'
 
@@ -115,7 +115,7 @@ function logOnce($: EngineInterface, text: string) {
   traceDebug($, `select: ${text}`)
   if (blits.logged.has(text)) return
   blits.logged.add(text)
-  void Promise.resolve(uiLog($, `Intelligent UI: picture select: ${text}`, { to: 'debug' })).catch(() => undefined)
+  void Promise.resolve(log($, `Intelligent UI: picture select: ${text}`, { to: 'debug' })).catch(() => undefined)
 }
 
 // The newest frame file's name, and the old ones that can go.
@@ -149,14 +149,14 @@ async function showPage($: EngineInterface, id: string, i: number, page: DrawnPa
       blits.shown.set(k, sig)
       return false
     }
-    const now = await clockNow($).catch(() => Date.now())
+    const now = await nowMs($).catch(() => Date.now())
     const t1 = performance.now()
     const made = frameNow(got.frames, rows)
     const png = made.png
     isWhole = made.isWhole
     const t2 = performance.now()
     const { path, old } = nextFile(env.cache, now)
-    const ran = await processRun($, [perlFor(env.isMac), '-e', WRITE_PL, path, ...old], { stdin: toBase64(png) }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+    const ran = await exec($, [perlFor(env.isMac), '-e', WRITE_PL, path, ...old], { stdin: toBase64(png) }).catch(err => ({ exitCode: -1, stderr: String(err) }))
     const t3 = performance.now()
     if (ran.exitCode !== 0) {
       // No perl: no frame is tried again.
@@ -170,7 +170,7 @@ async function showPage($: EngineInterface, id: string, i: number, page: DrawnPa
     timing = `wait ${ms(got.waitMs)} frame ${ms(t2 - t1)}${isWhole ? '' : ' (part)'} write ${ms(t3 - t2)} ${png.length} bytes`
   }
   const t4 = performance.now()
-  const res = await uiBlit($, { requestId: site.requestId, key, source }).catch(err => ({ deny: String(err) }))
+  const res = await paint($, { requestId: site.requestId, key, source }).catch(err => ({ deny: String(err) }))
   const blit = `blit ${ms(performance.now() - t4)}`
   if (res.deny) {
     blits.shown.delete(k)

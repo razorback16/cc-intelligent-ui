@@ -15,7 +15,7 @@ import { S, writesLive } from './state'
 import { firstLine } from './markdown'
 import type { Drawing } from './answer'
 import { drawPages, type ShownLink } from './draw'
-import { clockAfter, commandRun, envGet, fsRead, processRun, submit, turnAbort, uiAsk, uiResolve } from './api'
+import { delay, runCmd, getenv, cat, exec, send, abort, ask, uiResolve } from './api'
 
 // The question's chip and its two wordings.
 export const PLAN_HEADER = 'Plan'
@@ -178,7 +178,7 @@ async function findCode($: EngineInterface): Promise<string> {
   if (S.planCode !== null) return S.planCode
   let found = ''
   for (const flag of ['-lc', '-c']) {
-    const got = await processRun($, ['sh', flag, 'command -v code'], { timeoutMs: 5000 }).catch(() => null)
+    const got = await exec($, ['sh', flag, 'command -v code'], { timeoutMs: 5000 }).catch(() => null)
     const path = got?.exitCode === 0 ? firstLine(got.stdout) : ''
     if (path.startsWith('/')) {
       found = path
@@ -194,9 +194,9 @@ async function findCode($: EngineInterface): Promise<string> {
 async function findGuiEditor($: EngineInterface): Promise<string[]> {
   if (S.planGui !== null) return S.planGui
   let found: string[] = []
-  if ((await envGet($, 'WAYLAND_DISPLAY')) || (await envGet($, 'DISPLAY'))) {
+  if ((await getenv($, 'WAYLAND_DISPLAY')) || (await getenv($, 'DISPLAY'))) {
     for (const flag of ['-lc', '-c']) {
-      const got = await processRun($, ['sh', flag, GUI_EDITOR_SH], { timeoutMs: 5000 }).catch(() => null)
+      const got = await exec($, ['sh', flag, GUI_EDITOR_SH], { timeoutMs: 5000 }).catch(() => null)
       found = got?.exitCode === 0 ? guiEditorOf(got.stdout) : []
       if (found.length) break
     }
@@ -229,7 +229,7 @@ export async function decidePlan(
     let answer: string
     S.planAsking = question
     try {
-      answer = await uiAsk($, question, { header: PLAN_HEADER, options: planOptions(canEdit) })
+      answer = await ask($, question, { header: PLAN_HEADER, options: planOptions(canEdit) })
     } catch {
       return { kind: 'verdict', verdict: { kind: 'deny', message: PLAN_REJECTED } }
     } finally {
@@ -238,8 +238,8 @@ export async function decidePlan(
     const choice = choiceOf(answer, canEdit)
     if (choice.kind === 'feedback') return { kind: 'feedback', message: feedbackOf(choice.text) }
     if (choice.kind !== 'edit') return { kind: 'verdict', verdict: verdictOf(choice, plan, plan !== o.callPlan)! }
-    await processRun($, argv!, { timeoutMs: EDIT_TIMEOUT_MS }).catch(() => null)
-    const text = await fsRead($, o.file).catch(() => null)
+    await exec($, argv!, { timeoutMs: EDIT_TIMEOUT_MS }).catch(() => null)
+    const text = await cat($, o.file).catch(() => null)
     if (typeof text === 'string' && text.trim() && text !== plan) {
       plan = text
       isEdited = text !== o.plan
@@ -256,9 +256,9 @@ export async function decidePlan(
 export async function currentPlan($: EngineInterface, file: string, fallback: string): Promise<string> {
   if (!file) return fallback
   for (let waited = 0; (writesLive.get(file) ?? 0) > 0 && waited < PLAN_WRITE_WAIT_MS; waited += PLAN_WRITE_POLL_MS) {
-    await new Promise<void>(resolve => clockAfter($, PLAN_WRITE_POLL_MS, resolve))
+    await new Promise<void>(resolve => delay($, PLAN_WRITE_POLL_MS, resolve))
   }
-  const text = await fsRead($, file).catch(() => null)
+  const text = await cat($, file).catch(() => null)
   return typeof text === 'string' && text.trim() ? text : fallback
 }
 
@@ -266,10 +266,10 @@ export async function currentPlan($: EngineInterface, file: string, fallback: st
 // /clear and sends the plan as the new context's first prompt. Detached, as
 // `$.command.run` rejects inside a hook the turn waits on.
 export function scheduleClear($: EngineInterface, plan: string, turnId: string) {
-  clockAfter($, CLEAR_DELAY_MS, async () => {
-    if (turnId) await turnAbort($, { turnId }).catch(() => undefined)
-    await commandRun($, { command: 'clear' }).catch(() => undefined)
-    await submit($, { text: `${PLAN_IMPLEMENT}\n\n${plan}`, asUser: true }).catch(() => undefined)
+  delay($, CLEAR_DELAY_MS, async () => {
+    if (turnId) await abort($, { turnId }).catch(() => undefined)
+    await runCmd($, { command: 'clear' }).catch(() => undefined)
+    await send($, { text: `${PLAN_IMPLEMENT}\n\n${plan}`, asUser: true }).catch(() => undefined)
   })
 }
 

@@ -1,15 +1,20 @@
-// The one call site of each `$` method the mod uses: the other modules call
-// these wrappers, so the `calls:` note of `claude plugin validate` names one
-// function per method and stays short. Each wrapper is a function
-// declaration that spells the call `$.noun.method(...)` (the validator
-// follows `$` into a declaration only), with the types of EngineInterface.
+// The one call site of each `$` method the mod uses outside the hook bodies
+// of register.tsx: the other modules call these wrappers. The `calls:` note
+// of `claude plugin validate` names each method with the wrappers that call
+// it (`via <name>`), and a method that a hook body calls itself with none;
+// the validator cuts that note at about 1,000 characters, and the catalogue
+// then can not read the footprint. So the names are short, and
+// tests/footprint-sh-test.sh keeps the note at 850 characters at most. Each
+// wrapper is a function declaration that spells the call `$.noun.method(...)`
+// (the validator follows `$` into a declaration only), with the types of
+// EngineInterface.
 import type {
   AskOptions, CommandSpec, EngineInterface, FsBytes, FsReadBytesOptions, FsReadOptions, FsStatOptions, HttpInit, ImageBlitArgs, InvalidatableEventName,
   OpEventOf, PaneCloseArgs, PaneOpenArgs, ProcessRunInit, ProcessSpawnRequest, ResolveInput, ToastOptions, UiCopyArgs, UiLogOptions,
 } from 'claude-code'
 
 // The environment variables the mod reads. `$.env.get` takes a literal name
-// (the validator lists them), so envGet has one call per name.
+// (the validator lists them), so getenv has one call per name.
 export type EnvName =
   | 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC' | 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES' | 'CLAUDE_CODE_SESSION_KIND' | 'CLAUDE_CODE_TMPDIR'
   | 'CMUX_SOCKET_PATH' | 'CMUX_SURFACE_ID' | 'CMUX_WORKSPACE_ID' | 'COLORFGBG' | 'DISABLE_AUTOUPDATER' | 'DISABLE_UPDATES' | 'DISPLAY'
@@ -18,31 +23,31 @@ export type EnvName =
   | 'KITTY_WINDOW_ID' | 'LC_TERMINAL' | 'RIO_CONFIG_HOME' | 'SHELL' | 'SSH_CONNECTION' | 'SSH_TTY' | 'STY'
   | 'TERM' | 'TERM_PROGRAM' | 'TMUX' | 'TYPST_FONT_PATHS' | 'WAYLAND_DISPLAY' | 'XDG_CONFIG_HOME' | 'XDG_CURRENT_DESKTOP' | 'ZDOTDIR'
 
-export function clockAfter($: EngineInterface, ms: number, fn: () => void) {
+export function delay($: EngineInterface, ms: number, fn: () => void) {
   return $.clock.after(ms, fn)
 }
 
-export function clockEvery($: EngineInterface, ms: number, fn: () => void) {
+export function every($: EngineInterface, ms: number, fn: () => void) {
   return $.clock.every(ms, fn)
 }
 
-export function clockNow($: EngineInterface) {
+export function nowMs($: EngineInterface) {
   return $.clock.now()
 }
 
-export function commandAdd($: EngineInterface, command: CommandSpec) {
+export function cmd($: EngineInterface, command: CommandSpec) {
   return $.command.register(command)
 }
 
-export function commandRun($: EngineInterface, input: Parameters<EngineInterface['command']['run']>[0]) {
+export function runCmd($: EngineInterface, input: Parameters<EngineInterface['command']['run']>[0]) {
   return $.command.run(input)
 }
 
-export function configs($: EngineInterface) {
+export function cfgs($: EngineInterface) {
   return $.config.list()
 }
 
-export function envGet($: EngineInterface, name: EnvName): Promise<string | undefined> {
+export function getenv($: EngineInterface, name: EnvName): Promise<string | undefined> {
   switch (name) {
     case 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': return $.env.get('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC')
     case 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES': return $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES')
@@ -81,31 +86,31 @@ export function envGet($: EngineInterface, name: EnvName): Promise<string | unde
   }
 }
 
-export function fsExists($: EngineInterface, path: string) {
+export function exists($: EngineInterface, path: string) {
   return $.fs.exists(path)
 }
 
-export function fsList($: EngineInterface, path?: string) {
+export function ls($: EngineInterface, path?: string) {
   return $.fs.list(path)
 }
 
 // The overloads of `$.fs.read` (FsReadCall): text, or bytes with `{ as: 'bytes' }`.
-export function fsRead($: EngineInterface, path: string): Promise<string>
-export function fsRead($: EngineInterface, path: string, options: FsReadBytesOptions): Promise<FsBytes>
-export function fsRead($: EngineInterface, path: string, options: FsReadOptions): Promise<string | FsBytes>
-export function fsRead($: EngineInterface, path: string, options?: FsReadOptions): Promise<string | FsBytes> {
+export function cat($: EngineInterface, path: string): Promise<string>
+export function cat($: EngineInterface, path: string, options: FsReadBytesOptions): Promise<FsBytes>
+export function cat($: EngineInterface, path: string, options: FsReadOptions): Promise<string | FsBytes>
+export function cat($: EngineInterface, path: string, options?: FsReadOptions): Promise<string | FsBytes> {
   return options ? $.fs.read(path, options) : $.fs.read(path)
 }
 
-export function fsStat($: EngineInterface, path: string, options?: FsStatOptions) {
+export function stat($: EngineInterface, path: string, options?: FsStatOptions) {
   return $.fs.stat(path, options)
 }
 
-export function fsWrite($: EngineInterface, path: string, text: string) {
+export function write($: EngineInterface, path: string, text: string) {
   return $.fs.write(path, text)
 }
 
-export function httpFetch($: EngineInterface, url: string, init?: HttpInit) {
+export function http($: EngineInterface, url: string, init?: HttpInit) {
   return $.http.fetch(url, init)
 }
 
@@ -113,7 +118,7 @@ export function pluginRoot($: EngineInterface) {
   return $.plugin.root
 }
 
-export function processRun($: EngineInterface, argv: readonly string[], init?: ProcessRunInit) {
+export function exec($: EngineInterface, argv: readonly string[], init?: ProcessRunInit) {
   return $.process.run(argv, init)
 }
 
@@ -121,67 +126,67 @@ export function spawn($: EngineInterface, request: ProcessSpawnRequest) {
   return $.process.spawn(request)
 }
 
-export function submit($: EngineInterface, input: Parameters<EngineInterface['prompt']['submit']>[0]) {
+export function send($: EngineInterface, input: Parameters<EngineInterface['prompt']['submit']>[0]) {
   return $.prompt.submit(input)
 }
 
-export function sessionCwd($: EngineInterface) {
+export function cwd($: EngineInterface) {
   return $.session.cwd()
 }
 
-export function sessionId($: EngineInterface) {
+export function sid($: EngineInterface) {
   return $.session.id()
 }
 
-export function sessionRoot($: EngineInterface) {
+export function root($: EngineInterface) {
   return $.session.root()
 }
 
-export function sessionVersion($: EngineInterface) {
+export function ver($: EngineInterface) {
   return $.session.version()
 }
 
-export function sessionSurfaces($: EngineInterface) {
+export function surf($: EngineInterface) {
   return $.session.surfaces()
 }
 
-export function storeGet($: EngineInterface, key: string) {
+export function load($: EngineInterface, key: string) {
   return $.store.get(key)
 }
 
-export function storeSet($: EngineInterface, key: string, value: unknown) {
+export function save($: EngineInterface, key: string, value: unknown) {
   return $.store.set(key, value)
 }
 
-export function turnAbort($: EngineInterface, input: OpEventOf['turn.abort']) {
+export function abort($: EngineInterface, input: OpEventOf['turn.abort']) {
   return $.turn.abort(input)
 }
 
-export function uiAsk($: EngineInterface, question: string, options?: readonly string[] | AskOptions) {
+export function ask($: EngineInterface, question: string, options?: readonly string[] | AskOptions) {
   return $.ui.ask(question, options)
 }
 
-export function uiBlit($: EngineInterface, args: ImageBlitArgs) {
+export function paint($: EngineInterface, args: ImageBlitArgs) {
   return $.ui.blit(args)
 }
 
-export function uiClose($: EngineInterface, pane: PaneCloseArgs) {
+export function hide($: EngineInterface, pane: PaneCloseArgs) {
   return $.ui.close(pane)
 }
 
-export function uiCopy($: EngineInterface, args: UiCopyArgs) {
+export function copy($: EngineInterface, args: UiCopyArgs) {
   return $.ui.copy(args)
 }
 
-export function invalidate($: EngineInterface, event: InvalidatableEventName) {
+export function redraw($: EngineInterface, event: InvalidatableEventName) {
   return $.ui.invalidate(event)
 }
 
-export function uiLog($: EngineInterface, text: string, options?: UiLogOptions) {
+export function log($: EngineInterface, text: string, options?: UiLogOptions) {
   return $.ui.log(text, options)
 }
 
-export function uiOpen($: EngineInterface, pane: PaneOpenArgs) {
+export function show($: EngineInterface, pane: PaneOpenArgs) {
   return $.ui.open(pane)
 }
 
@@ -193,6 +198,6 @@ export function uiSelection($: EngineInterface) {
   return $.ui.selection()
 }
 
-export function uiToast($: EngineInterface, text: string, options?: ToastOptions) {
+export function toast($: EngineInterface, text: string, options?: ToastOptions) {
   return $.ui.toast(text, options)
 }

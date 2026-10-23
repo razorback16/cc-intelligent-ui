@@ -19,7 +19,7 @@ import { offerSetup } from './setup'
 import { findClipWay } from './clipboard'
 import { findTypst, measureFonts } from './typst'
 import { checkUpdates } from './updates'
-import { configs, envGet, fsList, fsStat, pluginRoot, processRun, sessionCwd, sessionVersion, storeGet, uiToast } from './api'
+import { cfgs, getenv, ls, stat, pluginRoot, exec, cwd, ver, load, toast } from './api'
 
 // The `isOn` atom, which setUp turns off when the stored setting says so (a
 // copy of its own: see state.ts).
@@ -38,75 +38,75 @@ export const CACHE_SH = `d="\${TMPDIR:-/tmp}"; d="\${d%/}/cc-intelligent-ui-$(id
 export function setUp($: EngineInterface): Promise<Env> {
   S.envLoading ??= (async () => {
     await registerCommand($)
-    const made = await processRun($, ['sh', '-c', CACHE_SH]).catch(() => null)
+    const made = await exec($, ['sh', '-c', CACHE_SH]).catch(() => null)
     const [made1 = '', os = '', made3 = '', refused = ''] = (made?.stdout ?? '').split('\n')
     // No private cache folder: nothing is drawn (no shared folder instead).
     const cache = made1.trim()
     S.cacheProblem = cache ? '' : refused.trim() ? `the cache folder ${refused.trim()} is a link, not a folder, or not yours` : 'the cache folder could not be made'
     // The key folders on disk now: a key found here is read back at once.
-    const listed = cache ? await fsList($, cache).catch(() => []) : []
+    const listed = cache ? await ls($, cache).catch(() => []) : []
     S.onDisk = new Set(listed.filter(entry => entry.kind === 'dir' && entry.name !== 'pkg-cache').map(entry => entry.name))
-    const program = (await envGet($, 'TERM_PROGRAM')) ?? ''
-    const term = (await envGet($, 'TERM')) ?? ''
-    const ssh = !!(await envGet($, 'SSH_CONNECTION')) || !!(await envGet($, 'SSH_TTY'))
+    const program = (await getenv($, 'TERM_PROGRAM')) ?? ''
+    const term = (await getenv($, 'TERM')) ?? ''
+    const ssh = !!(await getenv($, 'SSH_CONNECTION')) || !!(await getenv($, 'SSH_TTY'))
     const terminalDraws = canDrawIn({
       program,
       term,
-      kitty: !!(await envGet($, 'KITTY_WINDOW_ID')),
-      tmux: !!(await envGet($, 'TMUX')) || !!(await envGet($, 'STY')) || /^tmux|^screen/i.test(term),
+      kitty: !!(await getenv($, 'KITTY_WINDOW_ID')),
+      tmux: !!(await getenv($, 'TMUX')) || !!(await getenv($, 'STY')) || /^tmux|^screen/i.test(term),
       ssh,
-      background: (await envGet($, 'CLAUDE_CODE_SESSION_KIND')) === 'bg',
-      engineForced: isSet(await envGet($, 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES')),
-      modForced: isSet(await envGet($, 'IUI_FORCE')),
+      background: (await getenv($, 'CLAUDE_CODE_SESSION_KIND')) === 'bg',
+      engineForced: isSet(await getenv($, 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES')),
+      modForced: isSet(await getenv($, 'IUI_FORCE')),
     })
     const canDraw = terminalDraws && !!cache
     const root = pluginRoot($)
-    const template = await fsStat($, `${root}/render/md.typ`).catch(() => null)
-    const rows = await configs($).catch(() => [])
+    const template = await stat($, `${root}/render/md.typ`).catch(() => null)
+    const rows = await cfgs($).catch(() => [])
     const raw = rows.find(row => row.key === 'theme')?.value
     S.settingRaw = typeof raw === 'string' ? raw : ''
     S.setting = settingOf(raw)
     S.hostOs = os.trim()
     S.termProgram = program
     S.termName = term
-    S.itermProfile = (await envGet($, 'ITERM_PROFILE')) || undefined
-    S.isKitty = /kitty/i.test(term) || !!(await envGet($, 'KITTY_WINDOW_ID')) || !!(await envGet($, 'KITTY_PID'))
+    S.itermProfile = (await getenv($, 'ITERM_PROFILE')) || undefined
+    S.isKitty = /kitty/i.test(term) || !!(await getenv($, 'KITTY_WINDOW_ID')) || !!(await getenv($, 'KITTY_PID'))
     S.isRemote = ssh
-    S.debug = isSet(await envGet($, 'IUI_DEBUG'))
+    S.debug = isSet(await getenv($, 'IUI_DEBUG'))
     S.isIterm = isItermIn({
       program,
       profile: S.itermProfile,
-      session: (await envGet($, 'ITERM_SESSION_ID')) || undefined,
-      lcTerminal: (await envGet($, 'LC_TERMINAL')) || undefined,
+      session: (await getenv($, 'ITERM_SESSION_ID')) || undefined,
+      lcTerminal: (await getenv($, 'LC_TERMINAL')) || undefined,
     })
     S.setupNeeded = S.isIterm && !terminalDraws && !ssh && S.hostOs === 'Darwin' &&
-      !(await envGet($, 'TMUX')) && !(await envGet($, 'STY')) && (await envGet($, 'CLAUDE_CODE_SESSION_KIND')) !== 'bg'
+      !(await getenv($, 'TMUX')) && !(await getenv($, 'STY')) && (await getenv($, 'CLAUDE_CODE_SESSION_KIND')) !== 'bg'
     if (S.setupNeeded) void offerSetup($).catch(() => undefined)
-    S.isCmux = !!(await envGet($, 'CMUX_SURFACE_ID')) || !!(await envGet($, 'CMUX_WORKSPACE_ID')) || !!(await envGet($, 'CMUX_SOCKET_PATH'))
-    S.colorFgBg = (await envGet($, 'COLORFGBG')) ?? ''
-    S.userFontPaths = (await envGet($, 'TYPST_FONT_PATHS')) ?? ''
+    S.isCmux = !!(await getenv($, 'CMUX_SURFACE_ID')) || !!(await getenv($, 'CMUX_WORKSPACE_ID')) || !!(await getenv($, 'CMUX_SOCKET_PATH'))
+    S.colorFgBg = (await getenv($, 'COLORFGBG')) ?? ''
+    S.userFontPaths = (await getenv($, 'TYPST_FONT_PATHS')) ?? ''
     if (S.setting === 'auto') S.host = (await readHostMode($).catch(() => null)) ?? S.host
     S.theme = resolveMode(S.setting, S.host)
     watchHost($)
     // The stored settings, but not one an /iui command set meanwhile (settingsSet).
-    const kept = Number(await storeGet($, 'size').catch(() => undefined))
+    const kept = Number(await load($, 'size').catch(() => undefined))
     if (!settingsSet.has('size')) S.size = kept >= MIN_SIZE && kept <= MAX_SIZE ? kept : DEFAULT_SIZE
-    const width = await storeGet($, 'width').catch(() => undefined)
+    const width = await load($, 'width').catch(() => undefined)
     if (!settingsSet.has('width')) {
       S.width = width === 'full' ? 'full' : Number.isInteger(width) && Number(width) >= MIN_WIDTH && Number(width) <= MAX_WIDTH ? Number(width) : DEFAULT_WIDTH
     }
-    const height = await storeGet($, 'height').catch(() => undefined)
+    const height = await load($, 'height').catch(() => undefined)
     if (!settingsSet.has('height')) {
       S.height = height === 'half' || height === 'full' ? height
         : Number.isInteger(height) && Number(height) >= MIN_HEIGHT && Number(height) <= MAX_HEIGHT ? Number(height) : DEFAULT_HEIGHT
     }
-    const grid = (await storeGet($, 'grid').catch(() => undefined)) !== false
+    const grid = (await load($, 'grid').catch(() => undefined)) !== false
     if (!settingsSet.has('grid')) S.grid = grid
-    const select = (await storeGet($, 'select').catch(() => undefined)) !== false
+    const select = (await load($, 'select').catch(() => undefined)) !== false
     if (!settingsSet.has('select')) S.select = select
     // An engine with no version call is older than picture select.
-    S.engine = await Promise.resolve().then(() => sessionVersion($)).then(v => v.base ?? v.version, () => '')
-    const enabled = await storeGet($, 'enabled').catch(() => undefined)
+    S.engine = await Promise.resolve().then(() => ver($)).then(v => v.base ?? v.version, () => '')
+    const enabled = await load($, 'enabled').catch(() => undefined)
     if (enabled === false && !settingsSet.has('enabled')) await update($, isOn, () => false).catch(() => undefined)
     const isMac = os.trim() === 'Darwin'
     // Linux, on this computer: the clipboard tools, for the copy.
@@ -116,23 +116,23 @@ export function setUp($: EngineInterface): Promise<Env> {
     const typst = await findTypst($)
     if (S.cacheProblem && terminalDraws) {
       try {
-        uiToast($, `Intelligent UI: no pictures, ${S.cacheProblem} (see /iui details)`, { timeoutMs: 8000 })
+        toast($, `Intelligent UI: no pictures, ${S.cacheProblem} (see /iui details)`, { timeoutMs: 8000 })
       } catch {}
     } else if (!typst) {
       try {
-        uiToast($, noTypstOf(isMac), { timeoutMs: 8000 })
+        toast($, noTypstOf(isMac), { timeoutMs: 8000 })
       } catch {}
     }
     const termFont = await termFontOf($, isMac).catch(() => '')
-    const home = (await envGet($, 'HOME')) ?? ''
+    const home = (await getenv($, 'HOME')) ?? ''
     const designs = made3.trim() || (home ? `${home}/.cache/cc-intelligent-ui/designs` : cache ? `${cache}/designs` : '')
-    const stored = await storeGet($, 'theme-name').catch(() => undefined)
+    const stored = await load($, 'theme-name').catch(() => undefined)
     const wanted = typeof stored === 'string' && stored ? stored : DEFAULT_THEME
     const applied = await applyTheme($, root, home, wanted).catch(() => null)
     if (!applied) S.look = { name: BASE_THEME, dir: `${root}/render/themes/${BASE_THEME}`, stamp: '0' }
     else if (applied.chosen.isFallback) {
       try {
-        uiToast($, `Intelligent UI: theme ${wanted} not found, using ${applied.chosen.name}`, { timeoutMs: 8000 })
+        toast($, `Intelligent UI: theme ${wanted} not found, using ${applied.chosen.name}`, { timeoutMs: 8000 })
       } catch {}
     }
     S.env = {
@@ -140,14 +140,14 @@ export function setUp($: EngineInterface): Promise<Env> {
       canDraw,
       inline: ssh && canDraw,
       cache,
-      cwd: await sessionCwd($).catch(() => '/'),
+      cwd: await cwd($).catch(() => '/'),
       root,
       isMac,
       stamp: String(template?.mtimeMs ?? 0),
       home,
       claudeTmp: claudeTmpOf({
-        tmpdir: (await envGet($, 'CLAUDE_CODE_TMPDIR')) || undefined,
-        uid: await processRun($, ['id', '-u']).then(r => (r.exitCode === 0 ? r.stdout : ''), () => ''),
+        tmpdir: (await getenv($, 'CLAUDE_CODE_TMPDIR')) || undefined,
+        uid: await exec($, ['id', '-u']).then(r => (r.exitCode === 0 ? r.stdout : ''), () => ''),
         isMac,
       }),
       termFont,

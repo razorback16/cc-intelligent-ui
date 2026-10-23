@@ -16,7 +16,7 @@ import type { EngineInterface } from 'claude-code'
 import { keep, type Design } from './state'
 import { hashOf } from './draw'
 import { touchLater } from './typst'
-import { fsExists, fsRead, fsWrite } from './api'
+import { exists, cat, write } from './api'
 
 export type { Design } from './state'
 
@@ -71,7 +71,7 @@ export function noteDesign(key: string, design: Design) {
 export async function loadDesign($: EngineInterface, dir: string, key: string): Promise<Design | null> {
   if (known.has(key)) return known.get(key) ?? null
   const path = designPath(dir, key)
-  const text = await fsRead($, path).catch(() => null)
+  const text = await cat($, path).catch(() => null)
   const design = typeof text === 'string' ? parseDesign(text) : null
   keep(known, key, design, DESIGNS_IN_MEMORY)
   if (design) touchLater($, path)
@@ -85,8 +85,8 @@ export async function recordDesign($: EngineInterface, dir: string, key: string,
   try {
     if (known.get(key) && !unsaved.has(key)) return
     const path = designPath(dir, key)
-    if (await fsExists($, path).catch(() => false)) {
-      const text = await fsRead($, path).catch(() => null)
+    if (await exists($, path).catch(() => false)) {
+      const text = await cat($, path).catch(() => null)
       const kept = typeof text === 'string' ? parseDesign(text) : null
       if (kept) {
         keep(known, key, kept, DESIGNS_IN_MEMORY)
@@ -94,7 +94,7 @@ export async function recordDesign($: EngineInterface, dir: string, key: string,
         return
       }
     }
-    await fsWrite($, path, designText(design))
+    await write($, path, designText(design))
     keep(known, key, design, DESIGNS_IN_MEMORY)
     unsaved.delete(key)
   } catch {}

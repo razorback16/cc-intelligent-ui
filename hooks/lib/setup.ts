@@ -4,7 +4,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { S } from './state'
 import { readText } from './host'
-import { envGet, fsExists, fsWrite, processRun, storeGet, storeSet, uiAsk, uiLog, uiToast } from './api'
+import { getenv, exists, write, exec, load, save, ask, log, toast } from './api'
 
 // Claude Code turns pictures on by itself in kitty and Ghostty only; iTerm2
 // needs CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 when Claude Code starts (a mod's
@@ -59,10 +59,10 @@ export function withSetup(text: string, kind: ShellRc['kind']): string {
 // The shell start file for this user, or null when the shell is not known.
 async function shellRc($: EngineInterface): Promise<ShellRc | null> {
   return shellRcOf({
-    shell: (await envGet($, 'SHELL')) ?? '',
-    home: (await envGet($, 'HOME')) ?? '',
-    zdotdir: (await envGet($, 'ZDOTDIR')) || undefined,
-    xdgConfig: (await envGet($, 'XDG_CONFIG_HOME')) || undefined,
+    shell: (await getenv($, 'SHELL')) ?? '',
+    home: (await getenv($, 'HOME')) ?? '',
+    zdotdir: (await getenv($, 'ZDOTDIR')) || undefined,
+    xdgConfig: (await getenv($, 'XDG_CONFIG_HOME')) || undefined,
     isMac: S.hostOs === 'Darwin',
   })
 }
@@ -70,7 +70,7 @@ async function shellRc($: EngineInterface): Promise<ShellRc | null> {
 // The start file's text: '' when it is confirmed missing, null when it
 // exists (or may exist) but cannot be read. A write over null would lose it.
 async function readRc($: EngineInterface, path: string): Promise<string | null> {
-  const there = await fsExists($, path).catch(() => true)
+  const there = await exists($, path).catch(() => true)
   if (!there) return ''
   return readText($, path)
 }
@@ -91,12 +91,12 @@ export async function runSetup($: EngineInterface, remove: boolean): Promise<str
   const restart = 'Close this tab, open a new iTerm2 tab, and start Claude Code there to see pictures.'
   if (remove) {
     if (!hasSetup(text)) return `${rc.path} has no Intelligent UI block.`
-    await fsWrite($, rc.path, withoutSetup(text))
+    await write($, rc.path, withoutSetup(text))
     return `Removed the Intelligent UI block from ${rc.path}. New iTerm2 tabs show answers as text.`
   }
   if (hasSetup(text)) return `${rc.path} already has the Intelligent UI block. ${restart}`
-  if (rc.kind === 'fish') await processRun($, ['mkdir', '-p', rc.path.replace(/\/[^/]*$/, '')]).catch(() => null)
-  await fsWrite($, rc.path, withSetup(text, rc.kind))
+  if (rc.kind === 'fish') await exec($, ['mkdir', '-p', rc.path.replace(/\/[^/]*$/, '')]).catch(() => null)
+  await write($, rc.path, withSetup(text, rc.kind))
   return `Added the Intelligent UI block to ${rc.path}. ${restart} Undo with /iui setup remove.`
 }
 
@@ -104,24 +104,24 @@ export async function runSetup($: EngineInterface, remove: boolean): Promise<str
 export async function offerSetup($: EngineInterface) {
   if (S.setupAsked) return
   S.setupAsked = true
-  if ((await storeGet($, 'setup').catch(() => undefined)) === 'never') return
+  if ((await load($, 'setup').catch(() => undefined)) === 'never') return
   const rc = await shellRc($)
   const text = rc ? await readRc($, rc.path) : ''
   if (text === null || (rc && hasSetup(text))) return
-  const home = (await envGet($, 'HOME')) ?? ''
+  const home = (await getenv($, 'HOME')) ?? ''
   const file = rc ? (home ? rc.path.replace(home, '~') : rc.path) : "your shell's start file"
-  const answer = await uiAsk($, 
+  const answer = await ask($, 
     `Intelligent UI draws answers as pictures, but in iTerm2 Claude Code needs CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 when it starts. Add one line to ${file} that sets it in iTerm2 only (not in tmux or screen)?`,
     { header: 'iui', options: ['Add the line', 'Not now', 'Never ask'] },
   )
-  if (answer === 'Never ask') await storeSet($, 'setup', 'never')
+  if (answer === 'Never ask') await save($, 'setup', 'never')
   if (answer !== 'Add the line') return
   const said = await runSetup($, false)
   // The toast box is small: a short line there, the whole text in the transcript.
   try {
-    uiLog($, said)
+    log($, said)
   } catch {}
   try {
-    uiToast($, said.startsWith('Added') ? 'Close this tab and open a new iTerm2 tab to see pictures.' : 'See the transcript for the setup.', { timeoutMs: 10000 })
+    toast($, said.startsWith('Added') ? 'Close this tab and open a new iTerm2 tab to see pictures.' : 'See the transcript for the setup.', { timeoutMs: 10000 })
   } catch {}
 }

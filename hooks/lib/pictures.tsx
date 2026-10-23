@@ -22,7 +22,7 @@ import { convertCall, logDebug, parseOd, pngSize } from './typst'
 import { pagesOf, type Drawing } from './answer'
 import { HEADERS_SH } from './host'
 import { frameFor, pictureColumns, shownFor, type Frame } from './frame'
-import { clockAfter, fsExists, fsList, fsRead, fsStat, fsWrite, processRun, sessionId, sessionRoot, uiClose, invalidate, uiOpen, uiResolve } from './api'
+import { delay, exists, ls, cat, stat, write, exec, sid, root, hide, redraw, show, uiResolve } from './api'
 
 export type Picture = { file: string; stamp: string; bytes: number; width: number; height: number }
 export type Shown = { source: ImageSource; columns: number; rows: number; alt: string }
@@ -52,7 +52,7 @@ const STATS_KEPT = 4096
 let statsDone: number | undefined
 const stats = new Map<string, Promise<FsStat | null>>()
 function statOf($: EngineInterface, file: string, at?: StatAt): Promise<FsStat | null> {
-  if (!at) return fsStat($, file).catch(() => null)
+  if (!at) return stat($, file).catch(() => null)
   if (statsDone !== at.done || stats.size >= STATS_KEPT) {
     stats.clear()
     statsDone = at.done
@@ -60,7 +60,7 @@ function statOf($: EngineInterface, file: string, at?: StatAt): Promise<FsStat |
   const key = `${at.row}\n${file}`
   let got = stats.get(key)
   if (!got) {
-    got = fsStat($, file).catch(() => null)
+    got = stat($, file).catch(() => null)
     stats.set(key, got)
   }
   return got
@@ -74,7 +74,7 @@ export async function pictureOf($: EngineInterface, file: string, at?: StatAt): 
   const stamp = `${st.mtimeMs}:${st.size}`
   let kept = pictures.get(file)
   if (kept?.stamp !== stamp) {
-    const head = await processRun($, ['sh', '-c', HEADERS_SH, 'sh', file]).catch(() => null)
+    const head = await exec($, ['sh', '-c', HEADERS_SH, 'sh', file]).catch(() => null)
     if (!head || head.exitCode !== 0) return null
     kept = { stamp, size: pngSize(parseOd(head.stdout)[0] ?? []) }
     pictures.delete(file)
@@ -93,7 +93,7 @@ export async function pictureBytes($: EngineInterface, p: Picture): Promise<stri
   if (!fitsInline(p) || p.bytes > INLINE_MAX_BYTES) return null
   const key = `${p.file}@${p.stamp}`
   if (inlined.has(key)) return inlined.get(key) ?? null
-  const got = await fsRead($, p.file, { as: 'bytes' }).catch(() => null)
+  const got = await cat($, p.file, { as: 'bytes' }).catch(() => null)
   if (!got) return null
   const base64 = fitsInline(p, got.base64) ? got.base64 : null
   inlined.set(key, base64)
@@ -165,7 +165,7 @@ export async function convertedOf($: EngineInterface, ready: Env, file: string, 
     // jobDone one tick later: a run that ends while this row still draws
     // must not be lost. A run that is waited for (the first PNG, no epoch
     // open) draws in this render.
-    if (before || epochOpen()) void run.then(() => void clockAfter($, 0, () => jobDone($)), () => undefined)
+    if (before || epochOpen()) void run.then(() => void delay($, 0, () => jobDone($)), () => undefined)
   }
   return before ?? run
 }
@@ -210,20 +210,20 @@ async function convertOnce($: EngineInterface, ready: Env, file: string, stamp: 
   // The Typst error of a run that failed (null: made).
   let error: string | null = null
   // Made before (an earlier load): the same file, stamp and box.
-  const made = await fsStat($, out).catch(() => null)
+  const made = await stat($, out).catch(() => null)
   let png: string | null = out
   if (made?.kind !== 'file' || !made.size) {
     const dir = out.replace(/\/[^/]*$/, '')
     // The write makes the key folder; Typst does not (a failed write fails
     // the run below).
-    await fsWrite($, `${dir}/source.txt`, `${file}\n`).catch(() => undefined)
+    await write($, `${dir}/source.txt`, `${file}\n`).catch(() => undefined)
     // Typst writes a part file, moved to image.png only once it is whole, so
     // a run that is killed or fails leaves no image.png for a later load.
     const part = `${dir}/image.part.png`
     const { argv, env } = convertCall({ typst: ready.typst!, root: ready.root, cache: ready.cache, file, box, out: part, page: pdf?.page })
     const failed = (err: unknown) => ({ exitCode: 1, stdout: '', stderr: `did not run: ${String(err)}` })
-    const ran = await processRun($, argv, { timeoutMs: COMPILE_TIMEOUT_MS, env }).catch(failed)
-    const moved = ran.exitCode === 0 ? await processRun($, ['mv', '-f', part, out]).catch(failed) : null
+    const ran = await exec($, argv, { timeoutMs: COMPILE_TIMEOUT_MS, env }).catch(failed)
+    const moved = ran.exitCode === 0 ? await exec($, ['mv', '-f', part, out]).catch(failed) : null
     if (ran.exitCode !== 0) {
       // A PDF's page that is not there is no failure: it tells the last page.
       if (!pdf || !isNoPageError(ran.stderr)) await logDebug($, ready.cache, `convert ${file} failed:\n${ran.stderr}`)
@@ -249,7 +249,7 @@ export async function sentTextOf($: EngineInterface, file: string, at?: StatAt):
   const stamp = `${st.mtimeMs}:${st.size}`
   const kept = sentTexts.get(file)
   if (kept?.stamp === stamp) return kept.text
-  const got = st.size <= SENT_TEXT_MAX_BYTES ? await fsRead($, file).catch(() => null) : null
+  const got = st.size <= SENT_TEXT_MAX_BYTES ? await cat($, file).catch(() => null) : null
   const text = got?.trim() ? got : null
   keep(sentTexts, file, { stamp, text }, PICTURES_KEPT)
   return text
@@ -374,7 +374,7 @@ async function pdfOf(
 // string: Typst's error for another failure; null when it is not known (no
 // Typst, a file that is gone).
 async function pageMade($: EngineInterface, ready: Env, file: string, row: string, page: number, box: PixelBox): Promise<boolean | string | null> {
-  const st = await fsStat($, file).catch(() => null)
+  const st = await stat($, file).catch(() => null)
   if (!ready.typst || !st || st.kind !== 'file') return null
   const stamp = `${st.mtimeMs}:${st.size}`
   const known = factsOf(file, stamp)
@@ -406,9 +406,9 @@ const PAGE_PANE = 'iui-page'
 // A press on the page number: the page field, with the page in it.
 async function askPage($: EngineInterface, line: PageLine) {
   pageAsk.now = { row: line.row, file: line.file, box: line.box, value: String(line.page), note: '' }
-  await uiOpen($, { id: PAGE_PANE, title: 'Page', focus: true, closeOnEscape: true, rows: 2, columns: 24 }).catch(() => undefined)
+  await show($, { id: PAGE_PANE, title: 'Page', focus: true, closeOnEscape: true, rows: 2, columns: 24 }).catch(() => undefined)
   // An open field (another row's) draws the new page.
-  invalidate($, 'ui.render')
+  redraw($, 'ui.render')
 }
 
 // Enter in the page field: a page that exists shows in its row and the
@@ -417,7 +417,7 @@ async function askPage($: EngineInterface, line: PageLine) {
 // later Enter makes an earlier one's result go unused.
 async function submitPage($: EngineInterface, text: string) {
   const ask = pageAsk.now
-  if (!ask) return void uiClose($, { id: PAGE_PANE }).catch(() => undefined)
+  if (!ask) return void hide($, { id: PAGE_PANE }).catch(() => undefined)
   const mine = { ...ask, value: text }
   pageAsk.now = mine
   const page = parsePage(text)
@@ -426,12 +426,12 @@ async function submitPage($: EngineInterface, text: string) {
   if (!page || made !== true) {
     const note = !page ? 'Type a page number' : made === false ? `No page ${page}` : `Page ${page}: ${made ?? 'Typst could not make it'}`
     pageAsk.now = { ...mine, note }
-    invalidate($, 'ui.render')
+    redraw($, 'ui.render')
     return
   }
   keep(pdfPages, ask.row, page, PICTURES_KEPT)
   pageAsk.now = null
-  await uiClose($, { id: PAGE_PANE }).catch(() => undefined)
+  await hide($, { id: PAGE_PANE }).catch(() => undefined)
   refresh($)
 }
 
@@ -548,20 +548,20 @@ export function underRow($: EngineInterface, e: RowInput, row: RenderElement, un
 // cwd's folder name is cut). Kept once found; '' while there is none.
 export async function pasteDir($: EngineInterface, ready: Env): Promise<string> {
   if (!ready.claudeTmp) return ''
-  const id = await sessionId($)
+  const id = await sid($)
   const kept = pasteDirs.get(id)
   if (kept) return kept
   const found = async (dirs: Iterable<string>) => {
     for (const dir of dirs) {
-      if (!(await fsExists($, dir).catch(() => false))) continue
+      if (!(await exists($, dir).catch(() => false))) continue
       pasteDirs.set(id, dir)
       return dir
     }
     return ''
   }
-  const root = await sessionRoot($).catch(() => ready.cwd)
-  const named = await found(new Set([ready.cwd, root].map(dir => pasteDirOf(ready.claudeTmp, dir, id))))
+  const top = await root($).catch(() => ready.cwd)
+  const named = await found(new Set([ready.cwd, top].map(dir => pasteDirOf(ready.claudeTmp, dir, id))))
   if (named) return named
-  const projects = (await fsList($, ready.claudeTmp).catch(() => [])).filter(f => f.kind === 'dir')
+  const projects = (await ls($, ready.claudeTmp).catch(() => [])).filter(f => f.kind === 'dir')
   return found(projects.map(f => `${ready.claudeTmp}/${f.name}/${id}/images`))
 }

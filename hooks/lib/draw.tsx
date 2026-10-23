@@ -13,7 +13,7 @@ import { linksOf, type LinkItem } from './links'
 import { fitBox, fitsInline, roomColumns } from './terminal'
 import { clickLinks, selectOn } from './select'
 import { noteSite } from './blit'
-import { fsExists, fsRead, uiCopy, uiResolve, uiToast } from './api'
+import { exists, cat, copy, uiResolve, toast } from './api'
 
 // FNV-1a over the parts, twice with different offsets: 16 hex digits.
 export function hashOf(parts: readonly (string | number)[]): string {
@@ -162,7 +162,7 @@ export async function inlineOf($: EngineInterface, result: Result): Promise<stri
   for (const page of result.pages) {
     if (!fitsInline(page)) return null
     if (!inlined.has(page.file)) {
-      const got = await fsRead($, page.file, { as: 'bytes' }).catch(() => null)
+      const got = await cat($, page.file, { as: 'bytes' }).catch(() => null)
       const base64 = got && fitsInline(page, got.base64) ? got.base64 : null
       if (got) inlined.set(page.file, base64)
       for (const old of inlined.keys()) {
@@ -297,7 +297,7 @@ export async function resolveLinks($: EngineInterface, items: readonly LinkItem[
     const path = home && item.path.startsWith('~/') ? `${home.replace(/\/+$/, '')}${item.path.slice(1)}` : imagePathOf(item.path, base)
     let isFile = linkFiles.get(path)
     if (isFile === undefined) {
-      isFile = await fsExists($, path).catch(() => false)
+      isFile = await exists($, path).catch(() => false)
       keep(linkFiles, path, isFile, LINK_FILES_KEPT)
     }
     if (isFile) shown.push({ kind: 'file', label: item.label, path, href: fileHref(path) })
@@ -317,8 +317,8 @@ export async function linksFor($: EngineInterface, text: string, base: string): 
 
 // Copies a command at a press of its row, with a toast.
 async function copyCommand($: EngineInterface, text: string, surface: RenderSurface) {
-  const copied = await uiCopy($, { text, surface }).catch(() => null)
-  uiToast($, copied?.isCopied ? 'Copied' : `Could not copy${copied ? `: ${copied.reason}` : ''}`)
+  const copied = await copy($, { text, surface }).catch(() => null)
+  toast($, copied?.isCopied ? 'Copied' : `Could not copy${copied ? `: ${copied.reason}` : ''}`)
 }
 
 // One row per link, all dim and cut at the row's end (the copy counts them

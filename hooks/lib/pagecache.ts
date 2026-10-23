@@ -23,7 +23,7 @@ import { fromBase64 } from './png'
 import { knownWords, wordsOf } from './probe'
 import { keep, type Job } from './state'
 import { traceDebug } from './log'
-import { clockAfter, fsRead, uiLog } from './api'
+import { delay, cat, log } from './api'
 
 // A slice's budget, and a page a down waits for.
 export const SLICE_MS = 4
@@ -263,7 +263,7 @@ export async function needFrames($: EngineInterface, page: DrawnPage, color: str
 function later($: EngineInterface) {
   const epoch = pages.epoch
   try {
-    clockAfter($, 0, () => void slice($, epoch).catch(() => {
+    delay($, 0, () => void slice($, epoch).catch(() => {
       if (epoch === pages.epoch) pages.isPumping = false
     }))
   } catch {
@@ -316,7 +316,7 @@ async function slice($: EngineInterface, epoch: number) {
       b = pages.build = { want, steps: null, png: null, slices: [], started, readMs: 0, readyMs: 0, stepMs: 0, isCancelled: false, isReady: false }
       try {
         // Kept even when stopped meanwhile: a down can take the build up again.
-        const { base64 } = await fsRead($, want.page.file, { as: 'bytes' })
+        const { base64 } = await cat($, want.page.file, { as: 'bytes' })
         b.png = fromBase64(base64)
       } catch (err) {
         if (epoch === pages.epoch) fail($, b, err)
@@ -375,7 +375,7 @@ function fail($: EngineInterface, b: Build, err: unknown) {
   ready($, b, null)
   const why = `no highlight for ${b.want.page.file}: ${err instanceof Error ? err.message : String(err)}`
   traceDebug($, `select: ${why}`)
-  void Promise.resolve(uiLog($, `Intelligent UI: picture select: ${why}`, { to: 'debug' })).catch(() => undefined)
+  void Promise.resolve(log($, `Intelligent UI: picture select: ${why}`, { to: 'debug' })).catch(() => undefined)
 }
 
 // A build done (its tinted rows too): the cache within its budget again, and its trace.

@@ -7,7 +7,7 @@ import {
   type Height, type Width,
 } from './settings'
 import { isThemeName, type ThemeInfo } from './themes'
-import { commandAdd } from './api'
+import { cmd } from './api'
 
 // `/iui` arguments: on, off, size <80-200>, width [40-400|full],
 // height [6-200|half|full], grid [on|off], select [on|off], updates
@@ -173,7 +173,7 @@ export function commandSuggestions(
 // /iui; registered at session start and again in setUp, so it is
 // there after a hot reload too.
 export async function registerCommand($: EngineInterface) {
-  await commandAdd($, {
+  await cmd($, {
     name: 'iui',
     description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image or a Typst drawing takes), grid [on|off] (each line of text on whole terminal rows), select [on|off] (select and copy picture text with the mouse), updates [on|off] (look for a new version once a day), theme [name] (list or switch themes), grab (copy the text of the selected pictures, or of the picture cells on the clipboard), dump (copy diagnostics)",
     argumentHint: '[on|off|size <percent>|width [columns|full]|height [rows|half|full]|grid [on|off]|select [on|off]|updates [on|off]|theme [name]|grab|dump]',

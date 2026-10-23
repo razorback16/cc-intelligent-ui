@@ -16,7 +16,7 @@ import { columnsFor, isGhosttyHere, sizeOf } from './terminal'
 import { CELL_SH, perlFor, termFontOf, WATCH_PL } from './host'
 import { clipWatchArgs } from './clipboard'
 import { measureFonts } from './typst'
-import { clockAfter, processRun, spawn } from './api'
+import { delay, exec, spawn } from './api'
 
 export type { Cell, Frame } from './state'
 
@@ -97,7 +97,7 @@ const viewNow = (): View | null => (S.viewColumns === null ? null : { columns: S
 // One read of the tty size as a Frame; null when it fails (no tty, no
 // pixels).
 export async function readFrame($: EngineInterface): Promise<Frame | null> {
-  const tty = await processRun($, ['sh', '-c', CELL_SH], { timeoutMs: 5000 }).catch(() => null)
+  const tty = await exec($, ['sh', '-c', CELL_SH], { timeoutMs: 5000 }).catch(() => null)
   return tty?.exitCode === 0 ? frameOfLine(tty.stdout) : null
 }
 
@@ -140,7 +140,7 @@ let poke: (() => void) | null = null
 function burst($: EngineInterface) {
   poke ??= quietTimer({
     ms: RESIZE_QUIET_MS,
-    after: (ms, fn) => clockAfter($, ms, fn),
+    after: (ms, fn) => delay($, ms, fn),
     onStart: holdJobs,
     onQuiet: stale => void settle($, stale),
   })
@@ -243,7 +243,7 @@ export function watchFrame($: EngineInterface, clip?: ((count: number | null, fi
   let stopped = false
   let counted = false
   const kill = () => {
-    if (stopped && pid && !me.ended) void Promise.resolve(processRun($, ['kill', pid], { timeoutMs: 5000 })).catch(() => undefined)
+    if (stopped && pid && !me.ended) void Promise.resolve(exec($, ['kill', pid], { timeoutMs: 5000 })).catch(() => undefined)
   }
   const stop = () => {
     if (stopped) return
@@ -272,7 +272,7 @@ export function watchFrame($: EngineInterface, clip?: ((count: number | null, fi
       // WATCH_RESTART_MS, while it is still the child now.
       if (stopped || me.final || !me.clip) return
       try {
-        clockAfter($, WATCH_RESTART_MS, () => {
+        delay($, WATCH_RESTART_MS, () => {
           if (watcher === me) watchFrame($)
         })
       } catch {}
