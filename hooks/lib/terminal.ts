@@ -88,6 +88,11 @@ export function herdrHostOf(env: { cmux?: boolean; ghosttyResources?: string; gh
 // readers use (host.ts outerEnv): under herdr, the client's.
 export const OUTER_NAMES = ['COLORFGBG', 'GHOSTTY_BIN_DIR', 'GHOSTTY_RESOURCES_DIR', 'ITERM_PROFILE', 'KITTY_CONFIG_DIRECTORY', 'RIO_CONFIG_HOME'] as const satisfies readonly EnvName[]
 export type OuterName = (typeof OUTER_NAMES)[number]
+// The variables kept of a herdr client: OUTER_NAMES and those outerKindOf reads.
+export const CLIENT_NAMES = [
+  ...OUTER_NAMES, 'CMUX_SOCKET_PATH', 'CMUX_SURFACE_ID', 'CMUX_WORKSPACE_ID', 'ITERM_SESSION_ID', 'KITTY_INSTALLATION_DIR', 'KITTY_PID', 'KITTY_WINDOW_ID', 'LC_TERMINAL',
+  'TERM', 'TERM_PROGRAM',
+] as const
 
 // A herdr client (HERDR_CLIENT_SH): its pid, its tty and the tty's access
 // time (the last key typed there), its command, the nearest ancestor with no
@@ -125,7 +130,8 @@ export function outerKindOf(env: Readonly<Record<string, string>>, app: string):
 export function envOfText(text: string, cmd: string): Record<string, string> {
   const env: Record<string, string> = {}
   let words: string[]
-  if (text.includes('\0')) words = text.split('\0')
+  // A NUL as a regular expression: no control character in a string.
+  if (/\x00/.test(text)) words = text.split(/\x00/)
   else {
     const line = text.replace(/\n+$/, '')
     const bare = !!cmd && (line === cmd || line.startsWith(`${cmd} `))
@@ -152,8 +158,10 @@ export function herdrClientOf(stdout: string): HerdrClient | null {
   if (!Number.isInteger(pid) || pid <= 0) return null
   const cmd = field('cmd')
   const app = field('app')
-  const env = envOfText(stdout.slice(at + 5), cmd)
-  const kind = outerKindOf(env, app)
+  const all = envOfText(stdout.slice(at + 5), cmd)
+  const kind = outerKindOf(all, app)
+  // Only the variables the mod reads are kept (not a token of the client's shell).
+  const env = Object.fromEntries(Object.entries(all).filter(([name]) => (CLIENT_NAMES as readonly string[]).includes(name)))
   const bin = /^(.*)\/ghostty(?= |$)/.exec(app)?.[1]
   if (kind === 'ghostty' && !env.GHOSTTY_BIN_DIR && bin) env.GHOSTTY_BIN_DIR = bin
   return { pid, atime: Number(field('atime')) || 0, tty: field('tty'), cmd, app, env, kind }

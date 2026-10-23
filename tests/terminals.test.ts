@@ -275,7 +275,8 @@ test('a herdr client on macOS (ps eww): its command is not a variable, its varia
   expect(kitty).toMatchObject({ pid: 54346, atime: 1792712692, tty: 'ttys021', cmd: '/Users/u/.local/bin/herdr', kind: 'kitty' })
   expect(kitty.env.TERM).toBe('xterm-kitty')
   expect(kitty.env.KITTY_INSTALLATION_DIR).toBe('/Applications/kitty.app/Contents/Resources/kitty')
-  expect(kitty.env.USER).toBe('u')
+  // A variable the mod does not read is not kept.
+  expect(kitty.env.USER).toBeUndefined()
   expect(Object.keys(kitty.env).some(k => k.includes('herdr'))).toBe(false)
   const ghostty = herdrClientOf(GHOSTTY_MAC)!
   expect(ghostty).toMatchObject({ pid: 50390, kind: 'ghostty', cmd: 'herdr' })
@@ -299,9 +300,20 @@ test('ps eww text: a value with spaces stays whole; the arguments (--session x) 
 test('a herdr client on Linux (/proc/<pid>/environ): NUL-separated variables; a value can hold = and newlines', () => {
   const out = 'pid 4242\natime 1792700000\ntty pts/3\ncmd herdr session attach work\napp /usr/bin/kitty\nenv\n' +
     'TERM=xterm-kitty\0KITTY_CONFIG_DIRECTORY=/home/u/kc\0A=b=c\0B=one\ntwo\0'
+  expect(envOfText(out.slice(out.indexOf('\nenv\n') + 5), '')).toEqual({ TERM: 'xterm-kitty', KITTY_CONFIG_DIRECTORY: '/home/u/kc', A: 'b=c', B: 'one\ntwo' })
   const c = herdrClientOf(out)!
   expect(c).toMatchObject({ pid: 4242, tty: 'pts/3', kind: 'kitty', app: '/usr/bin/kitty' })
-  expect(c.env).toEqual({ TERM: 'xterm-kitty', KITTY_CONFIG_DIRECTORY: '/home/u/kc', A: 'b=c', B: 'one\ntwo' })
+  expect(c.env).toEqual({ TERM: 'xterm-kitty', KITTY_CONFIG_DIRECTORY: '/home/u/kc' })
+})
+
+test("a herdr client keeps only the variables the mod reads: never a token of the client's shell", () => {
+  const secret = 'GITHUB_TOKEN=ghp_secret AWS_SECRET_ACCESS_KEY=abc ANTHROPIC_API_KEY=sk-x'
+  const mac = herdrClientOf(['pid 7', 'atime 5', 'tty ttys003', 'cmd herdr', 'app /Applications/Ghostty.app/Contents/MacOS/ghostty', 'env',
+    `herdr TERM=xterm-ghostty COLORFGBG=15;0 ${secret}`].join('\n'))!
+  expect(mac.env).toEqual({ TERM: 'xterm-ghostty', COLORFGBG: '15;0', GHOSTTY_BIN_DIR: '/Applications/Ghostty.app/Contents/MacOS' })
+  const linux = herdrClientOf(`pid 8\natime 5\ntty pts/1\ncmd herdr\napp /usr/bin/kitty\nenv\nTERM=xterm-kitty\0${secret.split(' ').join('\0')}\0`)!
+  expect(linux.env).toEqual({ TERM: 'xterm-kitty' })
+  for (const c of [mac, linux]) expect(JSON.stringify(c)).not.toMatch(/secret|ghp_|sk-x|abc/)
 })
 
 test('no herdr client: no output, no pid or no env line is null; no variables read gives the app', () => {
