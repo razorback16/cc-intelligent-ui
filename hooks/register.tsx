@@ -18,7 +18,7 @@
 // page a copy reads) and updates (the daily check for a new version). This
 // file joins them to the hooks, and gives the tests the names they import.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderElement, RenderSurface, RenderViewport } from 'claude-code'
+import type { EngineInterface, Register, RenderElement, RenderSurface, RenderViewport, UiCopyArgs } from 'claude-code'
 
 import {
   DEFAULT_THEME, gridText, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_WIDTH, MIN_HEIGHT, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
@@ -330,7 +330,7 @@ async function readClipboard($: EngineInterface) {
       const text = await clipboardRead($)
       if (text === undefined || text === clip.seen) continue
       clip.seen = text
-      if (text === null || !copiedTexts.includes(text)) copies++
+      if (text === null || !copiedTexts.includes(text)) copies = ++asked
       if (text === null || text === clip.wrote || !hasPlaceholders(text)) continue
       hintGrab($, text)
     } while (clip.again)
@@ -374,19 +374,37 @@ async function updateState($: EngineInterface): Promise<UpdateState> {
   return { on: S.updates, off: S.updatesOff, own: S.ownVersion, checked: S.updateChecked, now }
 }
 
-// The newest copy (a grab, a click, an up, any $.ui.copy, or a copy from
-// outside that the watcher sees): an older one that still reads its text
-// when a newer one starts copies nothing. `copiedTexts`: the texts of the
+// Each copy (a grab, a click, an up, any $.ui.copy, or a copy from outside
+// that the watcher sees) gets a number when it begins (`asked`), and claims
+// the clipboard once it has a text (`copies`: the newest claim). An older
+// one that still reads its text when a newer one claimed copies nothing; a
+// click or an up with nothing to copy claims nothing. `copiedTexts`: the texts of the
 // last 4 $.ui.copy calls (their changes, even read late, are no copy from outside).
+let asked = 0
 let copies = 0
 const copiedTexts: string[] = []
 function noteCopied(text: string) {
+  if (copiedTexts.at(-1) === text) return
   copiedTexts.push(text)
   if (copiedTexts.length > 4) copiedTexts.shift()
 }
 
-// A copy's turn: its number and the native selection when it began.
-type Turn = { n: number; native: Promise<string> }
+// The mod's own write, noted here: a $.ui.copy made after an await does not
+// pass the mod's own ui.copy hook. While it runs (`writing`), the hook passes it with no new claim.
+const writing: string[] = []
+async function copyOwn($: EngineInterface, args: UiCopyArgs) {
+  noteCopied(args.text)
+  writing.push(args.text)
+  try {
+    return await copy($, args)
+  } finally {
+    writing.splice(writing.indexOf(args.text), 1)
+  }
+}
+
+// A copy's turn: its number, the native selection when it began, and its
+// end of not knowing yet whether it copies anything (`done`).
+type Turn = { n: number; native: Promise<string>; done: () => void }
 const nativeKey = (s: { text: string; requestId?: string } | undefined) => (s ? `${s.requestId ?? ''}|${s.text}` : '')
 function nativeNow($: EngineInterface): Promise<string> {
   try {
@@ -396,7 +414,30 @@ function nativeNow($: EngineInterface): Promise<string> {
     return Promise.resolve(nativeKey(undefined))
   }
 }
-const takeTurn = ($: EngineInterface, native?: Promise<string>): Turn => ({ n: ++copies, native: native ?? nativeNow($) })
+// The turns that do not know yet whether they copy anything.
+const undecided = new Map<number, Promise<void>>()
+function takeTurn($: EngineInterface, native?: Promise<string>): Turn {
+  const n = ++asked
+  let end = () => {}
+  undecided.set(n, new Promise<void>(r => (end = r)))
+  return { n, native: native ?? nativeNow($), done: () => (undecided.delete(n), end()) }
+}
+
+// A copy that has its text claims the clipboard: false when a newer one
+// claimed. A newer one that does not know yet whether it copies is waited for.
+async function claim(turn: Turn): Promise<boolean> {
+  for (const [n, decided] of undecided) if (n > turn.n) await decided
+  if (copies > turn.n) return false
+  copies = turn.n
+  return true
+}
+
+// A copy that has its text when it begins (a grab, a $.ui.copy): it claims at once.
+function claimNow($: EngineInterface, native: Promise<string>): Turn {
+  const n = ++asked
+  copies = n
+  return { n, native, done: () => {} }
+}
 
 // Whether a copy is still the newest when its text is read: no newer copy
 // came, and no new native selection (Claude Code copies that itself, past
@@ -425,13 +466,13 @@ async function grab($: EngineInterface): Promise<string> {
   clip.raw = raw
   clip.rawRow = row
   // Only a grab that copies takes a turn.
-  const turn = takeTurn($, Promise.resolve(nativeKey(selected)))
+  const turn = claimNow($, Promise.resolve(nativeKey(selected)))
   const read = await readCopy($, raw, row)
   if (!(await isNewest($, turn))) return 'Intelligent UI: a newer copy came first; this one copied nothing.'
   if (!read.resolved) return `Intelligent UI: found ${read.runs} picture run(s) but could not read them (see /iui dump).`
   clip.wrote = read.text
   clip.seen = read.text
-  const copied = await copy($, { text: read.text })
+  const copied = await copyOwn($, { text: read.text })
   return copied.isCopied
     ? `Intelligent UI: copied ${read.text.length} chars (${read.resolved} of ${read.runs} picture runs read${row ? `, row ${row}` : ''}).`
     : `Intelligent UI: the copy failed: ${copied.reason}.`
@@ -559,18 +600,26 @@ function lightHover($: EngineInterface) {
 // A click (a clear) on a target of the page copies its text (a link's URL,
 // a file's path, a command, a code block's code). The page's words are probed first when they
 // are not known; a newer copy while they are (or a new native selection): the newer one copies.
+// A click on no target copies nothing and cancels no other copy.
 async function clickAt($: EngineInterface, d: Drawn & { job?: Job }, post: SelectPost, surface: RenderSurface) {
   const turn = takeTurn($)
-  const links = () => clickLinks.get(d.id) ?? NO_LINKS
-  let targets = knownTargets(d, post.page, links())
-  if (!targets) {
-    await wordsOf($, d, post.page)
-    if (!(await isNewest($, turn))) return
-    targets = knownTargets(d, post.page, links())
+  try {
+    const links = () => clickLinks.get(d.id) ?? NO_LINKS
+    let targets = knownTargets(d, post.page, links())
+    if (!targets) {
+      await wordsOf($, d, post.page)
+      targets = knownTargets(d, post.page, links())
+    }
+    const target = targets?.[targetAt(targets, post.anchor.x, post.anchor.y)]?.target
+    if (S.debug) traceDebug($, `select: click ${d.id} page ${post.page} at ${post.anchor.x},${post.anchor.y} target ${target ? target.kind : 'none'}`)
+    if (!target) return
+    const mine = await claim(turn)
+    turn.done()
+    if (!mine || !(await isNewest($, turn))) return
+    await copyTarget($, target, surface)
+  } finally {
+    turn.done()
   }
-  const target = targets?.[targetAt(targets, post.anchor.x, post.anchor.y)]?.target
-  if (S.debug) traceDebug($, `select: click ${d.id} page ${post.page} at ${post.anchor.x},${post.anchor.y} target ${target ? target.kind : 'none'}`)
-  if (target) await copyTarget($, target, surface)
 }
 
 // A target's text on the clipboard (clickAt), with its toast.
@@ -580,7 +629,7 @@ async function copyTarget($: EngineInterface, target: Target, surface: RenderSur
   // The clipboard change of this text is not read again.
   clip.wrote = text
   clip.seen = text
-  const copied = await copy($, { text, surface })
+  const copied = await copyOwn($, { text, surface })
   toast($, copied.isCopied ? `Intelligent UI: copied the ${name}` : `Intelligent UI: the copy failed: ${copied.reason}`)
 }
 
@@ -599,24 +648,34 @@ async function selectionText($: EngineInterface, d: Drawn & { job?: Job }, sel: 
 }
 
 // The button came up: the selection's text on the clipboard, with the
-// toast of a copy. No text under it: nothing is copied; a newer up while
+// toast of a copy. No text under it: nothing is copied (and no other copy
+// is cancelled); a newer up while
 // its words are read (or any newer copy, or a new native selection): the newer one copies.
 async function copySelection($: EngineInterface, d: Drawn & { job?: Job }, sel: Selection, surface: RenderSurface) {
   const t = performance.now()
   const turn = takeTurn($)
   const probed: number[] = []
-  const text = await selectionText($, d, sel, probed)
-  if (!(await isNewest($, turn))) return
-  const read = performance.now() - t
-  if (text === null) {
-    toast($, 'Intelligent UI: could not read the selected picture')
-    return
+  let text: string | null
+  try {
+    text = await selectionText($, d, sel, probed)
+    // A newer copy claimed first: no toast either.
+    if (copies > turn.n) return
+    if (text === null) {
+      toast($, 'Intelligent UI: could not read the selected picture')
+      return
+    }
+    if (!text) return
+    const mine = await claim(turn)
+    turn.done()
+    if (!mine || !(await isNewest($, turn))) return
+  } finally {
+    turn.done()
   }
-  if (!text) return
+  const read = performance.now() - t
   // The clipboard change of this text is not read again.
   clip.wrote = text
   clip.seen = text
-  const copied = await copy($, { text, surface })
+  const copied = await copyOwn($, { text, surface })
   toast($, copied.isCopied ? `Intelligent UI: copied ${text.length} chars of text` : `Intelligent UI: the copy failed: ${copied.reason}`)
   if (S.debug) void traceCopy($, text, performance.now() - t, read, probed)
 }
@@ -712,14 +771,15 @@ export const register: Register = on => {
   // hold no placeholders and pass on as they are. Any copy is the newest:
   // one with placeholders whose words are read when a newer one came is refused.
   on('ui.copy', async ($, e, next) => {
+    if (writing.includes(e.text)) return next(e)
     noteCopied(e.text)
     if (!hasPlaceholders(e.text) || !drawnAnswers.size) {
-      copies++
+      copies = ++asked
       return next(e)
     }
     if (S.debug) traceDebug($, 'select: native copy seen: a $.ui.copy with picture cells (read as their text)')
     const selection = $.ui.selection().catch(() => undefined)
-    const turn = takeTurn($, selection.then(nativeKey))
+    const turn = claimNow($, selection.then(nativeKey))
     const selected = await selection
     clip.raw = e.text
     clip.rawRow = selected?.text === e.text ? selected.requestId : undefined
