@@ -1157,56 +1157,66 @@ export const register: Register = on => {
   // behind it). The person's words deny the call (Claude revises the plan);
   // a verdict waits for the PermissionRequest below, and is dropped once the
   // call resolves, so it never reaches a later call. No env, no plan, or a
-  // failure: no verdict, and the engine's dialog asks.
+  // failure: no verdict, and the engine's dialog asks. The engine may run
+  // two calls at once, and a PermissionRequest does not say which call it
+  // is for: a call that begins while another runs asks nothing (the
+  // engine's dialog asks), and no verdict is used while two run.
   on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
     if (e.agentId) {
       subagentPlans.add(e.tool_use_id)
       return next(e)
     }
-    S.planVerdict = null
-    let verdict: PlanVerdict | null = null
+    S.plansLive++
     try {
-      const ready = await planEnv($)
-      const callPlan = ready ? planInputOf(e) : ''
-      if (ready && callPlan) {
-        const id = e.tool_use_id
-        const file = planFileOf(e)
-        const plan = await currentPlan($, file, callPlan)
-        // Always: the row's input is the message's copy, read before an Edit in the same message.
-        editedPlans.set(id, plan)
-        refresh($)
-        const outcome = await decidePlan($, {
-          plan, callPlan, file, isMac: ready.isMac, isRemote: S.isRemote,
-          onEdited: text => {
-            editedPlans.set(id, text)
-            refresh($)
-          },
-        })
-        if (outcome.kind === 'feedback') return { deny: outcome.message }
-        verdict = outcome.verdict
-      }
-    } catch {
-      verdict = null
-    }
-    S.planVerdict = verdict
-    const turnId = S.mainTurnId
-    let got: Awaited<ReturnType<typeof next>>
-    try {
-      got = await next(e)
-    } finally {
+      if (S.plansLive > 1) return await next(e)
       S.planVerdict = null
+      let verdict: PlanVerdict | null = null
+      try {
+        const ready = await planEnv($)
+        const callPlan = ready ? planInputOf(e) : ''
+        if (ready && callPlan) {
+          const id = e.tool_use_id
+          const file = planFileOf(e)
+          const plan = await currentPlan($, file, callPlan)
+          // Always: the row's input is the message's copy, read before an Edit in the same message.
+          editedPlans.set(id, plan)
+          refresh($)
+          const outcome = await decidePlan($, {
+            plan, callPlan, file, isMac: ready.isMac, isRemote: S.isRemote,
+            onEdited: text => {
+              editedPlans.set(id, text)
+              refresh($)
+            },
+          })
+          if (outcome.kind === 'feedback') return { deny: outcome.message }
+          verdict = outcome.verdict
+        }
+      } catch {
+        verdict = null
+      }
+      S.planVerdict = verdict
+      const turnId = S.mainTurnId
+      let got: Awaited<ReturnType<typeof next>>
+      try {
+        got = await next(e)
+      } finally {
+        S.planVerdict = null
+      }
+      // The call has run: a failure to schedule changes nothing of its result.
+      try {
+        if (verdict?.kind === 'allow' && verdict.clear && got && typeof got === 'object' && !('deny' in got)) scheduleClear($, verdict.plan, turnId)
+      } catch {}
+      return got
+    } finally {
+      S.plansLive--
     }
-    // The call has run: a failure to schedule changes nothing of its result.
-    try {
-      if (verdict?.kind === 'allow' && verdict.clear && got && typeof got === 'object' && !('deny' in got)) scheduleClear($, verdict.plan, turnId)
-    } catch {}
-    return got
   }).catch(($, e, next) => next(e))
 
   // The PermissionRequest of that call: Intelligent UI's verdict at once (the
-  // engine's dialog never shows), else the engine's flow.
+  // engine's dialog never shows), else the engine's flow (also while two
+  // calls run: the verdict may be the other call's).
   on('classic.PermissionRequest', async ($, e, next) => {
-    if (e.tool_name !== 'ExitPlanMode' || e.agent_id || !S.planVerdict) return next(e)
+    if (e.tool_name !== 'ExitPlanMode' || e.agent_id || !S.planVerdict || S.plansLive !== 1) return next(e)
     const verdict = S.planVerdict
     S.planVerdict = null
     return { decision: decisionOf(verdict, e.tool_input) }

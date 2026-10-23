@@ -202,11 +202,14 @@ export const S = {
   stepsLive: 0,
   // The plan (plan.tsx): the main loop's running turn (`turn.start`), the
   // verdict the mod's question gave for the PermissionRequest that follows
-  // (null: none, the engine's dialog asks), the question asked now ('': none),
-  // and the `code` command's path (null: not looked up yet; '': none), and
-  // on Linux a GUI editor that waits (its path and flag; [] none).
+  // (null: none, the engine's dialog asks), the main loop's ExitPlanMode
+  // calls in flight (a verdict is used only while one runs), the question
+  // asked now ('': none), and the `code` command's path (null: not looked
+  // up yet; '': none), and on Linux a GUI editor that waits (its path and
+  // flag; [] none).
   mainTurnId: '',
   planVerdict: null as PlanVerdict | null,
+  plansLive: 0,
   planAsking: '',
   planCode: null as string | null,
   planGui: null as string[] | null,
