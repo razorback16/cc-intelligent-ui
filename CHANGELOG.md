@@ -2,7 +2,7 @@
 
 All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Code finds a new version by the `version` in `.claude-plugin/plugin.json`. To get it, refer to [Update](docs/install.md#update).
 
-## 0.3.3 (2026-10-22)
+## 0.3.3 (2026-10-23)
 
 ### New
 
