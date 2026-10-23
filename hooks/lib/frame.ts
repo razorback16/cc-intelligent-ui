@@ -320,6 +320,15 @@ export async function followWatcher(
 // time; a change while it runs reads once more.
 let fonting: Promise<boolean> | null = null
 let fontAgain = false
+let refontAtStart = false
+
+// The end of setUp: a refont asked while it ran reads the font again now
+// (a new epoch when it changed).
+export function refontAfterStart($: EngineInterface) {
+  if (!refontAtStart) return
+  refontAtStart = false
+  void refont($).then(changed => void (changed && beginEpoch($)), () => undefined)
+}
 export function refont($: EngineInterface): Promise<boolean> {
   if (fonting) {
     fontAgain = true
@@ -330,7 +339,11 @@ export function refont($: EngineInterface): Promise<boolean> {
     do {
       fontAgain = false
       const env = S.env
-      if (!env) return changed
+      // Before the start is done (its font may be the old one): setUp reads again.
+      if (!env) {
+        refontAtStart = true
+        return changed
+      }
       const termFont = (await termFontOf($, env.isMac).catch(() => '')) || env.termFont
       const themeDir = S.look?.dir ?? `${env.root}/render/themes/${BASE_THEME}`
       const read = env.typst ? await measureFonts($, env.typst, env.root, env.cache, termFont, themeDir).catch(() => DEFAULT_METRICS) : env.metrics

@@ -487,6 +487,41 @@ pollTest('herdr: /iui theme whose measure ends after a new terminal font measure
   expect(measuresOf(w).filter(m => m === 'Fira Code|vscode').length).toBe(before + 1)
 })
 
+pollTest('herdr: a new client found while the start still measures the old font: the new font is read once the start is done', async ($, on) => {
+  let client = ghosttyClient
+  let release = () => {}
+  let hold: Promise<void> | null = new Promise<void>(r => (release = r))
+  let held = false
+  const w = world(on, {
+    isMac: true,
+    env: HERDR_SERVER_ENV,
+    families: ['Iosevka', 'Fira Code'],
+    files: { '/h/kc/kitty.conf': 'font_family Fira Code\n' },
+    run: argv => {
+      if (hold && argv[1] === 'eval') {
+        const h = hold
+        hold = null
+        held = true
+        return h.then(() => ok('{}')) as any
+      }
+      return clientIs(() => client)(argv) ?? tickIs(() => null)(argv) ?? shows('font-family = Iosevka\n')(argv)
+    },
+  })
+  const first = details($)
+  // The start reads files first: real time, not only microtasks.
+  for (let i = 0; i < 200 && !held; i++) await new Promise(r => (globalThis as any).setTimeout(r, 1))
+  expect(measuresOf(w).map(m => m.split('|')[0])).toEqual(['Iosevka'])
+  // kitty's client while the start measures Ghostty's font.
+  client = kittyClient
+  const scanned = scansOf(w)
+  await w.clock.advance(HERDR_SCAN_MS)
+  await until(() => scansOf(w) > scanned)
+  release()
+  await first
+  await until(() => measuresOf(w).at(-1)?.startsWith('Fira Code|') === true)
+  expect(await details($)).toContain('terminal font Fira Code.')
+})
+
 fontTest('herdr: a terminal in front with no known client makes a full scan at the next second, and only once while it stays in front', async ($, on) => {
   let client = ghosttyClient
   let front: string | null = 'com.mitchellh.ghostty'

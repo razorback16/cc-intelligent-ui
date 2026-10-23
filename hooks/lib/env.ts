@@ -14,7 +14,7 @@ import { claudeTmpOf } from './images'
 import { applyTheme } from './themes'
 import { registerCommand } from './command'
 import { readHerdrClient, readHostMode, setOuter, termFontOf, watchHost } from './host'
-import { readFrame, setFrame, watchFrame } from './frame'
+import { readFrame, refontAfterStart, setFrame, watchFrame } from './frame'
 import { offerSetup } from './setup'
 import { findClipWay } from './clipboard'
 import { findTypst, measureFonts } from './typst'
@@ -172,6 +172,7 @@ export function setUp($: EngineInterface): Promise<Env> {
       metrics: typst && cache ? await measureFonts($, typst, root, cache, termFont, S.look?.dir ?? `${root}/render/themes/${BASE_THEME}`) : DEFAULT_METRICS,
     }
     refresh($)
+    refontAfterStart($)
     // The start is done: the update check now, and nothing waits for it.
     void checkUpdates($)
     return S.env
