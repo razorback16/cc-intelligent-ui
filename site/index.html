@@ -228,6 +228,7 @@
   footer .big em { font-style: italic; color: var(--accent); }
   .install { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; justify-items: center; margin-top: 28px; }
   .install .cmd { margin: 0; }
+  .install .or { margin: 0; color: var(--muted); font-size: 13px; }
   .links { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 28px; }
   .fine { margin: 40px auto 0; max-width: 620px; color: var(--muted); font-size: 13px; }
 
@@ -264,8 +265,8 @@
         <div class="dock" id="dock"><div class="tabs" role="tablist" aria-label="Example answers" id="tabs"></div></div>
       </div>
       <div><div class="cmd">
-        <code><b>/</b>plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui</code>
-        <button class="copy" type="button" data-copy="/plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui">Copy</button>
+        <code><b>$ </b>curl -fsSL https://intelligentui.art/install.sh | bash</code>
+        <button class="copy" type="button" data-copy="curl -fsSL https://intelligentui.art/install.sh | bash">Copy</button>
       </div></div>
     </div>
   </section>
@@ -282,11 +283,14 @@
   <div class="wrap">
     <p class="big">Ask once. <em>See it.</em></p>
     <div class="install">
+      <div class="cmd"><code><b>$ </b>curl -fsSL https://intelligentui.art/install.sh | bash</code><button class="copy" type="button" data-copy="curl -fsSL https://intelligentui.art/install.sh | bash">Copy</button></div>
+      <p class="or">or by hand</p>
       <div class="cmd"><code><b>$ </b>brew install typst</code><button class="copy" type="button" data-copy="brew install typst">Copy</button></div>
       <div class="cmd"><code><b>/</b>plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui</code><button class="copy" type="button" data-copy="/plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui">Copy</button></div>
     </div>
     <div class="links">
       <a class="icon-btn" href="https://github.com/razorback16/cc-intelligent-ui">GitHub</a>
+      <a class="icon-btn" href="install.sh">install.sh</a>
       <a class="icon-btn" href="https://github.com/razorback16/cc-intelligent-ui/blob/main/docs/install.md">Install guide</a>
     </div>
     <p class="fine">Needs Claude Code 2.1.298 or later, Typst 0.15, and macOS or Linux. An independent, community-made mod, not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC. MIT licence.</p>

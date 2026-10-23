@@ -17,6 +17,7 @@ sh tests/code-sh-test.sh       # code blocks of md.typ (width, header, copy butt
 sh tests/root-sh-test.sh       # the Typst root of a compile (STAGE_SH): answer code reads no other file, with the real Typst (its compiles skip with no typst)
 sh tests/check-sh-test.sh      # the skill's check.sh: a private cache folder, and a block reads no other file (skips with no Typst 0.15)
 sh tests/footprint-sh-test.sh  # release gate: the validator's footprint is whole (no [+N chars] mark, calls line of 850 characters at most)
+sh tests/install-sh-test.sh    # the installer site/install.sh in a sandbox HOME with a fake claude, curl and uname (shellcheck when installed)
 claude plugin validate .
 ```
 

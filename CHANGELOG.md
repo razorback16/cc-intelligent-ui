@@ -4,6 +4,10 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 ## 0.3.3 (2026-10-22)
 
+### New
+
+- **A one-line installer.** `curl -fsSL https://intelligentui.art/install.sh | bash` checks the system and Claude Code, installs Typst 0.15.1 when no Typst 0.15 or later is found (the official release from GitHub, checked against a SHA-256 in the script, into `~/.local/bin`), adds the `razorback16` marketplace and installs the mod with the `claude plugin` commands, and turns on auto-update for the marketplace in `~/.claude/settings.json` (`extraKnownMarketplaces`, with a backup; all other settings stay byte for byte). Run it again to update. It never uses `sudo`. `IUI_NO_TYPST=1` and `IUI_NO_AUTO_UPDATE=1` skip a step. Refer to [The install script](docs/install.md#the-install-script).
+
 ### Fixed
 
 - **The newest copy wins.** A click, a picture selection's up, `/iui grab` and the `ui.copy` change of picture cells each read their text first. An older one that was still reading wrote the clipboard over a newer copy. Now it writes nothing when a newer copy came: a newer click or up, a `$.ui.copy` (another plugin's, or the command button of a link row), Claude Code's own copy of a selection, or a copy in another app. A `ui.copy` change that lost its turn is refused. `/iui grab`, a click on no target and an up with no text copy nothing and cancel no other copy. An older copy (a click, an up, `/iui grab` or a `ui.copy` change) waits for a newer click or up that still reads its text, so it never writes first and is then overwritten. A copy in another app counts from the time the clipboard changed, not from the time the mod read it.

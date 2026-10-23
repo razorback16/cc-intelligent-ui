@@ -26,6 +26,55 @@ Where pictures cannot draw, the mod shows the normal text. To see why a terminal
 
 ## Install steps
 
+There are two ways: the install script, or by hand.
+
+### The install script
+
+In a shell, on macOS or Linux:
+
+```
+curl -fsSL https://intelligentui.art/install.sh | bash
+```
+
+You can also download the script, read it, and run it with `bash install.sh`. Its source is [`site/install.sh`](../site/install.sh). When it is done, restart Claude Code, or type `/reload-plugins` in a session. To update, run it again: each step that is done already changes nothing.
+
+The script does these steps, in this order:
+
+1. **Checks.** The system must be macOS or Linux, on arm64 or x86_64. The `claude` command must be on your `PATH` (or in `~/.local/bin` or `~/.claude/local`). If Claude Code is not installed, the script tells you where to get it ([Set up Claude Code](https://code.claude.com/docs/en/setup)), changes nothing, and stops with exit code 1. If Claude Code is older than 2.1.298, it shows a warning and continues.
+2. **Typst.** The script looks for Typst as the mod does: on the `PATH`, then in `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/snap/bin`, `~/.cargo/bin`, `~/.local/bin`, `/home/linuxbrew/.linuxbrew/bin` and `~/.linuxbrew/bin`. If the first Typst that it finds is 0.15 or later, it changes nothing. If not, it downloads the official Typst 0.15.1 release file for your system from [github.com/typst/typst/releases](https://github.com/typst/typst/releases/tag/v0.15.1) (`typst-aarch64-apple-darwin`, `typst-x86_64-apple-darwin`, `typst-aarch64-unknown-linux-musl` or `typst-x86_64-unknown-linux-musl`, `.tar.xz`), with `curl` over HTTPS only. It compares the file's SHA-256 with the value written in the script. If they are not the same, it deletes the file, installs nothing and stops. Then it extracts the file in a private temporary folder (deleted at the end), makes sure that the program runs, and moves it to `~/.local/bin/typst` in one step. An older `typst` in `~/.local/bin` is replaced. Linux needs `xz` for `tar` (the `xz-utils` package on Debian and Ubuntu). The script tells you when `~/.local/bin` is not on your `PATH` (the mod finds Typst there anyway), and when an older Typst comes first, so that the mod uses that one.
+3. **The mod.** With the Claude Code commands only. If the `razorback16` marketplace is not known (`claude plugin marketplace list`), it runs `claude plugin marketplace add razorback16/cc-intelligent-ui`; else `claude plugin marketplace update razorback16`. Then, if the mod is not installed for your user (`claude plugin list`), it runs `claude plugin install cc-intelligent-ui@razorback16 --scope user`; else `claude plugin update cc-intelligent-ui@razorback16 --scope user`. The script shows each command before it runs it.
+4. **Auto-update.** The script sets this entry in your user settings, `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`). This is the setting that Claude Code documents for a marketplace in `extraKnownMarketplaces`:
+
+   ```json
+   "extraKnownMarketplaces": {
+     "razorback16": {
+       "source": { "source": "github", "repo": "razorback16/cc-intelligent-ui" },
+       "autoUpdate": true
+     }
+   }
+   ```
+
+   `claude plugin marketplace add` already writes the `razorback16` entry with its `source`; the script adds `"autoUpdate": true` to it. It changes only that: all other bytes of the file (keys, their order, values, spaces) stay the same. It writes a new file in the same folder and then renames it over the old one, with the same permissions. If `settings.json` is a link, the file that it points to changes. It keeps the old file as `settings.json.bak-iui`, only when it changed the file. If the file is not there, it makes it. If `autoUpdate` is `true` already, it changes nothing. If the file is not valid JSON (for example, it has comments), the script changes nothing, shows the entry to add, and ends with exit code 1. It uses `perl` (no modules) to read and change the JSON. It never uses `sed` on JSON.
+5. **Summary.** What was installed or updated, where Typst is, the state of auto-update, and how to undo each step.
+
+Options (environment variables):
+
+- `IUI_NO_TYPST=1`: no Typst step. The script does not look for Typst and downloads nothing.
+- `IUI_NO_AUTO_UPDATE=1`: no auto-update step. `settings.json` does not change.
+
+For example: `curl -fsSL https://intelligentui.art/install.sh | IUI_NO_TYPST=1 bash`.
+
+The script never uses `sudo` and runs no downloaded code other than the Typst program that it checked. All its work is in functions that the last line runs, so a download that stops in the middle runs nothing. Its output is plain text.
+
+To undo:
+
+- The mod: `claude plugin uninstall cc-intelligent-ui@razorback16`
+- The marketplace: `claude plugin marketplace remove razorback16`. Claude Code also removes the `razorback16` entry of `extraKnownMarketplaces` from your settings.
+- Only auto-update: in Claude Code, type `/plugin`, go to **Marketplaces**, select **razorback16**, then select **Disable auto-update**. Or copy `settings.json.bak-iui` back to `settings.json`.
+- Typst, if the script installed it: `rm ~/.local/bin/typst`
+
+### By hand
+
 1. Install Typst: `brew install typst` on macOS. On Linux, refer to [Install Typst on Linux](#install-typst-on-linux). For all the ways, refer to [Typst's install page](https://github.com/typst/typst#installation).
 2. At the prompt of a Claude Code session in the terminal, type:
 
@@ -81,6 +130,8 @@ Claude Code finds a new version of the mod from the version number in its `plugi
 
 ### Turn on auto-update
 
+The [install script](#the-install-script) turns it on for you. To turn it on yourself:
+
 1. In Claude Code, type `/plugin`.
 2. Go to **Marketplaces**, then select **razorback16**.
 3. Select **Enable auto-update**.
@@ -89,7 +140,7 @@ Claude Code then updates the mod in approximately 10 minutes after the first mes
 
 ### Update manually
 
-From a shell:
+Run the [install script](#the-install-script) again, or, from a shell:
 
 ```
 claude plugin marketplace update razorback16

@@ -14,6 +14,27 @@ Intelligent UI draws each answer from Claude as a typeset picture, with [Typst](
 
 ## Install
 
+In a shell, on macOS or Linux:
+
+```
+curl -fsSL https://intelligentui.art/install.sh | bash
+```
+
+Then restart Claude Code, or type `/reload-plugins` in a session. To update, run the command again. You can [read the script](site/install.sh) before you run it.
+
+What `install.sh` does:
+
+1. It checks that the system is macOS or Linux (arm64 or x86_64) and that Claude Code is installed. If Claude Code is not installed, it stops and changes nothing.
+2. If it finds no Typst 0.15 or later, it downloads the official Typst 0.15.1 release from GitHub, checks its SHA-256 (written in the script), and puts `typst` in `~/.local/bin`. It never uses `sudo`.
+3. It adds the `razorback16` marketplace and installs the mod with the `claude plugin` commands. If they are installed, it updates them.
+4. It turns on auto-update for the `razorback16` marketplace: `"autoUpdate": true` for `razorback16` in `extraKnownMarketplaces` of `~/.claude/settings.json`. It keeps all other settings and keeps the old file as `settings.json.bak-iui`. If the file is not valid JSON, the script does not change it and shows the lines to add.
+
+`IUI_NO_TYPST=1` skips step 2, and `IUI_NO_AUTO_UPDATE=1` skips step 4, for example `curl -fsSL https://intelligentui.art/install.sh | IUI_NO_AUTO_UPDATE=1 bash`.
+
+To undo: `claude plugin uninstall cc-intelligent-ui@razorback16`, then `claude plugin marketplace remove razorback16` (this also removes its entry in `settings.json`). If the script installed Typst: `rm ~/.local/bin/typst`. Refer to [The install script](docs/install.md#the-install-script).
+
+### Install by hand
+
 ```
 brew install typst
 ```
@@ -28,9 +49,11 @@ Then, in Claude Code:
 
 It works at once, with no restart.
 
+### Fullscreen, updates and terminals
+
 Intelligent UI works best in fullscreen mode (recommended). To use it, run `/tui fullscreen` in Claude Code.
 
-To get new versions, turn on auto-update for the `razorback16` marketplace in `/plugin`, or update manually. Refer to [Update](docs/install.md#update). The mod also shows a notice when a new version is available (`/iui updates off` stops it).
+To get new versions, turn on auto-update for the `razorback16` marketplace in `/plugin` (the install script does this for you), or update manually. Refer to [Update](docs/install.md#update). The mod also shows a notice when a new version is available (`/iui updates off` stops it).
 
 You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15, and macOS or Linux (X11 or Wayland). The pictures show only in some terminals:
 
