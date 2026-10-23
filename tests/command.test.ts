@@ -287,6 +287,34 @@ test('select off is kept and named; select with no value shows it', async ($, on
   expect(await run($, 'details')).toContain('picture select off')
 })
 
+test('a setting changed while the start reads the store is not set back to the stored one', async ($, on) => {
+  const store = new Map<string, unknown>([['size', 100], ['width', 'full'], ['height', 'half'], ['grid', true], ['select', true], ['enabled', false]])
+  // The commands run while the start's first read waits; its reads answer
+  // with the store as it was when they began.
+  let before: Map<string, unknown> | null = null
+  on('store.get', async (_: any, e: any) => {
+    if (e.key === 'size' && !before) {
+      before = new Map(store)
+      for (const args of ['size 150', 'width 120', 'height full', 'grid off', 'select off', 'on']) await run($, args)
+    }
+    return { value: (before ?? store).get(e.key) }
+  })
+  on('store.set', async (_: any, e: any) => (store.set(e.key, e.value), { value: undefined }))
+  mock.clock(on)
+  mock.env(on, { HOME: '/h', TERM: 'xterm-kitty' })
+  on('process.run', async (_: any, e: any, next: any) =>
+    e.argv[0] === 'sh' && /cc-intelligent-ui-/.test(e.argv.join(' '))
+      ? { value: { exitCode: 0, stdout: '/tmp/mdp\nDarwin\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } as Out }
+      : next(e))
+  on('ui.toast', async () => ({ value: undefined }))
+  // The first run starts the start (its line was read before it).
+  await run($, '')
+  expect(before).not.toBe(null)
+  expect(await run($, '')).toContain('Intelligent UI is on: theme vscode, dark, text 150%, width 120 columns, height full, grid off.')
+  expect(await run($, 'select')).toContain('Picture select is off.')
+  expect([...store.entries()]).toEqual([['size', 150], ['width', 120], ['height', 'full'], ['grid', false], ['select', false], ['enabled', true]])
+})
+
 test('a word that is not a subcommand gets the not-understood line, then the state', async ($, on) => {
   world(on)
   const text = await run($, '  bigger please ')

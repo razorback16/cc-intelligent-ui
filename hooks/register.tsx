@@ -24,7 +24,7 @@ import {
   DEFAULT_THEME, gridText, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_WIDTH, MIN_HEIGHT, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
   SELECT_SINCE, selectText, typstHintOf, widthText,
 } from './lib/settings'
-import { clip, DEFAULT_METRICS, drawnAnswers, editedPlans, keep, queue, refresh, running, S, subagentPlans, writesLive, type Env, type Job } from './lib/state'
+import { clip, DEFAULT_METRICS, drawnAnswers, editedPlans, keep, queue, refresh, running, S, settingsSet, subagentPlans, writesLive, type Env, type Job } from './lib/state'
 import { beginEpoch } from './lib/epoch'
 import { escapeControls, luminanceOf, modeLine, modeOfLuminance, parseOsc11, settingOf } from './lib/mode'
 import { applyTheme, themeListing, userThemesOf } from './lib/themes'
@@ -623,6 +623,35 @@ function releaseSelect($: EngineInterface) {
   forgetPages()
 }
 
+// `/iui theme [name]`, one at a time (`themeRuns`): an older one still
+// reading the themes or measuring fonts would write its look, metrics,
+// epoch and stored name over a newer one's.
+let themeRuns: Promise<unknown> = Promise.resolve()
+function runTheme($: EngineInterface, name: string | undefined): Promise<string> {
+  const run = themeRuns.then(() => setTheme($, name))
+  themeRuns = run.catch(() => undefined)
+  return run
+}
+
+async function setTheme($: EngineInterface, name: string | undefined): Promise<string> {
+  const ready = await setUp($)
+  const was = S.look
+  const wanted = name ?? S.look?.name ?? DEFAULT_THEME
+  const { themes, problems, chosen } = await applyTheme($, ready.root, ready.home, wanted)
+  if (name && chosen.isFallback) {
+    if (was) S.look = was
+    return `No usable theme named ${name}.\n\n${themeListing(themes, problems, was?.name ?? DEFAULT_THEME, userThemesOf(ready.home), ready.home)}`
+  }
+  if (S.look?.name !== was?.name || S.look?.dir !== was?.dir || S.look?.stamp !== was?.stamp) {
+    // The theme's fonts set the column width and the code size.
+    if (ready.typst && S.look) ready.metrics = await measureFonts($, ready.typst, ready.root, ready.cache, ready.termFont, S.look.dir)
+    beginEpoch($)
+  }
+  if (name) await storeSet($, 'theme-name', chosen.name)
+  const head = name ? `Theme set to ${chosen.name}.\n\n` : ''
+  return `${head}${themeListing(themes, problems, chosen.name, userThemesOf(ready.home), ready.home)}`
+}
+
 // ---- Hooks ----------------------------------------------------------------
 
 export const register: Register = on => {
@@ -712,6 +741,7 @@ export const register: Register = on => {
     if (asked.kind === 'grab') return { text: await grab($) }
     if (asked.kind === 'dump') return { text: await dump($, await read($, isOn)) }
     if (asked.kind === 'on' || asked.kind === 'off') {
+      settingsSet.add('enabled')
       await update($, isOn, () => asked.kind === 'on')
       // On: the clipboard part starts with the next picture drawn.
       if (asked.kind === 'off') {
@@ -725,6 +755,7 @@ export const register: Register = on => {
       // The epoch begins with the setting, so no row draws it with no epoch
       // open (the store write waits for the host).
       S.size = asked.percent
+      settingsSet.add('size')
       beginEpoch($)
       await storeSet($, 'size', S.size)
       return { text: `Intelligent UI draws text at ${S.size}% of the terminal's text size (100% matches it).` }
@@ -733,6 +764,7 @@ export const register: Register = on => {
       if (asked.width === undefined) await setUp($).catch(() => null)
       else {
         S.width = asked.width
+        settingsSet.add('width')
         beginEpoch($)
         await storeSet($, 'width', S.width)
       }
@@ -744,6 +776,7 @@ export const register: Register = on => {
       if (asked.height === undefined) await setUp($).catch(() => null)
       else {
         S.height = asked.height
+        settingsSet.add('height')
         beginEpoch($)
         await storeSet($, 'height', S.height)
       }
@@ -754,6 +787,7 @@ export const register: Register = on => {
       if (asked.grid === undefined) await setUp($).catch(() => null)
       else {
         S.grid = asked.grid
+        settingsSet.add('grid')
         beginEpoch($)
         await storeSet($, 'grid', S.grid)
       }
@@ -764,6 +798,7 @@ export const register: Register = on => {
       if (asked.on === undefined) await setUp($).catch(() => null)
       else {
         S.select = asked.on
+        settingsSet.add('select')
         if (!S.select) releaseSelect($)
         refresh($)
         await storeSet($, 'select', S.select)
@@ -798,24 +833,7 @@ export const register: Register = on => {
       }
       return { text: `OSC 11 probe (the terminal's background), ${PROBE_RUNS} runs:\n${lines.join('\n')}\nThe poll uses it: ${USE_OSC11 ? 'yes' : 'no (off)'}.` }
     }
-    if (asked.kind === 'theme') {
-      const ready = await setUp($)
-      const was = S.look
-      const wanted = asked.name ?? S.look?.name ?? DEFAULT_THEME
-      const { themes, problems, chosen } = await applyTheme($, ready.root, ready.home, wanted)
-      if (asked.name && chosen.isFallback) {
-        if (was) S.look = was
-        return { text: `No usable theme named ${asked.name}.\n\n${themeListing(themes, problems, was?.name ?? DEFAULT_THEME, userThemesOf(ready.home), ready.home)}` }
-      }
-      if (S.look?.name !== was?.name || S.look?.dir !== was?.dir || S.look?.stamp !== was?.stamp) {
-        // The theme's fonts set the column width and the code size.
-        if (ready.typst && S.look) ready.metrics = await measureFonts($, ready.typst, ready.root, ready.cache, ready.termFont, S.look.dir)
-        beginEpoch($)
-      }
-      if (asked.name) await storeSet($, 'theme-name', chosen.name)
-      const head = asked.name ? `Theme set to ${chosen.name}.\n\n` : ''
-      return { text: `${head}${themeListing(themes, problems, chosen.name, userThemesOf(ready.home), ready.home)}` }
-    }
+    if (asked.kind === 'theme') return { text: await runTheme($, asked.name) }
     const state = (await read($, isOn)) ? 'on' : 'off'
     const ready = await setUp($)
     const bad = asked.kind === 'bad' ? `Not understood: "${e.args.trim()}".\n` : ''

@@ -226,6 +226,10 @@ export const S = {
   updateDone: false,
   updateBusy: false,
 }
+// The settings an /iui command set in this load (`size`, `enabled`, ...): the
+// start (setUp) does not read them from the store, which may answer with the
+// value from before the command.
+export const settingsSet = new Set<string>()
 // The compile results by key (an LRU: set with `keep` at RESULTS_KEPT).
 export const results = new Map<string, Result | 'failed'>()
 // Streaming: model requests of the main loop in flight (`S.stepsLive`), the
