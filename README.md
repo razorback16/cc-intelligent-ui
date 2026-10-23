@@ -101,6 +101,17 @@ More in the [gallery](docs/gallery.md): plots, fractals and a tour of all the Ma
 
 All commands are in [Usage](docs/usage.md).
 
+## Privacy and access
+
+The mod sends nothing about you or your sessions anywhere.
+
+- **Network:** one GET request each day at most, to `raw.githubusercontent.com`, for the public `plugin.json` of this mod. It only tells you about a new version. `/iui updates off` stops it. It also stops when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_UPDATES` or `DISABLE_AUTOUPDATER` is set.
+- **Clipboard, read:** a small `perl` process watches the clipboard while the mod is on and has drawn a picture. On macOS it reads only the change counter, and it reads the text when the counter changes. The text is only checked for picture cells (then a toast names `/iui grab`). It is not stored or sent. <!-- pending pkg A -->Copies that a password manager marks as concealed or transient are skipped on macOS and on X11, and sensitive copies on Wayland.
+- **Clipboard, written:** only at these times: when you release a picture selection, when you click a link, a file path, a command or a copy button in a picture, on `/iui grab`, when you press the command button in a link row on the main screen, and when the mod changes a `$.ui.copy` that has picture cells to its text.
+- **Files:** a private cache folder in `$TMPDIR` (`cc-intelligent-ui-<uid>`, mode 700, deleted after 2 days), and `~/.cache/cc-intelligent-ui/designs`. `/iui setup` on macOS changes your shell start file after you agree.
+- **Processes:** `typst`, the `perl` watcher, and short helper commands such as `pbpaste`, `osascript`, `defaults`, `fc-list` and `fc-match`. On Linux also `wl-paste`, `xclip`, `xsel` or `clipnotify` for the clipboard.
+- **Typst:** <!-- pending pkg B -->Typst runs with a narrow root, so the code in an answer cannot read other files on your computer.
+
 ## Docs
 
 - [Install](docs/install.md): requirements, terminal support and updates

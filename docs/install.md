@@ -4,9 +4,9 @@
 
 ## Requirements
 
-- Claude Code 2.1.298 or later (tested on 2.1.301)
+- Claude Code 2.1.298 or later (tested on 2.1.307)
 - [Typst](https://typst.app) 0.15 (tested on 0.15.1)
-- macOS (tested) or Linux with X11 or Wayland. The Linux parts are tested in a container, not yet on a Linux desktop. Refer to [Linux](#linux).
+- macOS (tested) or Linux with X11 or Wayland. It works on a Linux desktop (tested on Ubuntu 24.04 with GNOME). Refer to [Linux](#linux).
 - A terminal where Claude Code draws pictures. Refer to [Terminals](#terminals).
 
 ## Terminals
