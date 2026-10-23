@@ -8,11 +8,18 @@
 #   2. Typst: when no Typst 0.15 or later is found, downloads the official Typst 0.15.1
 #      release from GitHub, checks its SHA-256 (in this file) and puts it in ~/.local/bin.
 #   3. Adds the razorback16 marketplace and installs the mod, with the `claude plugin`
-#      commands (or updates both when they are there).
+#      commands (or updates both when they are there). A razorback16 marketplace from
+#      another source (a fork, a pinned ref, a local folder) is removed and added again
+#      from GitHub. Another user copy of the mod (from another marketplace) is uninstalled;
+#      copies in a project are not changed, only shown.
 #   4. Turns on auto-update for the razorback16 marketplace in your Claude Code
-#      settings.json (extraKnownMarketplaces), with a backup.
+#      settings.json (extraKnownMarketplaces), with a backup of the file before that change.
 # Run it again to update. It never uses sudo.
-# Options: IUI_NO_TYPST=1 (no Typst step), IUI_NO_AUTO_UPDATE=1 (no auto-update step).
+#   5. When iTerm2 or herdr is there: adds the mod's own /iui setup block (it sets
+#      CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 in iTerm2 and herdr only) to the start file of
+#      your login shell, with a backup. /iui setup remove removes it.
+# Options: IUI_NO_TYPST=1 (no Typst step), IUI_NO_AUTO_UPDATE=1 (no auto-update step),
+# IUI_NO_SHELL_SETUP=1 (no shell setup step).
 # All the work is in functions, and the last line runs it: a cut download runs nothing.
 
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -157,9 +164,12 @@ typst_version() {
 }
 
 # The typst that the mod uses: the PATH first, then TYPST_DIRS in order.
-mod_typst() {
+mod_typst() { find_tool typst; }
+
+# The program $1: on the PATH, else in TYPST_DIRS in order.
+find_tool() {
   local p d
-  p=$(command -v typst 2> /dev/null || true)
+  p=$(command -v "$1" 2> /dev/null || true)
   case $p in /*)
     printf '%s' "$p"
     return 0
@@ -167,8 +177,8 @@ mod_typst() {
   esac
   for d in $TYPST_DIRS; do
     case $d in \~/*) d=$HOME/${d#\~/} ;; esac
-    if [ -e "$d/typst" ]; then
-      printf '%s' "$d/typst"
+    if [ -e "$d/$1" ]; then
+      printf '%s' "$d/$1"
       return 0
     fi
   done
@@ -263,10 +273,15 @@ install_typst() {
 # A small strict JSON reader that keeps the byte place of each value, so a
 # change to settings.json inserts text and keeps all other bytes. It needs
 # only core perl (no modules). Modes:
-#   has-name NAME        stdin: a JSON array; exit 0 when an object in it has "name": NAME
-#   plugin ID            stdin: a JSON array; prints the "version" and "enabled" of "id": ID, "scope": "user"
+#   marketplace NAME     stdin: the marketplace list (a JSON array); prints 3 lines for "name": NAME:
+#                        official or other, the source for `marketplace add`, and a description.
+#                        Exit 1: no such marketplace.
+#   plugin ID            stdin: the plugin list; prints the "version" and "enabled" of "id": ID, "scope": "user"
+#   copies NAME          stdin: the plugin list; prints "id TAB scope TAB version TAB enabled TAB projectPath"
+#                        for each copy of the plugin NAME (any marketplace, any scope)
 #   settings FILE BACKUP sets extraKnownMarketplaces.razorback16 (source and autoUpdate: true)
 #                        in FILE; prints created, changed or unchanged. Exit 2: not changed (the reason on stdout).
+# Exit 3: stdin is not a JSON array.
 json_pl() {
   cat << 'PERL'
 use strict; use warnings;
@@ -339,26 +354,69 @@ sub parse {
 # The last member named $k (JSON.parse keeps the last one).
 sub member { my ($o, $k) = @_; my $f; for (@{ $o->{m} }) { $f = $_ if $_->{k} eq $k } return $f }
 
-if ($mode eq 'has-name' || $mode eq 'plugin') {
+# A string member, or undef.
+sub sv { my ($o, $k) = @_; my $m = member($o, $k); return ($m && $m->{v}{t} eq 's') ? $m->{v}{s} : undef }
+# Printable ASCII only (for the shell's messages).
+sub clean { my $x = shift // ''; $x =~ s/[^\x20-\x7e]//g; return $x }
+# 1 when a source (an object with source, repo, url, ref, path) is the official
+# one: GitHub razorback16/cc-intelligent-ui, with no ref, path or sparse paths.
+sub official {
+  my $o = shift;
+  for my $k (qw(ref path)) { my $x = sv($o, $k); return 0 if defined $x && $x ne '' }
+  return 0 if member($o, 'sparsePaths');
+  my $kind = sv($o, 'source') // '';
+  my $repo = sv($o, 'repo') // '';
+  my $url = sv($o, 'url') // '';
+  return 1 if $kind eq 'github' && lc($repo) eq 'razorback16/cc-intelligent-ui';
+  return 1 if $kind eq 'git' && $url =~ m{\Ahttps://github\.com/razorback16/cc-intelligent-ui(?:\.git)?\z}i;
+  return 0;
+}
+
+if ($mode eq 'marketplace' || $mode eq 'plugin' || $mode eq 'copies') {
   local $/; my $in = <STDIN> // '';
   my $v = eval { parse($in) } or exit 3;
   exit 3 unless $v->{t} eq 'a';
   for my $x (@{ $v->{l} }) {
     next unless $x->{t} eq 'o';
-    if ($mode eq 'has-name') {
-      my $n = member($x, 'name');
-      exit 0 if $n && $n->{v}{t} eq 's' && $n->{v}{s} eq $args[0];
-    } else {
-      my ($id, $sc, $ver, $en) = map { member($x, $_) } qw(id scope version enabled);
-      next unless $id && $id->{v}{t} eq 's' && $id->{v}{s} eq $args[0];
-      next unless $sc && $sc->{v}{t} eq 's' && $sc->{v}{s} eq 'user';
-      my $vs = ($ver && $ver->{v}{t} eq 's') ? $ver->{v}{s} : '?';
-      $vs =~ s/[^\x21-\x7e]//g;
-      print $vs, ' ', (($en && $en->{v}{t} eq 'false') ? 'disabled' : 'enabled'), "\n";
+    if ($mode eq 'marketplace') {
+      next unless (sv($x, 'name') // '') eq $args[0];
+      my ($kind, $ref, $path) = map { clean(sv($x, $_)) } qw(source ref path);
+      my ($spec, $desc);
+      if ($kind eq 'github' || $kind eq 'git') {
+        my $at = clean(sv($x, $kind eq 'git' ? 'url' : 'repo'));
+        $spec = $at . ($ref ne '' ? "#$ref" : '');
+        $desc = ($kind eq 'git' ? "the git URL $at" : "the GitHub repository $at") . ($ref ne '' ? " (ref $ref)" : '') . ($path ne '' ? " (folder $path)" : '');
+      } elsif ($kind eq 'directory' || $kind eq 'file') {
+        $spec = $path;
+        $desc = ($kind eq 'file' ? 'the local file ' : 'the local folder ') . $path;
+      } elsif ($kind eq 'url') {
+        $spec = clean(sv($x, 'url'));
+        $desc = "the URL $spec";
+      } else {
+        $spec = '';
+        $desc = "a source of the type '$kind'";
+      }
+      print official($x) ? 'official' : 'other', "\n$spec\n$desc\n";
       exit 0;
     }
+    my ($id, $sc, $ver, $en) = map { member($x, $_) } qw(id scope version enabled);
+    next unless $id && $id->{v}{t} eq 's';
+    my $vs = ($ver && $ver->{v}{t} eq 's') ? $ver->{v}{s} : '?';
+    $vs =~ s/[^\x21-\x7e]//g;
+    my $state = ($en && $en->{v}{t} eq 'false') ? 'disabled' : 'enabled';
+    if ($mode eq 'plugin') {
+      next unless $id->{v}{s} eq $args[0];
+      next unless $sc && $sc->{v}{t} eq 's' && $sc->{v}{s} eq 'user';
+      print $vs eq '' ? '?' : $vs, " $state\n";
+      exit 0;
+    }
+    # copies: only ids that are safe to give to `claude plugin`.
+    next unless $id->{v}{s} =~ /\A\Q$args[0]\E\@[A-Za-z0-9._-]+\z/;
+    my $scope = clean(sv($x, 'scope'));
+    $scope = '?' unless $scope =~ /\A[a-z]+\z/;
+    print join("\t", $id->{v}{s}, $scope, $vs eq '' ? '?' : $vs, $state, clean(sv($x, 'projectPath'))), "\n";
   }
-  exit 1;
+  exit($mode eq 'copies' ? 0 : 1);
 }
 exit 4 unless $mode eq 'settings';
 
@@ -452,6 +510,9 @@ if (!defined $old || $old =~ /\A\s*\z/) {
     } elsif ($rb->{v}{t} ne 'o') {
       refuse("extraKnownMarketplaces.$name in $file is not an object");
     } else {
+      my $src = member($rb->{v}, 'source');
+      refuse("extraKnownMarketplaces.$name in $file has another source, not the GitHub repository razorback16/cc-intelligent-ui")
+        if $src && !($src->{v}{t} eq 'o' && official($src->{v}));
       my $au = member($rb->{v}, 'autoUpdate');
       if ($au && $au->{v}{t} eq 'true') { print "unchanged\n"; exit 0 }
       if ($au) {
@@ -490,51 +551,217 @@ json() { perl -e "$(json_pl)" "$@"; }
 # --- 3. The mod ----------------------------------------------------------------
 
 SUM_PLUGIN=
+COPIES=
+# Undo lines of step 3 that are not always there (one per line).
+UNDO_MORE=
+TAB=$(printf '\t')
+# $1 quoted for a shell command line, when it needs quotes.
+shq() {
+  case $1 in
+    '' | *[!A-Za-z0-9_./:@#%+=,-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+# The version in a plugin_state line, or "?".
+ver_of() {
+  local v=${1%% *}
+  printf '%s' "${v:-?}"
+}
+
 # "VERSION enabled|disabled" of the mod in user scope, or nothing.
 plugin_state() {
   "$CLAUDE" plugin list --json < /dev/null 2> /dev/null | json plugin "$PLUGIN" 2> /dev/null || true
 }
 
-marketplace_known() {
-  local out rc=0
+# Each copy of the mod, from any marketplace, in any scope (lines of
+# id, scope, version, enabled and projectPath, with tabs).
+plugin_copies() {
+  "$CLAUDE" plugin list --json < /dev/null 2> /dev/null | json copies "$PLUGIN_NAME" 2> /dev/null || true
+}
+
+# The razorback16 marketplace. MKT_KIND: official, other (another source:
+# MKT_SPEC and MKT_DESC tell which), none (not known) or unknown (no JSON list).
+MKT_KIND=
+MKT_SPEC=
+MKT_DESC=
+marketplace_source() {
+  local out info rc=0
+  MKT_KIND=unknown
   if out=$("$CLAUDE" plugin marketplace list --json < /dev/null 2> /dev/null); then
-    printf '%s' "$out" | json has-name "$MARKETPLACE" 2> /dev/null || rc=$?
-    case $rc in 0 | 1) return $rc ;; esac
+    info=$(printf '%s' "$out" | json marketplace "$MARKETPLACE" 2> /dev/null) || rc=$?
+    case $rc in
+      0)
+        {
+          IFS= read -r MKT_KIND
+          IFS= read -r MKT_SPEC
+          IFS= read -r MKT_DESC
+        } << INFO || true
+$info
+INFO
+        return 0
+        ;;
+      1)
+        MKT_KIND=none
+        return 0
+        ;;
+    esac
   fi
-  # No JSON: the text list.
-  "$CLAUDE" plugin marketplace list < /dev/null 2> /dev/null | grep -qw "$MARKETPLACE"
+  # No JSON: the text list. The source is not known.
+  if ! "$CLAUDE" plugin marketplace list < /dev/null 2> /dev/null | grep -qw "$MARKETPLACE"; then MKT_KIND=none; fi
+}
+
+# The marketplace has another source (a fork, a pinned ref, a local folder):
+# an update from it can not get the newest version. Remove it and add the
+# official one. Claude Code also uninstalls the mod with the marketplace.
+OLD_STATE=
+REPOINTED=
+repoint_marketplace() {
+  local id scope ver pp undo
+  warn "the $MARKETPLACE marketplace comes from $MKT_DESC, not from the GitHub repository $MARKETPLACE_REPO. An update from there can not get the newest version of the mod."
+  note "So the installer removes the $MARKETPLACE marketplace and adds it again from $MARKETPLACE_REPO."
+  note "Claude Code also uninstalls the mod with the marketplace; the installer then installs it again."
+  note "Kept: your /iui settings (Claude Code keeps them under the name $PLUGIN). The mod has no other saved options, secrets or data."
+  OLD_STATE=$(plugin_state)
+  while IFS=$TAB read -r id scope ver _ pp; do
+    if [ "$id" = "$PLUGIN" ] && [ "$scope" != user ]; then
+      note "Claude Code can also remove the copy of the mod in $scope scope for ${pp:-a project}."
+    fi
+  done << COPIES
+$COPIES
+COPIES
+  if [ -n "$MKT_SPEC" ]; then
+    undo="claude plugin marketplace remove $MARKETPLACE, then claude plugin marketplace add $(shq "$MKT_SPEC")"
+  else
+    undo="claude plugin marketplace remove $MARKETPLACE, then add $MKT_DESC again"
+  fi
+  claude_run plugin marketplace remove "$MARKETPLACE" --scope user || die "Claude Code could not remove the marketplace $MARKETPLACE (from $MKT_DESC). The mod was not updated."
+  if ! claude_run plugin marketplace add "$MARKETPLACE_REPO"; then
+    die "Claude Code could not add the marketplace $MARKETPLACE_REPO. To add the old one back: claude plugin marketplace add $(shq "${MKT_SPEC:-?}")"
+  fi
+  note "The $MARKETPLACE marketplace comes from $MARKETPLACE_REPO now (before: $MKT_DESC)."
+  REPOINTED=1
+  UNDO_MORE="${UNDO_MORE}Old source:   $undo
+"
+}
+
+# A copy that is in $2 (copies lines) with the id, scope and path of line $1.
+copy_in() {
+  local id scope pp i s p
+  IFS=$TAB read -r id scope _ _ pp << LINE
+$1
+LINE
+  while IFS=$TAB read -r i s _ _ p; do
+    if [ "$i" = "$id" ] && [ "$s" = "$scope" ] && [ "$p" = "$pp" ]; then return 0; fi
+  done << LIST
+$2
+LIST
+  return 1
 }
 
 install_plugin() {
-  local before after
+  local before after rc=0 mkt_ok=1 now line id scope ver pp old new
   step "3. The mod: $PLUGIN"
-  if marketplace_known; then
-    claude_run plugin marketplace update "$MARKETPLACE" || warn "the marketplace update failed. The mod is updated from the copy that Claude Code has."
-  else
-    claude_run plugin marketplace add "$MARKETPLACE_REPO" || die "Claude Code could not add the marketplace $MARKETPLACE_REPO."
-  fi
+  COPIES=$(plugin_copies)
+  marketplace_source
+  case $MKT_KIND in
+    none) claude_run plugin marketplace add "$MARKETPLACE_REPO" || die "Claude Code could not add the marketplace $MARKETPLACE_REPO." ;;
+    other) repoint_marketplace ;;
+    *)
+      if ! claude_run plugin marketplace update "$MARKETPLACE"; then
+        mkt_ok=
+        warn "the marketplace update failed. The mod is updated from the copy of the marketplace that Claude Code has, which can be old."
+      fi
+      ;;
+  esac
   before=$(plugin_state)
   if [ -n "$before" ]; then
-    claude_run plugin update "$PLUGIN" --scope user || warn "the update of the mod failed. The installed version stays."
+    claude_run plugin update "$PLUGIN" --scope user || rc=$?
     after=$(plugin_state)
-    if [ "${after%% *}" = "${before%% *}" ]; then
-      SUM_PLUGIN="$PLUGIN_NAME ${after%% *} (the newest version was installed already)"
+    if [ "$rc" != 0 ]; then
+      warn "the update of the mod failed. The installed version ($(ver_of "$after")) stays."
+      SUM_PLUGIN="$PLUGIN_NAME $(ver_of "$after") (NOT updated: the update failed, refer to the warning above)"
+      PROBLEM=1
+    elif [ "$(ver_of "$after")" != "$(ver_of "$before")" ]; then
+      SUM_PLUGIN="$PLUGIN_NAME $(ver_of "$after") (updated from $(ver_of "$before"))"
+    elif [ -z "$mkt_ok" ]; then
+      SUM_PLUGIN="$PLUGIN_NAME $(ver_of "$after") (NOT checked for a newer version: the marketplace update failed)"
+      PROBLEM=1
+    elif [ "$MKT_KIND" = unknown ]; then
+      SUM_PLUGIN="$PLUGIN_NAME $(ver_of "$after") (no newer version found)"
     else
-      SUM_PLUGIN="$PLUGIN_NAME ${after%% *} (updated from ${before%% *})"
+      SUM_PLUGIN="$PLUGIN_NAME $(ver_of "$after") (the newest version was installed already)"
     fi
   else
     claude_run plugin install "$PLUGIN" --scope user || die "Claude Code could not install $PLUGIN."
     after=$(plugin_state)
-    SUM_PLUGIN="$PLUGIN_NAME ${after%% *} (installed)"
+    SUM_PLUGIN="$PLUGIN_NAME $(ver_of "$after") (installed)"
   fi
+  if [ -n "$REPOINTED" ] && [ "$rc" = 0 ]; then
+    SUM_PLUGIN="$PLUGIN_NAME $(ver_of "$after") (from $MARKETPLACE_REPO now; before: $(ver_of "$OLD_STATE") from $MKT_DESC)"
+    # A local folder can have a version that is not released yet.
+    old=$(ver_of "$OLD_STATE")
+    new=$(ver_of "$after")
+    if [ "$old" != '?' ] && [ "$new" != '?' ] && [ "$old" != "$new" ] && version_ge "$old" "$new"; then
+      warn "the version from the old source ($old) is newer than the version on GitHub ($new). To use the old source again: $(printf '%s' "$UNDO_MORE" | sed -n 's/^Old source: *//p')"
+    fi
+  fi
+  # A mod that was disabled before the new marketplace stays disabled.
+  case $OLD_STATE:$after in
+    *' disabled:'*' enabled')
+      claude_run plugin disable "$PLUGIN" --scope user || warn "Claude Code could not disable the mod again."
+      after=$(plugin_state)
+      ;;
+  esac
   case $after in
     *' disabled') warn "the mod is disabled in Claude Code. To turn it on: claude plugin enable $PLUGIN" ;;
   esac
+  now=$(plugin_copies)
+  # Another copy in user scope (from another marketplace) would run too.
+  if [ -n "$after" ]; then
+    while IFS=$TAB read -r id scope ver _ pp; do
+      case $id in '' | "$PLUGIN") continue ;; esac
+      [ "$scope" = user ] || continue
+      note "Another copy of the mod is installed for your user: $id $ver. Two copies would both run, so the installer uninstalls that one."
+      if claude_run plugin uninstall "$id" --scope user; then
+        note "Uninstalled $id. Its /iui settings are kept under its own name; set them again with /iui if you want."
+        UNDO_MORE="${UNDO_MORE}Other copy:   claude plugin install $id --scope user
+"
+      else
+        warn "Claude Code could not uninstall $id. Two copies of the mod run. To remove it: claude plugin uninstall $id --scope user"
+        PROBLEM=1
+      fi
+    done << NOW
+$now
+NOW
+    now=$(plugin_copies)
+  fi
+  # Copies in a project: not changed. In that folder, they can hide the user copy.
+  while IFS=$TAB read -r id scope ver _ pp; do
+    case $scope in '' | user) continue ;; esac
+    warn "a copy of the mod is installed in $scope scope for ${pp:-a project}: $id $ver. In that project it can be used instead of the version above. To remove it: cd $(shq "${pp:-.}") && claude plugin uninstall $id --scope $scope"
+  done << NOW
+$now
+NOW
+  # Copies that Claude Code removed with the old marketplace.
+  if [ -n "$REPOINTED" ]; then
+    while IFS= read -r line; do
+      IFS=$TAB read -r id scope _ _ pp << LINE
+$line
+LINE
+      case $scope in '' | user) continue ;; esac
+      [ "$id" = "$PLUGIN" ] || continue
+      copy_in "$line" "$now" && continue
+      warn "Claude Code removed the copy of the mod in $scope scope for ${pp:-a project} with the old marketplace. To install it there again: cd $(shq "${pp:-.}") && claude plugin install $PLUGIN --scope $scope"
+    done << COPIES
+$COPIES
+COPIES
+  fi
 }
 
 # --- 4. Auto-update ------------------------------------------------------------
 
 SUM_AUTO=
+AUTO_ON=
 UNDO_AUTO=
 PROBLEM=
 manual_auto_update() {
@@ -586,17 +813,20 @@ auto_update() {
     0:unchanged)
       note "Auto-update is on already ($(tilde "$file")). Not changed."
       SUM_AUTO="on (it was on already)"
+      AUTO_ON=1
       ;;
     0:created)
       note "Made $(tilde "$file") with extraKnownMarketplaces.$MARKETPLACE.autoUpdate = true."
       SUM_AUTO="on ($(tilde "$file"), new file)"
-      UNDO_AUTO="delete $(tilde "$file")"
+      AUTO_ON=1
       ;;
     0:changed)
       note "Set extraKnownMarketplaces.$MARKETPLACE.autoUpdate = true in $(tilde "$file")."
-      note "All other settings are kept. The file before the change: $(tilde "$file").bak-iui"
+      note "All other settings are kept. The file before this auto-update change: $(tilde "$file").bak-iui"
+      note "(It has the changes of step 3 already: the backup undoes only the auto-update change.)"
       SUM_AUTO="on ($(tilde "$file"))"
-      UNDO_AUTO="copy $(tilde "$file").bak-iui back to $(tilde "$file")"
+      AUTO_ON=1
+      UNDO_AUTO="copy $(tilde "$file").bak-iui (the file before the auto-update change only) back to $(tilde "$file")"
       ;;
     *)
       warn "$(tilde "$file") was not changed: ${result:-an unknown error}"
@@ -607,13 +837,176 @@ auto_update() {
   esac
 }
 
-# --- 5. Summary ----------------------------------------------------------------
+# --- 5. Pictures in iTerm2 and herdr -------------------------------------------
+
+# The mod's own setup block (SETUP_START, SETUP_END and setupBlock() of
+# hooks/lib/setup.ts, byte for byte): Claude Code shows pictures in iTerm2 and
+# herdr only with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 when it starts. The mod's
+# /iui setup sees this block as done, and /iui setup remove removes it.
+SETUP_START='# >>> cc-intelligent-ui: Claude Code pictures in iTerm2 >>>'
+SETUP_END='# <<< cc-intelligent-ui <<<'
+# shellcheck disable=SC2016 # the shell reads these lines later, not now
+SETUP_SH='if { [ "$TERM_PROGRAM" = "iTerm.app" ] || [ "$TERM_PROGRAM" = "herdr" ]; } && [ -z "$TMUX" ] && [ -z "$STY" ]; then export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1; fi'
+# shellcheck disable=SC2016
+SETUP_FISH='if test "$TERM_PROGRAM" = "iTerm.app" -o "$TERM_PROGRAM" = "herdr"; and not set -q TMUX; and not set -q STY; set -gx CLAUDE_CODE_FORCE_TERMINAL_IMAGES 1; end'
+
+# Puts the block in a start file as the mod's withSetup() does: an older block
+# of the mod is replaced, one blank line goes before the block, and the exact
+# block already there changes nothing. Args: FILE START LINE END BACKUP. A link
+# keeps its place and its file changes. Prints created, changed or unchanged.
+# Exit 2: not changed (the reason on stdout).
+setup_pl() {
+  cat << 'PERL'
+use strict; use warnings;
+use Fcntl;
+my ($file, $start, $line, $end, $bak) = @ARGV;
+sub refuse { print "$_[0]\n"; exit 2 }
+my $real = $file;
+if (-l $file) {
+  require Cwd;
+  $real = Cwd::realpath($file);
+  refuse("$file is a link to a file that is not there") unless defined $real && -e $real;
+}
+my $old;
+if (-e $real) {
+  refuse("$file is not a regular file") unless -f $real;
+  refuse("$file is larger than 4 MB") if -s $real > 4 * 1024 * 1024;
+  open(my $fh, '<:raw', $real) or refuse("can not read $file: $!");
+  local $/; $old = <$fh>; close $fh;
+  refuse("can not read $file") unless defined $old;
+}
+my $text = $old // '';
+my $block = "$start\n$line\n$end\n";
+if (index($text, $block) >= 0) { print "unchanged\n"; exit 0 }
+# withoutSetup(): each START ... END block goes, with one blank line before it.
+my @lines = split /\n/, $text, -1;
+my @out;
+for (my $i = 0; $i < @lines; $i++) {
+  if ($lines[$i] ne $start) { push @out, $lines[$i]; next }
+  my $e = -1;
+  for my $j ($i .. $#lines) { if ($lines[$j] eq $end) { $e = $j; last } }
+  if ($e < 0) { push @out, $lines[$i]; next }
+  pop @out if @out && $out[-1] eq '';
+  $i = $e;
+}
+my $base = join("\n", @out);
+$base =~ s/\n*\z//;
+my $new = $base . ($base ne '' ? "\n\n" : '') . $block;
+# Writes: a new file in the same folder, then one rename.
+sub put {
+  my ($path, $data, $fmode) = @_;
+  my $tmp = "$path.iui-$$";
+  unlink $tmp;
+  sysopen(my $fh, $tmp, O_WRONLY | O_CREAT | O_EXCL, defined $fmode ? 0600 : 0666) or die "can not write $tmp: $!\n";
+  binmode $fh;
+  print {$fh} $data or die "can not write $tmp: $!\n";
+  close $fh or die "can not write $tmp: $!\n";
+  chmod($fmode, $tmp) if defined $fmode;
+  rename($tmp, $path) or do { unlink $tmp; die "can not write $path: $!\n" };
+}
+my $fmode = defined $old ? (stat $real)[2] & 07777 : undef;
+eval {
+  put($bak, $old, $fmode) if defined $old;
+  put($real, $new, $fmode);
+  1;
+} or refuse("$@");
+print defined $old ? "changed\n" : "created\n";
+PERL
+}
+
+# 0 when iTerm2 is installed (macOS). IUI_TEST_ROOT is only for the tests.
+has_iterm() {
+  local p
+  [ "$OS" = macos ] || return 1
+  for p in "${IUI_TEST_ROOT:-}/Applications/iTerm.app" "$HOME/Applications/iTerm.app"; do
+    if [ -d "$p" ]; then return 0; fi
+  done
+  command -v mdfind > /dev/null 2>&1 || return 1
+  # Spotlight, stopped after 5 s.
+  p=$(perl -e 'alarm 5; exec @ARGV' mdfind "kMDItemCFBundleIdentifier == 'com.googlecode.iterm2'" < /dev/null 2> /dev/null | grep -m 1 '\.app$' || true)
+  [ -n "$p" ]
+}
+
+SUM_SHELL=
+UNDO_SHELL=
+shell_setup() {
+  local apps='' name file kind line result rc t
+  step "5. Pictures in iTerm2 and herdr"
+  if on "${IUI_NO_SHELL_SETUP:-}"; then
+    note "Skipped (IUI_NO_SHELL_SETUP is set)."
+    SUM_SHELL="not changed (IUI_NO_SHELL_SETUP is set)"
+    return 0
+  fi
+  if has_iterm; then apps=iTerm2; fi
+  if [ -n "$(find_tool herdr)" ]; then apps=${apps:+$apps and }herdr; fi
+  if [ -z "$apps" ]; then
+    note "No iTerm2 or herdr found. Not needed: other terminals need no setup."
+    SUM_SHELL="not needed (no iTerm2 or herdr)"
+    return 0
+  fi
+  note "$apps found. Claude Code shows pictures there only with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1."
+  # The start file of the login shell, as the mod's shellRcOf() picks it.
+  name=${SHELL:-}
+  name=${name##*/}
+  case $name in
+    zsh) file=${ZDOTDIR:-$HOME}/.zshrc kind='sh' ;;
+    bash)
+      kind='sh'
+      if [ "$OS" = macos ]; then file=$HOME/.bash_profile; else file=$HOME/.bashrc; fi
+      ;;
+    fish) file=${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/cc-intelligent-ui.fish kind='fish' ;;
+    *)
+      note "Your shell (${name:-not known}) is not one that the mod knows, so no file was changed."
+      note "Add this to your shell's start file: export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 (only in iTerm2 and herdr, not in tmux or screen)"
+      SUM_SHELL="NOT added (your shell is not known; refer to the lines above)"
+      return 0
+      ;;
+  esac
+  if [ "$kind" = fish ]; then line=$SETUP_FISH; else line=$SETUP_SH; fi
+  if ! command -v perl > /dev/null 2>&1; then
+    result="perl is not installed"
+    rc=2
+  else
+    if [ "$kind" = fish ] && [ ! -e "$file" ] && [ ! -L "$file" ]; then mkdir -p "${file%/*}"; fi
+    rc=0
+    result=$(perl -e "$(setup_pl)" "$file" "$SETUP_START" "$line" "$SETUP_END" "$file.bak-iui" 2>&1) || rc=$?
+  fi
+  t="~"
+  result=${result//"$HOME"/$t}
+  case $rc:$result in
+    0:unchanged)
+      note "$(tilde "$file") has the Intelligent UI block already. Not changed."
+      SUM_SHELL="set already in $(tilde "$file")"
+      ;;
+    0:created)
+      note "Made $(tilde "$file") with the Intelligent UI block."
+      SUM_SHELL="added to $(tilde "$file") (open a new tab or pane)"
+      ;;
+    0:changed)
+      note "Added the Intelligent UI block to $(tilde "$file") (an older block of the mod is replaced)."
+      note "The file before this change: $(tilde "$file").bak-iui"
+      SUM_SHELL="added to $(tilde "$file") (open a new tab or pane)"
+      ;;
+    *)
+      warn "$(tilde "$file") was not changed: ${result:-an unknown error}"
+      say "  To set it yourself, add these lines to $(tilde "$file"), or run /iui setup in Claude Code in iTerm2 or herdr:" >&2
+      printf '    %s\n' "$SETUP_START" "$line" "$SETUP_END" >&2
+      SUM_SHELL="NOT added (refer to the warning above)"
+      PROBLEM=1
+      return 0
+      ;;
+  esac
+  UNDO_SHELL="/iui setup remove in Claude Code, or delete the lines from '$SETUP_START' to '$SETUP_END' in $(tilde "$file")"
+}
+
+# --- 6. Summary ----------------------------------------------------------------
 
 summary() {
   step "Done"
   note "Typst:        $SUM_TYPST"
   note "Mod:          $SUM_PLUGIN"
   note "Auto-update:  $SUM_AUTO"
+  note "Pictures in iTerm2/herdr: $SUM_SHELL"
   say ""
   say "Restart Claude Code, or type /reload-plugins in a session that runs now."
   say "Intelligent UI works best in fullscreen mode: type /tui fullscreen in Claude Code."
@@ -624,9 +1017,13 @@ summary() {
   if [ -n "$UNDO_TYPST" ]; then note "Typst:        $UNDO_TYPST"; fi
   note "Mod:          claude plugin uninstall $PLUGIN"
   note "Marketplace:  claude plugin marketplace remove $MARKETPLACE  (also removes its settings entry)"
-  if [ -n "$UNDO_AUTO" ]; then
-    note "Auto-update:  /plugin > Marketplaces > $MARKETPLACE > Disable auto-update, or $UNDO_AUTO"
+  if [ -n "$UNDO_MORE" ]; then printf '%s' "$UNDO_MORE" | sed 's/^/  /'; fi
+  if [ -n "$AUTO_ON" ]; then
+    note "Auto-update:  /plugin > Marketplaces > $MARKETPLACE > Disable auto-update"
+    note "              (it also sets extraKnownMarketplaces.$MARKETPLACE.autoUpdate to false in settings.json)"
+    if [ -n "$UNDO_AUTO" ]; then note "              or $UNDO_AUTO"; fi
   fi
+  if [ -n "$UNDO_SHELL" ]; then note "Shell setup:  $UNDO_SHELL"; fi
 }
 
 main() {
@@ -636,7 +1033,8 @@ main() {
   trap 'exit 143' TERM
   say "${BOLD}Intelligent UI for Claude Code: installer${PLAIN}"
   say "It installs Typst $TYPST_VERSION (when no Typst $TYPST_MIN or later is found), the mod $PLUGIN,"
-  say "and turns on auto-update for the $MARKETPLACE marketplace. It never uses sudo."
+  say "turns on auto-update for the $MARKETPLACE marketplace, and sets up pictures in iTerm2 and herdr."
+  say "It never uses sudo."
   step "1. Checks"
   check_platform
   check_claude
@@ -645,6 +1043,7 @@ main() {
   WORK=
   install_plugin
   auto_update
+  shell_setup
   summary
   if [ -n "$PROBLEM" ]; then
     say ""
