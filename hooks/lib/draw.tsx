@@ -6,7 +6,7 @@ import type { EngineInterface, RenderComponent, RenderSurface, RenderViewport, R
 
 import type { IuiTheme } from '../../types'
 import { BODY_PT, bulletOf, GRID_VERSION, GUTTER, LINK_FILES_KEPT, MARGIN_TOP, RESULTS_KEPT, TEMPLATE_VERSION } from './settings'
-import { INLINE_KEPT, inlined, keep, linkFiles, S, type Cell, type Look, type Metrics, type Result, type Room } from './state'
+import { INLINE_KEPT, inlined, keep, linkFiles, ownCopy, S, type Cell, type Look, type Metrics, type Result, type Room } from './state'
 import { DEFAULT_GRID, gridFirstRow, type GridMetrics } from './grid'
 import { FENCE, imagePathOf } from './markdown'
 import { linksOf, type LinkItem } from './links'
@@ -317,6 +317,7 @@ export async function linksFor($: EngineInterface, text: string, base: string): 
 
 // Copies a command at a press of its row, with a toast.
 async function copyCommand($: EngineInterface, text: string, surface: RenderSurface) {
+  ownCopy.note(text)
   const copied = await copy($, { text, surface }).catch(() => null)
   toast($, copied?.isCopied ? 'Copied' : `Could not copy${copied ? `: ${copied.reason}` : ''}`)
 }

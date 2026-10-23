@@ -299,6 +299,9 @@ export const writesLive = new Map<string, number>()
 // probe's inputs; none when not known).
 export const drawnAnswers = new Map<string, Drawn & { job?: Job }>()
 export const DRAWN_KEPT = 64
+// The copy gate's hook for a mod copy no ui.copy hook sees (register.tsx sets it).
+export const ownCopy = { note: (_text: string) => {} }
+
 // The clipboard (register.tsx): the change count last seen (null: none
 // yet; the first of each watcher child is only noted), whether the watcher
 // found no PerlObjCBridge (`none`), a read that runs (`busy`) and a change

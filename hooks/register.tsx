@@ -24,7 +24,7 @@ import {
   DEFAULT_THEME, gridText, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_WIDTH, MIN_HEIGHT, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
   SELECT_SINCE, selectText, typstHintOf, widthText,
 } from './lib/settings'
-import { clip, DEFAULT_METRICS, drawnAnswers, editedPlans, keep, queue, refresh, running, S, settingsSet, subagentPlans, writesLive, type Env, type Job } from './lib/state'
+import { clip, DEFAULT_METRICS, drawnAnswers, editedPlans, keep, ownCopy, queue, refresh, running, S, settingsSet, subagentPlans, writesLive, type Env, type Job } from './lib/state'
 import { beginEpoch } from './lib/epoch'
 import { escapeControls, luminanceOf, modeLine, modeOfLuminance, parseOsc11, settingOf } from './lib/mode'
 import { applyTheme, themeListing, userThemesOf } from './lib/themes'
@@ -299,6 +299,7 @@ function clipChanged($: EngineInterface, count: number | null, first: boolean) {
     return
   }
   clip.count = count
+  if (!first) changed = ++asked
   if (!first) void readClipboard($).catch(() => undefined)
 }
 
@@ -327,10 +328,11 @@ async function readClipboard($: EngineInterface) {
   try {
     do {
       clip.again = false
+      const n = changed
       const text = await clipboardRead($)
       if (text === undefined || text === clip.seen) continue
       clip.seen = text
-      if (text === null || !copiedTexts.includes(text)) copies = ++asked
+      if (text === null || !copiedTexts.includes(text)) copies = Math.max(copies, n)
       if (text === null || text === clip.wrote || !hasPlaceholders(text)) continue
       hintGrab($, text)
     } while (clip.again)
@@ -382,11 +384,17 @@ async function updateState($: EngineInterface): Promise<UpdateState> {
 // last 4 $.ui.copy calls (their changes, even read late, are no copy from outside).
 let asked = 0
 let copies = 0
+// The number of the last clipboard change the watcher saw (taken when its line came).
+let changed = 0
 const copiedTexts: string[] = []
 function noteCopied(text: string) {
   if (copiedTexts.at(-1) === text) return
   copiedTexts.push(text)
   if (copiedTexts.length > 4) copiedTexts.shift()
+}
+ownCopy.note = text => {
+  noteCopied(text)
+  copies = ++asked
 }
 
 // The mod's own write, noted here: a $.ui.copy made after an await does not
@@ -425,8 +433,11 @@ function takeTurn($: EngineInterface, native?: Promise<string>): Turn {
 
 // A copy that has its text claims the clipboard: false when a newer one
 // claimed. A newer one that does not know yet whether it copies is waited for.
-async function claim(turn: Turn): Promise<boolean> {
+async function newerDecided(turn: Turn) {
   for (const [n, decided] of undecided) if (n > turn.n) await decided
+}
+async function claim(turn: Turn): Promise<boolean> {
+  await newerDecided(turn)
   if (copies > turn.n) return false
   copies = turn.n
   return true
@@ -466,10 +477,17 @@ async function grab($: EngineInterface): Promise<string> {
   clip.raw = raw
   clip.rawRow = row
   // Only a grab that copies takes a turn.
-  const turn = claimNow($, Promise.resolve(nativeKey(selected)))
-  const read = await readCopy($, raw, row)
-  if (!(await isNewest($, turn))) return 'Intelligent UI: a newer copy came first; this one copied nothing.'
-  if (!read.resolved) return `Intelligent UI: found ${read.runs} picture run(s) but could not read them (see /iui dump).`
+  const turn = takeTurn($, Promise.resolve(nativeKey(selected)))
+  let read: Awaited<ReturnType<typeof readCopy>>
+  try {
+    read = await readCopy($, raw, row)
+    if (!read.resolved) return `Intelligent UI: found ${read.runs} picture run(s) but could not read them (see /iui dump).`
+    const mine = await claim(turn)
+    turn.done()
+    if (!mine || !(await isNewest($, turn))) return 'Intelligent UI: a newer copy came first; this one copied nothing.'
+  } finally {
+    turn.done()
+  }
   clip.wrote = read.text
   clip.seen = read.text
   const copied = await copyOwn($, { text: read.text })
@@ -784,6 +802,7 @@ export const register: Register = on => {
     clip.raw = e.text
     clip.rawRow = selected?.text === e.text ? selected.requestId : undefined
     const read = await readCopy($, e.text, clip.rawRow)
+    await newerDecided(turn)
     if (!(await isNewest($, turn))) return { value: { isCopied: false, reason: 'refused' } }
     if (!read.resolved) return next(e)
     // The clipboard change of this write is not read again.

@@ -2316,3 +2316,187 @@ test('a password manager\'s copy is never read: no hint, no /iui grab, nothing i
   await w.clock.settle()
   expect(hints(w)).toBe(1)
 })
+
+// ---- The copy gate: claims and waits ----
+
+const UNREADABLE = [cells(1, 0, 150), cells(2, 0, 150)].join('\n')
+const TCELLS = [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n')
+
+test('/iui grab that reads nothing (cells that fit no page) cancels no click whose words are still read', async ($, on) => {
+  const { w } = await drawTargets($, on)
+  // Unreadable cells on the clipboard before the click (their change seen first).
+  w.foreign(UNREADABLE)
+  await settle(w)
+  w.hold()
+  const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  await click(slow, 6, 3)
+  await settle(w)
+  expect(await grab($)).toContain('could not read them')
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual(['https://example.com'])
+})
+
+test('a /iui grab still reading copies nothing when a newer click will copy', async ($, on) => {
+  const { w } = await drawTargets($, on)
+  w.hold()
+  const older = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nAnother line.`)
+  // The grab's cells fit ans-3 (the newest): its probe is held.
+  w.selection = { text: TCELLS }
+  const g = grab($)
+  await settle(w)
+  await click(older, 6, 3)
+  await settle(w)
+  w.release()
+  await settle(w)
+  await g
+  await settle(w)
+  expect(w.clipboard).toBe('https://example.com')
+  expect(w.copies).toEqual(['https://example.com'])
+})
+
+test('a $.ui.copy of picture cells still reading is refused when a newer click will copy', { plugins: [COPIER] }, async ($, on) => {
+  const { w } = await drawTargets($, on)
+  w.hold()
+  const older = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nAnother line.`)
+  const cp = $.command.run({ command: 'cp', args: TCELLS } as any)
+  await settle(w)
+  await click(older, 6, 3)
+  await settle(w)
+  w.release()
+  await settle(w)
+  await cp
+  await settle(w)
+  expect(w.clipboard).toBe('https://example.com')
+  expect(w.copies).toEqual(['https://example.com'])
+})
+
+test('a copy in another app made before a click, read late by the watcher, does not cancel that newer click', async ($, on) => {
+  const { w } = await drawTargets($, on)
+  w.holdReads()
+  w.foreign('copied in another app')
+  await settle(w)
+  w.hold()
+  const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  await click(slow, 6, 3)
+  await settle(w)
+  w.releaseReads()
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual(['https://example.com'])
+  expect(w.clipboard).toBe('https://example.com')
+})
+
+test('main screen: a command button press is newer than a /iui grab still reading (no watcher)', async ($, on) => {
+  const { w, ui } = await drawTargets($, on, { noBridge: true }, false)
+  const buttons = tree(await ui.drawn()).filter((n: any) => n.type === 'Button')
+  expect(buttons.length).toBe(2)
+  w.hold()
+  await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`, false)
+  w.selection = { text: TCELLS }
+  const g = grab($)
+  await settle(w)
+  await ui.press({ key: buttons[0].props.key })
+  await settle(w)
+  const pressed = w.copies.at(-1)
+  w.release()
+  await settle(w)
+  const said = await g
+  expect([said, w.copies]).toEqual(['Intelligent UI: a newer copy came first; this one copied nothing.', [pressed]])
+})
+
+test('three clicks: the oldest on a ready page copies at once; of two that still read, only the newer one with a target copies', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  await hover(ui, 52, 4)
+  await settle(w)
+  w.hold()
+  const mid = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  const newest = await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nAnother line.`)
+  await click(ui, 52, 4)
+  await settle(w)
+  await click(mid, 1, 3)
+  await click(newest, 6, 3)
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual(['ls -la', 'https://example.com'])
+})
+
+test('three clicks that still read: the middle one with a target copies; the oldest waits and never writes', async ($, on) => {
+  const { w } = await drawTargets($, on)
+  w.hold()
+  const a = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  const b = await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nAnother line.`)
+  const c = await drawAnswer($, w, 'ans-4', `${TARGETS_MD}\n\nThird line.`)
+  await click(a, 6, 3)
+  await click(b, 52, 4)
+  await click(c, 1, 3)
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual(['ls -la'])
+})
+
+test('a /iui grab whose words come first waits for a newer click that still reads, then copies nothing', async ($, on) => {
+  const { w } = await drawTargets($, on)
+  w.hold()
+  await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nAnother line.`)
+  w.selection = { text: TCELLS }
+  let said: any = 'pending'
+  const g = grab($).then(t => (said = t))
+  await settle(w)
+  const first = w.release
+  w.hold()
+  const newer = await drawAnswer($, w, 'ans-4', `${TARGETS_MD}\n\nThird line.`)
+  await click(newer, 6, 3)
+  await settle(w)
+  first()
+  await settle(w)
+  const mid = [said, [...w.copies]]
+  w.release()
+  await settle(w)
+  await g
+  expect(w.clipboard).toBe('https://example.com')
+  expect({ mid, end: w.copies, said }).toEqual({ mid: ['pending', []], end: ['https://example.com'], said: 'Intelligent UI: a newer copy came first; this one copied nothing.' })
+})
+
+test('a $.ui.copy of picture cells whose words come first waits for a newer click that still reads, then is refused', { plugins: [COPIER] }, async ($, on) => {
+  const { w } = await drawTargets($, on)
+  w.hold()
+  await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nAnother line.`)
+  const cp = $.command.run({ command: 'cp', args: TCELLS } as any)
+  await settle(w)
+  const first = w.release
+  w.hold()
+  const newer = await drawAnswer($, w, 'ans-4', `${TARGETS_MD}\n\nThird line.`)
+  await click(newer, 6, 3)
+  await settle(w)
+  first()
+  await settle(w)
+  const mid = [...w.copies]
+  w.release()
+  await settle(w)
+  await cp
+  expect(w.clipboard).toBe('https://example.com')
+  expect({ mid, end: w.copies }).toEqual({ mid: [], end: ['https://example.com'] })
+})
+
+test('main screen with the watcher: a command button press is newer than a /iui grab still reading', async ($, on) => {
+  const { w, ui } = await drawTargets($, on, {}, false)
+  const buttons = tree(await ui.drawn()).filter((n: any) => n.type === 'Button')
+  w.hold()
+  await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`, false)
+  w.selection = { text: TCELLS }
+  const g = grab($)
+  await settle(w)
+  await ui.press({ key: buttons[0].props.key })
+  await settle(w)
+  const pressed = w.copies.at(-1)
+  w.release()
+  await settle(w)
+  const said = await g
+  expect([said, w.copies]).toEqual(['Intelligent UI: a newer copy came first; this one copied nothing.', [pressed]])
+})
