@@ -71,12 +71,23 @@ case $version in
   *) echo "error: typst 0.15.x is needed, found ${version:-nothing} at $typst"; exit 2 ;;
 esac
 
-# The mod's cache root (docs/how-it-works.md step 6); runs older than a day go.
+# The mod's cache root (docs/how-it-works.md step 6), private as the mod
+# makes it (env.ts CACHE_SH): no link, and this user's. Runs older than a day go.
 cache=${TMPDIR:-/tmp}
 cache="${cache%/}/cc-intelligent-ui-$(id -u)"
-mkdir -p "$cache/check" && chmod 700 "$cache" 2>/dev/null
+private() { [ ! -L "$1" ] && [ -d "$1" ] && [ -O "$1" ]; }
+mkdir "$cache" 2>/dev/null
+if ! private "$cache" || ! chmod 700 "$cache"; then echo "error: the cache folder $cache is a link, not a folder, or not yours"; exit 2; fi
+mkdir "$cache/check" 2>/dev/null
+if ! private "$cache/check"; then echo "error: the folder $cache/check is a link, not a folder, or not yours"; exit 2; fi
 find "$cache/check" -mindepth 1 -maxdepth 1 -type d -mmin +1440 -exec rm -rf {} + 2>/dev/null
-run=$(mktemp -d "$cache/check/run-XXXXXX") || { echo "error: can not make a folder in $cache/check"; exit 2; }
+run=$(mktemp -d "$cache/check/run-XXXXXX") && run=$(cd "$run" && pwd -P) || { echo "error: can not make a folder in $cache/check"; exit 2; }
+
+# The run folder is Typst's root, so a block reads no other file: render/
+# has md.typ (copied: Typst wants its main file inside the root) and links
+# to the rest of the template; theme is a link to the theme folder (below).
+mkdir "$run/render" && ln -s "$root"/render/* "$run/render/" && rm "$run/render/md.typ" && cp "$root/render/md.typ" "$run/render/md.typ" \
+  || { echo "error: can not make the template folder in $run"; exit 2; }
 
 # The input, kept as src.typ or src.md in the run folder.
 if [ "$file" = - ]; then
@@ -147,15 +158,17 @@ fi
 
 echo "using theme=$theme_name width=$width height=$height row=${row:-off}"
 [ -n "$theme_note" ] && echo "$theme_note"
+ln -s "$theme_dir" "$run/theme" || { echo "error: can not link the theme folder in $run"; exit 2; }
 
 # The doc JSON (as the mod writes it): a .typ body goes in a fence longer
-# than any backtick run in it; Typst does the JSON escapes.
-"$typst" eval --root / --input "src=$src" --input "kind=$kind" --input "base=$base" '{
+# than any backtick run in it; Typst does the JSON escapes. No images are
+# allowed (they are outside the root): they show as their alt text.
+"$typst" eval --root "$run" --input "src=/src.$kind" --input "kind=$kind" --input "base=$base" '{
   let body = read(sys.inputs.src)
   let n = calc.max(3, ..body.matches(regex("`+")).map(m => m.text.len() + 1))
   let fence = "`" * n
   let md = if sys.inputs.kind == "typ" { fence + "typst\n" + body.trim("\n", at: end) + "\n" + fence + "\n" } else { body }
-  (base: sys.inputs.base, segments: (md,))
+  (base: sys.inputs.base, segments: (md,), images: ())
 }' > "$run/doc.json" 2> "$run/doc.log" || {
   echo "error: can not read $label (it must be UTF-8 text)"
   grep -v 'unknown font family' "$run/doc.log" | head -n 5
@@ -165,8 +178,8 @@ printf '{"base":"","segments":[""]}\n' > "$run/empty.json"
 
 # Each live block alone (block-K.typ: the theme import, then its body), for
 # diagnostics with lines in FILE; map.txt: K, the line before the body, indent.
-shim="#import \"$run/shim.typ\": theme"
-printf '#import "%s/render/md.typ": live-theme as theme\n' "$root" > "$run/shim.typ"
+shim='#import "/shim.typ": theme'
+printf '#import "/render/md.typ": live-theme as theme\n' > "$run/shim.typ"
 if [ $kind = typ ]; then
   { printf '%s\n' "$shim"; cat "$src"; } > "$run/block-1.typ"
   echo "1 0 0" > "$run/map.txt"
@@ -196,14 +209,14 @@ else
   [ -f "$run/map.txt" ] || { echo "note: $label has no \`\`\`typst block"; : > "$run/map.txt"; }
 fi
 
-# Runs typst in the run folder (short paths) with the mod's env (typst.ts
-# noNetworkEnv) and its 20 s limit; its output goes to file $1.
+# Runs typst in the run folder (short paths; its root) with the mod's env
+# (typst.ts noNetworkEnv) and its 20 s limit; its output goes to file $1.
 run_typst() {
-  local out=$1 pid dog status
-  shift
+  local out=$1 cmd=$2 pid dog status
+  shift 2
   (cd "$run" && exec env HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 \
     https_proxy=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9 all_proxy=http://127.0.0.1:9 NO_PROXY= no_proxy= \
-    TYPST_PACKAGE_CACHE_PATH="$cache/pkg-cache" "$typst" "$@") > "$out" 2>&1 &
+    TYPST_PACKAGE_CACHE_PATH="$cache/pkg-cache" "$typst" "$cmd" --root "$run" "$@") > "$out" 2>&1 &
   pid=$!
   # The watchdog stops its own sleep when it is stopped, so no process stays.
   (sleep 20 & s=$!; trap 'kill $s; exit 0' TERM; wait $s && kill "$pid" && echo "error: timed out after 20 s (an endless loop?)" >> "$out") \
@@ -216,7 +229,7 @@ run_typst() {
   return $status
 }
 inputs_of() {
-  set -- --input "theme=$1" --input "theme-dir=$theme_dir" --input "doc=$2" --input "width=$width" --input "height=$height"
+  set -- --input "theme=$1" --input "theme-dir=/theme" --input "doc=$2" --input "width=$width" --input "height=$height"
   [ -n "$row" ] && set -- "$@" --input "row=$row" --input grid=1
   printf '%s\n' "$@"
 }
@@ -224,7 +237,7 @@ inputs_of() {
 # Diagnostics without font noise, with short paths.
 clean() {
   grep -v 'unknown font family' "$1" | grep -v '^[[:space:]]*$' \
-    | sed -e 's#[^ ]*/render/md\.typ:#md.typ:#g' -e "s#$run/##g"
+    | sed -e 's#[^ ]*/render/md\.typ:#md.typ:#g' -e 's#^render/md\.typ:#md.typ:#' -e "s#$run/##g"
 }
 
 # The diagnostics of each block alone, at lines of FILE; an error inside a
@@ -236,10 +249,10 @@ block_errors() {
     [ -n "$k" ] || continue
     old_ifs=$IFS; IFS='
 '
-    set -- $(inputs_of "$m" "$run/empty.json")
+    set -- $(inputs_of "$m" /empty.json)
     IFS=$old_ifs
     log="$run/diag-$m-$k.log"
-    run_typst "$log" compile --root / --package-path "$root/render/packages" --diagnostic-format short \
+    run_typst "$log" compile --package-path "$root/render/packages" --diagnostic-format short \
       "$@" "block-$k.typ" "diag-$m-$k.pdf" && continue
     failed=0
     first=$(clean "$log" | grep -m 1 'error:')
@@ -247,7 +260,7 @@ block_errors() {
     case $first in
       "block-$k.typ:"*|*'timed out'*|'') ;;
       *)
-        run_typst "$run/trace-$m-$k.log" compile --root / --package-path "$root/render/packages" --diagnostic-format human \
+        run_typst "$run/trace-$m-$k.log" compile --package-path "$root/render/packages" --diagnostic-format human \
           "$@" "block-$k.typ" "diag-$m-$k.pdf"
         at=$(grep -o "block-$k\.typ:[0-9]*:[0-9]*" "$run/trace-$m-$k.log" | head -n 1)
         ;;
@@ -266,13 +279,13 @@ block_errors() {
 
 # The PNGs of a mode, in page order, each on the theme's background (the
 # mod's PNGs are clear over the terminal); the clear one when that fails.
-printf '#import "%s/render/theme.typ": C\n#page(width: auto, height: auto, margin: 0pt, fill: C.bg, image(sys.inputs.png))\n' "$root" > "$run/backdrop.typ"
+printf '#import "/render/theme.typ": C\n#page(width: auto, height: auto, margin: 0pt, fill: C.bg, image(sys.inputs.png))\n' > "$run/backdrop.typ"
 pngs_of() {
   n=1 list=''
   while [ -f "$run/clear-$1-$n.png" ]; do
     out="$run/$1-$n.png"
-    run_typst "$run/backdrop.log" compile --root / --ppi 72 --input "png=$run/clear-$1-$n.png" --input "theme=$1" \
-      --input "theme-dir=$theme_dir" backdrop.typ "$out" || out="$run/clear-$1-$n.png"
+    run_typst "$run/backdrop.log" compile --ppi 72 --input "png=/clear-$1-$n.png" --input "theme=$1" \
+      --input "theme-dir=/theme" backdrop.typ "$out" || out="$run/clear-$1-$n.png"
     list="$list $out"; n=$((n + 1))
   done
   printf '%s' "${list# }"
@@ -282,10 +295,10 @@ all=0
 for m in $modes; do
   old_ifs=$IFS; IFS='
 '
-  set -- $(inputs_of "$m" "$run/doc.json")
+  set -- $(inputs_of "$m" /doc.json)
   IFS=$old_ifs
-  if run_typst "$run/$m.log" compile --root / --package-path "$root/render/packages" --format png --diagnostic-format short \
-    --ppi 144 "$@" "$root/render/md.typ" "clear-$m-{p}.png"; then
+  if run_typst "$run/$m.log" compile --package-path "$root/render/packages" --format png --diagnostic-format short \
+    --ppi 144 "$@" render/md.typ "clear-$m-{p}.png"; then
     echo "ok $m $(pngs_of "$m")"
     clean "$run/$m.log" | sed 's/^/  /'
   else
