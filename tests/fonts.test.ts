@@ -213,7 +213,7 @@ test('only plain text uses the lean set', () => {
 })
 
 test('the lean folder goes into the compile and probe calls only when given', () => {
-  const o = { typst: '/t', root: '/r', cache: '/c', ppi: 144, inputs: { theme: 'dark' }, out: '/o/a-{0p}.png' }
+  const o = { typst: '/t', root: '/r', run: '/c/k/r-1', cache: '/c', ppi: 144, inputs: { theme: 'dark' }, out: '/o/a-{0p}.png' }
   expect(typstCall(o).argv).not.toContain('--ignore-system-fonts')
   const lean = typstCall({ ...o, fonts: '/c/fonts-1' }).argv
   expect(lean.slice(lean.indexOf('--ignore-system-fonts'), lean.indexOf('--ignore-system-fonts') + 3)).toEqual(['--ignore-system-fonts', '--font-path', '/c/fonts-1'])
