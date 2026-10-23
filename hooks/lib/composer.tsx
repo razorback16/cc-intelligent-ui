@@ -235,11 +235,11 @@ function previewLines($: EngineInterface, e: BandInput | RowInput, lines: readon
   )
 }
 
-// The previews, then the band beneath (another plugin's or the engine's).
+// The previews one row under the transcript, then the band beneath (another plugin's or the engine's).
 export function drawPreviews($: EngineInterface, e: BandInput, lines: readonly Preview[][], below: RenderElement) {
   const { Box } = uiResolve($, e)
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" marginTop={1}>
       {previewLines($, e, lines, true)}
       {below}
     </Box>

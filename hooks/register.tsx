@@ -1278,7 +1278,7 @@ export const register: Register = on => {
         else {
           // The same numbers written again: only the band reads them.
           const redraw = () => void update($, draft, ns => [...ns]).catch(() => undefined)
-          const made = await previewsOf($, e.viewport, ready.env, numbers, { columns: e.props.bodyColumns, maxRows: e.props.maxRows, labelled: true, redraw })
+          const made = await previewsOf($, e.viewport, ready.env, numbers, { columns: e.props.bodyColumns, maxRows: e.props.maxRows - 1, labelled: true, redraw })
           lines = made.lines
           if (made.isWhole && made.isFinal) memoSet(drafts, 'draft', k, lines)
           else drafts.delete('draft')
