@@ -6,7 +6,7 @@ import {
   type ClipWay,
 } from '../hooks/register'
 import { CACHE_SH } from '../hooks/lib/env'
-import { clipboardNow, clipWatchArgs, clipWayReady, findClipWay } from '../hooks/lib/clipboard'
+import { clipboardNow, clipboardRead, clipWatchArgs, clipWayReady, findClipWay } from '../hooks/lib/clipboard'
 import { S } from '../hooks/lib/state'
 import { SMALL_MARKS, SMALL_MD } from './copy-fixture'
 
@@ -44,8 +44,8 @@ test('GNOME on Wayland (no data-control): the X11 tools through Xwayland come fi
   // Only GTK (a GNOME desktop with no other tool): GTK reads and watches.
   const gtk = clipWayOf({ wayland: true, x11: true, desktop: 'GNOME', found: { gtk: '/usr/bin/python3' } }) as Extract<ClipWay, { name: string }>
   expect(gtk.name).toBe('GTK (X11, Xwayland)')
-  expect(gtk.read).toEqual(['/usr/bin/env', 'GDK_BACKEND=x11', 'PYTHONIOENCODING=utf-8', '/usr/bin/python3', '-c', GTK_READ_PY])
-  expect(gtk.watch).toEqual(['/usr/bin/env', 'GDK_BACKEND=x11', 'PYTHONIOENCODING=utf-8', '/usr/bin/python3', '-c', GTK_WATCH_PY])
+  expect(gtk.read).toEqual(['/usr/bin/env', 'GDK_BACKEND=x11', '/usr/bin/python3', '-I', '-X', 'utf8', '-c', GTK_READ_PY])
+  expect(gtk.watch).toEqual(['/usr/bin/env', 'GDK_BACKEND=x11', '/usr/bin/python3', '-I', '-X', 'utf8', '-c', GTK_WATCH_PY])
   // No X tool: wl-paste (its --watch can fail; then the copy is off).
   expect(clipWayOf({ wayland: true, x11: true, desktop: 'GNOME', found: { 'wl-paste': '/w' } })).toMatchObject({ name: 'wl-paste --watch (Wayland)', wayland: true })
 })
@@ -55,7 +55,7 @@ test('X11: clipnotify or GTK sees the changes; xclip or GTK reads (xsel can not 
     off: 'xsel can not see a password manager\'s copy: install xclip',
   })
   expect(clipWayOf({ wayland: false, x11: true, desktop: 'XFCE', found: { xsel: '/x/xsel', clipnotify: '/x/cn', gtk: '/p' } })).toMatchObject({
-    name: 'clipnotify and GTK (X11)', read: ['/usr/bin/env', 'GDK_BACKEND=x11', 'PYTHONIOENCODING=utf-8', '/p', '-c', GTK_READ_PY],
+    name: 'clipnotify and GTK (X11)', read: ['/usr/bin/env', 'GDK_BACKEND=x11', '/p', '-I', '-X', 'utf8', '-c', GTK_READ_PY],
   })
   expect(clipWayOf({ wayland: false, x11: true, desktop: '', found: { xclip: '/x/xclip', gtk: '/p' } })).toMatchObject({
     name: 'GTK and xclip (X11)', read: ['sh', '-c', XCLIP_READ_SH, '/x/xclip'],
@@ -69,6 +69,19 @@ test('X11: clipnotify or GTK sees the changes; xclip or GTK reads (xsel can not 
   expect(clipWayOf({ wayland: false, x11: false, desktop: '', found: ALL })).toEqual({ off: 'no Wayland or X11 display' })
   // clipnotify 1.0.3+ loops by itself (-l); an older one exits at each change.
   expect(X11_WATCH_SH).toBe('echo; while "$0" -s clipboard -l; do echo; done')
+})
+
+test('python runs isolated (-I): a gi.py in the session\'s folder never runs; UTF-8 out with -X utf8', () => {
+  for (const found of [{ gtk: '/usr/bin/python3' }, { xsel: '/x/xsel', clipnotify: '/x/cn', gtk: '/usr/bin/python3' }, { xclip: '/x/xclip', gtk: '/usr/bin/python3' }]) {
+    const way = clipWayOf({ wayland: false, x11: true, desktop: 'XFCE', found }) as Extract<ClipWay, { name: string }>
+    for (const argv of [way.read, way.watch].filter(a => a.includes('/usr/bin/python3'))) {
+      expect(argv.slice(argv.indexOf('/usr/bin/python3') + 1, -2)).toEqual(['-I', '-X', 'utf8'])
+      expect(argv.some(a => a.startsWith('PYTHON'))).toBe(false)
+    }
+  }
+  // The check that python3 loads GTK 3 is isolated too.
+  expect(FIND_SH).toContain(`"$p" -I -c 'import gi;`)
+  expect(FIND_SH.match(/"\$p" (-\S+ )*-c/g)).toEqual([`"$p" -I -c`])
 })
 
 test('the GTK scripts: X11 events, a line at the start, a text read that fails with no text', () => {
@@ -178,6 +191,18 @@ test('the clipboard now: PerlObjCBridge on macOS, the way found on Linux; null w
   expect(await withClip(false, { off: 'no wl-paste' }, () => clipboardNow(none.$))).toBe(null)
   expect(await withClip(false, null, () => clipboardNow(none.$))).toBe(null)
   expect(none.argvs).toEqual([])
+})
+
+test('the watcher\'s read: null for no text or a password manager\'s copy (a copy all the same); undefined for a read that failed', async () => {
+  expect(await withClip(false, WL_WAY, () => clipboardRead(fake$({ exitCode: 0, stdout: 'text' }).$))).toBe('text')
+  for (const isMac of [true, false]) {
+    for (const exitCode of [1, 3]) expect(await withClip(isMac, WL_WAY, () => clipboardRead(fake$({ exitCode, stdout: 'x' }).$))).toBe(null)
+    // No bridge (2), another error, the 2 s timeout (a rejection), no tool.
+    expect(await withClip(isMac, WL_WAY, () => clipboardRead(fake$({ exitCode: 2, stdout: '' }).$))).toBe(undefined)
+    expect(await withClip(isMac, WL_WAY, () => clipboardRead(fake$({ exitCode: 127, stdout: '' }).$))).toBe(undefined)
+    expect(await withClip(isMac, WL_WAY, () => clipboardRead(fake$(new Error('timeout')).$))).toBe(undefined)
+  }
+  expect(await withClip(false, null, () => clipboardRead(fake$({ exitCode: 0, stdout: 'x' }).$))).toBe(undefined)
 })
 
 test('looking up the clipboard way sets S.clipWay from the display, the desktop and the tools found; clipWayReady waits for it', async () => {

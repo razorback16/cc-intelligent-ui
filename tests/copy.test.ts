@@ -587,10 +587,10 @@ const inputsOf = (argv: readonly string[]) => Object.fromEntries(argv.flatMap((a
 // The world beneath the mod: a cache at /c, a typst whose compile writes a
 // 1568 x 512 page per segment and whose query of page n gives the fixture's
 // marks on page n (`hold` holds the next query until `release`; a kill ends
-// it; `holdReads` the clipboard reads until `releaseReads`), the watcher (WATCH_PL: its PID, then with `clip` the change count at
+// it; `holdReads` the clipboard reads until `releaseReads`, each with the clipboard of its start), the watcher (WATCH_PL: its PID, then with `clip` the change count at
 // its start and at each change of the clipboard; `clip none` with
 // `noBridge`), the read (READ_PL) giving `clipboard` (exit 3 for a
-// password manager's copy: `concealed`), and the copies, toasts and
+// password manager's copy: `concealed`; refused with `readFails`), and the copies, toasts and
 // selection the test sees. `copy` is a native copy (a drag over text and
 // pictures, the main screen's terminal copy): while `selects`, picture cells
 // are this session's selection too; the text goes on the clipboard, one
@@ -603,11 +603,12 @@ const inputsOf = (argv: readonly string[]) => Object.fromEntries(argv.flatMap((a
 // written, `blits` the blits asked (`deny`: each refused with it), `logs`
 // the debug log lines. `noPerl`: perl can not start; `beforeWrite` runs
 // before each frame write; `refused`: the cache folder sweep refuses that folder.
+// `selectionFails`: each $.ui.selection is refused.
 function world(
   on: any,
   o: {
     failFirst?: boolean; noBridge?: boolean; env?: Record<string, string>; tty?: string; version?: string; deny?: string; noPerl?: boolean; beforeWrite?: () => Promise<void>
-    refused?: string; marks?: readonly object[]
+    refused?: string; marks?: readonly object[]; selectionFails?: boolean
   } = {},
 ) {
   forgetBlits()
@@ -631,7 +632,7 @@ function world(
   const w = {
     clock, files, compiles, queries, kills, watchers, vars, envSets,
     ran: [] as string[][], spawned: [] as string[][], reads: [] as string[],
-    clipboard: 'nothing yet', secret: false, count: 40, pastes: 0, copies: [] as string[], toasts: [] as string[], traces: [] as string[], logs: [] as string[],
+    clipboard: 'nothing yet', secret: false, readFails: false, count: 40, pastes: 0, copies: [] as string[], toasts: [] as string[], traces: [] as string[], logs: [] as string[],
     frames: [] as { path: string; old: string[]; png: Uint8Array }[], blits: [] as any[], writes: 0, selectionReads: 0,
     selection: undefined as { text: string; requestId?: string } | undefined,
     selects: true,
@@ -732,9 +733,12 @@ function world(
     if (cmd.includes('od -An')) return ok(argv.filter(a => a.endsWith('.png')).map(() => `${HEAD}\n@\n`).join(''))
     if (argv[0] === '/usr/bin/perl' && argv[2] === READ_PL) {
       w.pastes++
+      const { clipboard, secret } = w
       if (w.readGate) await w.readGate
+      // A read that failed (an error, the 2 s timeout).
+      if (w.readFails) return { deny: 'timed out' }
       // A password manager's copy: exit 3, its text not read.
-      return w.secret ? ok('', 3) : ok(w.clipboard)
+      return secret ? ok('', 3) : ok(clipboard)
     }
     return ok('', 1)
   })
@@ -762,6 +766,7 @@ function world(
   })
   on('ui.selection', async () => {
     w.selectionReads++
+    if (o.selectionFails) return { deny: 'no selection' }
     return { value: w.selection }
   })
   on('ui.blit', async ($: any, e: any) => {
@@ -2165,6 +2170,61 @@ test('/iui grab that copies nothing (no selection, no picture cells) does not ca
   await settle(w)
   expect(w.copies).toEqual(['https://example.com'])
   expect(w.clipboard).toBe('https://example.com')
+})
+
+test('a clipboard read that fails (an error, the 2 s timeout) is no copy from outside: a click whose words are still read still copies', async ($, on) => {
+  const { w } = await drawTargets($, on)
+  w.hold()
+  const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  await click(slow, 6, 3)
+  await settle(w)
+  const pastes = w.pastes
+  w.readFails = true
+  w.change()
+  await settle(w)
+  expect(w.pastes).toBe(pastes + 1)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual(['https://example.com'])
+  expect(w.clipboard).toBe('https://example.com')
+})
+
+test('our own older write, read late by the watcher, does not cancel a newer click whose words are still read', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  await hover(ui, 52, 4)
+  await settle(w)
+  // Two clicks on the ready page; the read of the first one's change (its text 'ls -la') is held.
+  w.holdReads()
+  await click(ui, 52, 4)
+  await settle(w)
+  await click(ui, 6, 3)
+  await settle(w)
+  expect(w.copies).toEqual(['ls -la', 'https://example.com'])
+  w.hold()
+  const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  await click(slow, 52, 4)
+  await settle(w)
+  // The late read gives the older write, then the read again the newer one: neither is a copy from outside.
+  w.releaseReads()
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual(['ls -la', 'https://example.com', 'ls -la'])
+  expect(w.clipboard).toBe('ls -la')
+})
+
+test('a $.ui.selection that fails is no selection at both ends of a copy: a $.ui.copy of picture cells and /iui grab still copy', { plugins: [COPIER] }, async ($, on) => {
+  const w = world(on, { selectionFails: true })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  const got = await $.command.run({ command: 'cp', args: COPY } as any)
+  expect(JSON.parse(got.text!)).toEqual({ isCopied: true })
+  expect(w.copies).toEqual([COPIED])
+  // A native copy of the cells: /iui grab reads them from the clipboard.
+  w.foreign(COPY)
+  await w.clock.settle()
+  expect(await grab($)).toBe(GRABBED)
+  expect(w.copies).toEqual([COPIED, COPIED])
 })
 
 test('a password manager\'s copy is never read: no hint, no /iui grab, nothing in dump; the read looks at the marks first', async ($, on) => {

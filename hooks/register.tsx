@@ -45,7 +45,7 @@ import { finalizeAll } from './lib/stream'
 import { knownTargets, knownWords, noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf, type PageWords } from './lib/probe'
 import { codePointsOf, decodeSelection, hasPlaceholders, joinSegments, pageTopsOf, pickPages, textOfRun, type Drawn, type Pick, type Segment } from './lib/copy'
 import { pagesOf, type Drawing } from './lib/answer'
-import { clipboardNow, clipWatchArgs, clipWayReady, hintText } from './lib/clipboard'
+import { clipboardNow, clipboardRead, clipWatchArgs, clipWayReady, hintText } from './lib/clipboard'
 import { setUp } from './lib/env'
 import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/frame'
 import { roomColumns } from './lib/terminal'
@@ -313,11 +313,11 @@ function hintGrab($: EngineInterface, text: string) {
   toast($, 'Intelligent UI: picture cells copied; /iui grab puts their text on the clipboard')
 }
 
-// The clipboard changed: one read (clipboardNow). A clipboard with no
+// The clipboard changed: one read (clipboardRead). A clipboard with no
 // placeholders, and our own write, are never touched. A new text that no
-// $.ui.copy wrote (another app's copy, Claude Code's copy on select, a
-// password manager's: null) is a newer copy. A change while a read runs
-// reads once more after it.
+// recent $.ui.copy wrote (another app's copy, Claude Code's copy on select, a
+// password manager's: null) is a newer copy; a failed read is none. A change
+// while a read runs reads once more after it.
 async function readClipboard($: EngineInterface) {
   if (clip.busy) {
     clip.again = true
@@ -327,10 +327,10 @@ async function readClipboard($: EngineInterface) {
   try {
     do {
       clip.again = false
-      const text = await clipboardNow($)
-      if (text === clip.seen) continue
+      const text = await clipboardRead($)
+      if (text === undefined || text === clip.seen) continue
       clip.seen = text
-      if (text !== copiedText) copies++
+      if (text === null || !copiedTexts.includes(text)) copies++
       if (text === null || text === clip.wrote || !hasPlaceholders(text)) continue
       hintGrab($, text)
     } while (clip.again)
@@ -376,19 +376,24 @@ async function updateState($: EngineInterface): Promise<UpdateState> {
 
 // The newest copy (a grab, a click, an up, any $.ui.copy, or a copy from
 // outside that the watcher sees): an older one that still reads its text
-// when a newer one starts copies nothing. `copiedText`: the text of the
-// last $.ui.copy (its clipboard change is no copy from outside).
+// when a newer one starts copies nothing. `copiedTexts`: the texts of the
+// last 4 $.ui.copy calls (their changes, even read late, are no copy from outside).
 let copies = 0
-let copiedText: string | undefined
+const copiedTexts: string[] = []
+function noteCopied(text: string) {
+  copiedTexts.push(text)
+  if (copiedTexts.length > 4) copiedTexts.shift()
+}
 
 // A copy's turn: its number and the native selection when it began.
 type Turn = { n: number; native: Promise<string> }
 const nativeKey = (s: { text: string; requestId?: string } | undefined) => (s ? `${s.requestId ?? ''}|${s.text}` : '')
 function nativeNow($: EngineInterface): Promise<string> {
   try {
-    return Promise.resolve(uiSelection($)).then(nativeKey, () => '?')
+    // A failed read is no selection, as grab and the ui.copy hook take it.
+    return Promise.resolve(uiSelection($)).then(nativeKey, () => nativeKey(undefined))
   } catch {
-    return Promise.resolve('?')
+    return Promise.resolve(nativeKey(undefined))
   }
 }
 const takeTurn = ($: EngineInterface, native?: Promise<string>): Turn => ({ n: ++copies, native: native ?? nativeNow($) })
@@ -707,7 +712,7 @@ export const register: Register = on => {
   // hold no placeholders and pass on as they are. Any copy is the newest:
   // one with placeholders whose words are read when a newer one came is refused.
   on('ui.copy', async ($, e, next) => {
-    copiedText = e.text
+    noteCopied(e.text)
     if (!hasPlaceholders(e.text) || !drawnAnswers.size) {
       copies++
       return next(e)
@@ -724,7 +729,7 @@ export const register: Register = on => {
     // The clipboard change of this write is not read again.
     clip.wrote = read.text
     clip.seen = read.text
-    copiedText = read.text
+    noteCopied(read.text)
     return next({ ...e, text: read.text })
   }).catch(($, e, next) => next(e))
 

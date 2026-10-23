@@ -15,6 +15,9 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 - A long session no longer keeps the last text of each answer in memory: the mod keeps the newest 1,024, as it does for the compile results.
 - The picture select highlight could stop on a page whose frames went out of the page cache while its build waited. That page is now built again.
 - The watcher no longer sends `kill` to the PID of a child that ended (the PID can be another process's).
+- On Linux, the GTK clipboard read, watch and check run Python isolated (`-I`): a `gi.py` in the session's project folder no longer runs.
+- When `$.ui.selection()` fails, a `ui.copy` of picture cells and `/iui grab` copy again (before, they said that a newer copy came first).
+- A clipboard read that fails (an error or the 2 s timeout), or a late read of one of the mod's last 4 copies, no longer cancels a newer copy.
 
 ### Changed
 

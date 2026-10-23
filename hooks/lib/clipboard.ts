@@ -98,7 +98,9 @@ export const GTK_READ_PY = [
   'if t is None: sys.exit(1)',
   'sys.stdout.write(t)',
 ].join('\n')
-const GTK_ENV = ['/usr/bin/env', 'GDK_BACKEND=x11', 'PYTHONIOENCODING=utf-8']
+const GTK_ENV = ['/usr/bin/env', 'GDK_BACKEND=x11']
+// Python isolated (-I): no gi.py of the session's folder runs; -X utf8 for UTF-8 stdout.
+const PY_ISOLATED = ['-I', '-X', 'utf8']
 
 // The way to read and watch the clipboard on Linux, from the session
 // (WAYLAND_DISPLAY, DISPLAY, the desktop) and the tools found (their paths).
@@ -109,7 +111,9 @@ const GTK_ENV = ['/usr/bin/env', 'GDK_BACKEND=x11', 'PYTHONIOENCODING=utf-8']
 export function clipWayOf(o: { wayland: boolean; x11: boolean; desktop: string; found: Partial<Record<ClipTool, string>> }): ClipWay {
   const { found } = o
   const wl = o.wayland && found['wl-paste'] ? found['wl-paste'] : ''
-  const gtk = found.gtk ? { read: [...GTK_ENV, found.gtk, '-c', GTK_READ_PY], watch: [...GTK_ENV, found.gtk, '-c', GTK_WATCH_PY] } : null
+  const gtk = found.gtk
+    ? { read: [...GTK_ENV, found.gtk, ...PY_ISOLATED, '-c', GTK_READ_PY], watch: [...GTK_ENV, found.gtk, ...PY_ISOLATED, '-c', GTK_WATCH_PY] }
+    : null
   // xsel is no reader: it can not list the targets (a password manager's copy would be read).
   const reader = found.xclip ? { tool: 'xclip', read: ['sh', '-c', XCLIP_READ_SH, found.xclip] }
     : gtk ? { tool: 'GTK', read: gtk.read } : null
@@ -133,11 +137,11 @@ export function clipWayOf(o: { wayland: boolean; x11: boolean; desktop: string; 
 }
 
 // Prints `tool path` for each clipboard tool on the PATH, and `gtk <python3>`
-// when there is no clipnotify or no xclip, and python3 loads GTK 3.
+// when there is no clipnotify or no xclip, and python3 (isolated) loads GTK 3.
 const GTK_CHECK_PY = 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk'
 export const FIND_SH = [
   `for c in ${CLIP_TOOLS.filter(c => c !== 'gtk').join(' ')}; do p=$(command -v "$c" 2>/dev/null) && echo "$c $p"; done`,
-  `{ command -v clipnotify && command -v xclip; } >/dev/null 2>&1 || { p=$(command -v python3 2>/dev/null) && "$p" -c '${GTK_CHECK_PY}' >/dev/null 2>&1 && echo "gtk $p"; }`,
+  `{ command -v clipnotify && command -v xclip; } >/dev/null 2>&1 || { p=$(command -v python3 2>/dev/null) && "$p" -I -c '${GTK_CHECK_PY}' >/dev/null 2>&1 && echo "gtk $p"; }`,
 ].join('; ')
 
 // The tools of `FIND_SH`'s output, by name; only absolute paths.
@@ -175,14 +179,19 @@ async function lookUp($: EngineInterface): Promise<ClipWay> {
 // null when it can not be read (no tool or no bridge, no text in it, or a
 // password manager's copy, which is never read).
 export async function clipboardNow($: EngineInterface): Promise<string | null> {
-  if (S.env?.isMac) {
-    const got = await exec($, ['/usr/bin/perl', '-e', READ_PL], { timeoutMs: 2000 }).catch(() => null)
-    return got && got.exitCode === 0 ? got.stdout : null
-  }
+  return (await clipboardRead($)) ?? null
+}
+
+// The same read, with a failed one apart: null for no text or a password
+// manager's copy (exit 1 or 3: a copy all the same); undefined when the read
+// failed (no tool or no bridge, an error, the 2 s timeout).
+export async function clipboardRead($: EngineInterface): Promise<string | null | undefined> {
   const way = S.clipWay
-  if (!way || !('read' in way)) return null
-  const got = await exec($, way.read, { timeoutMs: 2000 }).catch(() => null)
-  return got && got.exitCode === 0 ? got.stdout : null
+  const argv = S.env?.isMac ? ['/usr/bin/perl', '-e', READ_PL] : way && 'read' in way ? way.read : null
+  if (!argv) return undefined
+  const got = await exec($, argv, { timeoutMs: 2000 }).catch(() => null)
+  if (!got) return undefined
+  return got.exitCode === 0 ? got.stdout : got.exitCode === 1 || got.exitCode === 3 ? null : undefined
 }
 
 // The watcher's arguments after `clip`: none on macOS (its PerlObjCBridge),
