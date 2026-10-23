@@ -367,10 +367,15 @@ async function updateState($: EngineInterface): Promise<UpdateState> {
   return { on: S.updates, off: S.updatesOff, own: S.ownVersion, checked: S.updateChecked, now }
 }
 
+// The newest copy (a grab, a click or an up): an older one that still
+// reads its text when a newer one starts copies nothing.
+let copies = 0
+
 // /iui grab: the last mouse selection, read and copied. With no selection
 // (the main screen), the picture cells on the clipboard: the command says
 // that the copy is this session's.
 async function grab($: EngineInterface): Promise<string> {
+  const mine = ++copies
   const selected = await uiSelection($).catch(() => undefined)
   let raw = selected?.text
   if (raw === undefined) {
@@ -385,6 +390,7 @@ async function grab($: EngineInterface): Promise<string> {
   clip.raw = raw
   clip.rawRow = row
   const read = await readCopy($, raw, row)
+  if (mine !== copies) return 'Intelligent UI: a newer copy came first; this one copied nothing.'
   if (!read.resolved) return `Intelligent UI: found ${read.runs} picture run(s) but could not read them (see /iui dump).`
   clip.wrote = read.text
   clip.seen = read.text
@@ -515,12 +521,14 @@ function lightHover($: EngineInterface) {
 
 // A click (a clear) on a target of the page copies its text (a link's URL,
 // a file's path, a command, a code block's code). The page's words are probed first when they
-// are not known.
+// are not known; a newer copy while they are: the newer one copies.
 async function clickAt($: EngineInterface, d: Drawn & { job?: Job }, post: SelectPost, surface: RenderSurface) {
+  const mine = ++copies
   const links = () => clickLinks.get(d.id) ?? NO_LINKS
   let targets = knownTargets(d, post.page, links())
   if (!targets) {
     await wordsOf($, d, post.page)
+    if (mine !== copies) return
     targets = knownTargets(d, post.page, links())
   }
   const target = targets?.[targetAt(targets, post.anchor.x, post.anchor.y)]?.target
@@ -555,8 +563,7 @@ async function selectionText($: EngineInterface, d: Drawn & { job?: Job }, sel: 
 
 // The button came up: the selection's text on the clipboard, with the
 // toast of a copy. No text under it: nothing is copied; a newer up while
-// its words are read: the newer one copies.
-let copies = 0
+// its words are read (or a newer click or grab): the newer one copies.
 async function copySelection($: EngineInterface, d: Drawn & { job?: Job }, sel: Selection, surface: RenderSurface) {
   const t = performance.now()
   const mine = ++copies

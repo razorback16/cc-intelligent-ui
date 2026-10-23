@@ -917,15 +917,16 @@ test('positions are kept in memory: grabs of the same page share one probe run, 
   expect(w.copies).toEqual([])
   w.release()
   await w.clock.settle()
-  expect(await first).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read, row ans-1).')
+  // The newer grab copies; the older one copies nothing.
+  expect(await first).toBe('Intelligent UI: a newer copy came first; this one copied nothing.')
   expect(await second).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read, row ans-1).')
-  expect(w.copies).toEqual([COPIED, COPIED])
+  expect(w.copies).toEqual([COPIED])
   // Known now: no probe for the next grab.
   w.gate = null
   w.selection = { text: [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n') }
   expect(await grab($)).toBe(GRABBED)
   expect(w.queries.length).toBe(1)
-  expect(w.copies).toEqual([COPIED, COPIED, COPIED])
+  expect(w.copies).toEqual([COPIED, COPIED])
 })
 
 test('the watcher: its first count is only noted, each change is read once, the clipboard is never written; off stops its clipboard part', async ($, on) => {
@@ -1876,6 +1877,43 @@ test('picture select: a click copies a link, a file\'s path or a command; a clic
   await click(ui, 5, 10)
   await settle(w)
   expect(w.copies.length).toBe(4)
+})
+
+test('picture select: a click whose page still reads its words copies nothing after a newer click on a ready page', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  await hover(ui, 52, 4)
+  await settle(w)
+  // A second drawing (one more line: its own folder), its words held.
+  w.hold()
+  const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  await click(slow, 6, 3)
+  await settle(w)
+  await click(ui, 52, 4)
+  await settle(w)
+  expect(w.copies).toEqual(['ls -la'])
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual(['ls -la'])
+  expect(w.clipboard).toBe('ls -la')
+  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: copied the '))).toEqual(['Intelligent UI: copied the command'])
+})
+
+test('picture select: an up whose page still reads its words copies nothing after a newer click', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  await hover(ui, 52, 4)
+  await settle(w)
+  w.hold()
+  const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  await slow.pointer({ type: 'down', x: 0, y: 1, button: 'left', in: 'sel0' })
+  await slow.pointer({ type: 'move', x: 20, y: 3, button: 'left', in: 'sel0' })
+  await slow.pointer({ type: 'up', x: 30, y: 3, button: 'left', in: 'sel0' })
+  await settle(w)
+  await click(ui, 52, 4)
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual(['ls -la'])
+  expect(w.clipboard).toBe('ls -la')
 })
 
 test("picture select: a click on a code block's copy button copies its whole code; a hover tints the button", async ($, on) => {
