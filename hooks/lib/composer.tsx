@@ -129,23 +129,28 @@ export async function previewsOf(
 }
 
 // The filled copies made in this load by key (null: it failed), and the
-// ones being made.
+// ones being made, each with the redraws of the drawings that wait for it.
 const filled = new Map<string, string | null>()
-const filling = new Set<string>()
+const filling = new Map<string, Set<() => void>>()
 
 // A picture's filled copy for `box` pixels: its path; undefined while it is
-// made (`redraw` once it is: the plain image shows meanwhile); null when it
-// failed (not tried again) or with no Typst.
+// made (`redraw` once it is, with every other caller's: the plain image
+// shows meanwhile); null when it failed (not tried again) or with no Typst.
 function filledOf($: EngineInterface, ready: Env, p: Picture, box: PixelBox, redraw: () => void): string | null | undefined {
   if (!ready.typst) return null
   const key = `${p.file}@${p.stamp}@${box.width}x${box.height}`
   if (filled.has(key)) return filled.get(key) ?? null
-  if (filling.has(key)) return undefined
-  filling.add(key)
+  const waits = filling.get(key)
+  if (waits) {
+    waits.add(redraw)
+    return undefined
+  }
+  const redraws = new Set([redraw])
+  filling.set(key, redraws)
   void makeFilled($, ready, p, box).catch(() => null).then(png => {
     filling.delete(key)
     keep(filled, key, png, PICTURES_KEPT)
-    if (png) redraw()
+    if (png) for (const again of redraws) again()
   })
   return undefined
 }
@@ -161,8 +166,9 @@ async function makeFilled($: EngineInterface, ready: Env, p: Picture, box: Pixel
   const dir = folderOf(out)
   // The write makes the key folder; Typst does not.
   await write($, `${dir}/source.txt`, `${p.file}\n`).catch(() => undefined)
-  const part = `${dir}/image.part.png`
   const run = `${dir}/r-${Math.random().toString(36).slice(2, 10)}`
+  // The part file is in the run folder: another load's fill of the key has its own.
+  const part = `${run}/image.part.png`
   const staged = await exec($, ['sh', '-c', FILL_SH, 'sh', run, ready.root, p.file], { timeoutMs: 10000 }).catch(() => null)
   if (staged?.exitCode !== 0) {
     await logDebug($, ready.cache, `fill ${p.file}: the root ${run} could not be made: ${staged?.stderr ?? 'sh did not run'}`)
@@ -175,11 +181,11 @@ async function makeFilled($: EngineInterface, ready: Env, p: Picture, box: Pixel
       await logDebug($, ready.cache, `fill ${p.file} failed:\n${ran.stderr}`)
       return null
     }
+    const moved = await exec($, ['mv', '-f', part, out])
+    return moved.exitCode === 0 ? out : null
   } finally {
     void Promise.resolve(exec($, ['rm', '-rf', run], { timeoutMs: 10000 })).catch(() => undefined)
   }
-  const moved = await exec($, ['mv', '-f', part, out])
-  return moved.exitCode === 0 ? out : null
 }
 
 // A draft with an image not found: `redraw` (the band alone) a little later

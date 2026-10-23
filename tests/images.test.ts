@@ -1296,7 +1296,7 @@ test('under the prompt row: the plain image while Typst makes the filled copy, t
   const before = { filled: sets.filter(k => k === 'filled').length, done: sets.filter(k => k === 'done').length }
   release()
   await clock.settle()
-  const out = fills[0]!.at(-1)!.replace(/image\.part\.png$/, 'image.png')
+  const out = fills[0]!.at(-1)!.replace(/\/r-[^/]*\/image\.part\.png$/, '/image.png')
   expect(images(await ui.drawn())[0].props).toMatchObject({ source: { file: out }, columns: 20, rows: 5 })
   expect(sets.filter(k => k === 'filled').length).toBe(before.filled + 1)
   expect(sets.filter(k => k === 'done').length).toBe(before.done)
@@ -1492,7 +1492,7 @@ test('the filled copy: the plain image while Typst makes it, then the copy (the 
   const redraws = sets.filter(k => k === 'done').length
   release()
   await clock.settle()
-  const out = argv.at(-1)!.replace(/image\.part\.png$/, 'image.png')
+  const out = argv.at(-1)!.replace(/\/r-[^/]*\/image\.part\.png$/, '/image.png')
   const [image] = images(await ui.drawn())
   expect(image.props.source.file).toBe(out)
   expect(image.props).toMatchObject({ columns: 20, rows: 5, alt: '[Image #5]' })
@@ -1517,7 +1517,9 @@ test('a fill runs in a root of its own: only fill.typ and a link to the pasted f
   const argv = fills[0]!
   const run = argv[argv.indexOf('--root') + 1]!
   expect(run).not.toBe('/')
-  const key = argv.at(-1)!.replace(/\/image\.part\.png$/, '')
+  // The part file is in the run folder (another load's fill has its own), then moved to the key folder.
+  expect(argv.at(-1)).toBe(`${run}/image.part.png`)
+  const key = run.replace(/\/r-[^/]*$/, '')
   expect(run.startsWith(`${key}/r-`)).toBe(true)
   expect(argv.at(-2)).toBe(`${run}/fill.typ`)
   expect(argv).toContain('f=/image.png')
@@ -1575,6 +1577,33 @@ test('in herdr in iTerm2, a sent prompt draws its pasted images from their flipp
   expect(image.props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/flip\.png$/)
   expect(pngs.has(image.props.source.file)).toBe(true)
 })
+
+for (const flip of [false, true]) {
+  test(`a copy made while the band and a sent row both wait for it draws both again${flip ? ' (herdr in iTerm2)' : ''}`, async ($, on) => {
+    let release = () => {}
+    const holdFill = new Promise<void>(r => (release = r))
+    const { clock, fills } = world(on, {
+      typst: true, files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED], holdFill,
+      ...(flip ? { herdr: '/Applications/iTerm.app/Contents/MacOS/iTerm2', bytes: ROWS_PNG } : {}),
+    })
+    editor(on)
+    await ready($)
+    const band1 = await $.ui.mount(band())
+    await ($ as any).prompt.edit(typed('', '[Image #5]'))
+    await band1.drawn()
+    await clock.settle()
+    // Sent before the copy is made: the row's image has the same box, so it waits for the same copy.
+    await ($ as any).prompt.change({ text: '', cursor: 0, origin: { kind: 'clear' } })
+    const row = await $.ui.mount(prompt('[Image #5] what'))
+    await row.drawn()
+    expect(fills.length).toBe(1)
+    release()
+    await clock.settle()
+    // No redraw by the test: the row draws again by itself, with the copy.
+    const [image] = images(await row.drawn())
+    expect(image.props.source.file).toMatch(flip ? /^\/c\/[0-9a-f]{16}\/flip\.png$/ : /^\/c\/[0-9a-f]{16}\/image\.png$/)
+  })
+}
 
 test('a fill compile that fails leaves the plain image, and is not tried again', async ($, on) => {
   const { clock, fills } = world(on, { typst: true, files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED], failFill: true })
