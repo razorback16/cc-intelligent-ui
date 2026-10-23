@@ -5,14 +5,14 @@ import type { EngineInterface } from 'claude-code'
 
 import type { IuiTheme } from '../../types'
 import type { ThemeInfo } from './themes'
-import type { HostMode, ThemeSetting } from './mode'
+import type { HostMode, Osc11Kept, ThemeSetting } from './mode'
 import type { PlanVerdict } from './plan'
 import type { Drawn } from './copy'
 import type { GridMetrics } from './grid'
 import type { Checked } from './updates'
 import type { ClipWay } from './clipboard'
 import type { PdfFacts, PixelBox } from './images'
-import type { HerdrHost } from './terminal'
+import type { HerdrClient, HerdrHost } from './terminal'
 import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } from './settings'
 import { invalidate } from './api'
 
@@ -174,16 +174,21 @@ export const S = {
   termProgram: '',
   termName: '',
   itermProfile: undefined as string | undefined,
-  // kitty: TERM=xterm-kitty, or its KITTY_WINDOW_ID / KITTY_PID (set in setUp).
+  // kitty: TERM=xterm-kitty, or its KITTY_WINDOW_ID / KITTY_PID (set in setUp; setOuter).
   isKitty: false,
-  // iTerm2 (isItermIn) and cmux (Ghostty inside, with its CMUX_* variables), set in setUp.
+  // iTerm2 (isItermIn) and cmux (Ghostty inside, with its CMUX_* variables), set in setUp (cmux: setOuter).
   isIterm: false,
   isCmux: false,
-  // herdr (isHerdrIn), its version ('' not known) and the terminal it runs in
-  // (herdrHostOf; '' outside herdr or not known), set in setUp.
+  // herdr (isHerdrIn), its version ('' not known), the client the user
+  // typed in last (HERDR_CLIENT_SH; null: none found, so the server's
+  // variables count), the terminal it runs in ('' outside herdr or not
+  // known; setOuter), all set in setUp and kept by the poll; and the last
+  // OSC 11 answer of its pane (keptOsc11).
   isHerdr: false,
   herdrVersion: '',
+  herdrClient: null as HerdrClient | null,
   herdrHost: '' as HerdrHost,
+  osc11Kept: null as Osc11Kept,
   // A font folder for Typst (TYPST_FONT_PATHS): the font a terminal carries
   // in its program (Ghostty's, Rio's), when it draws it. '' for none.
   fontPaths: '',

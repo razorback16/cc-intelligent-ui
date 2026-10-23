@@ -21,7 +21,7 @@ export function settingOf(value: unknown): ThemeSetting {
 // The OS appearance, and where it was read.
 export type HostMode = {
   mode: IuiTheme
-  source: 'terminal' | 'iTerm2' | 'Ghostty' | 'cmux' | 'kitty' | 'Rio' | 'macOS' | 'GNOME' | 'desktop portal' | 'COLORFGBG'
+  source: 'terminal' | 'herdr' | 'iTerm2' | 'Ghostty' | 'cmux' | 'kitty' | 'Rio' | 'macOS' | 'GNOME' | 'desktop portal' | 'COLORFGBG'
   detail?: string
 }
 
@@ -88,6 +88,19 @@ export function parseOsc11(text: string): Rgb | null {
   if (!m) return null
   const part = (h: string) => parseInt(h, 16) / (16 ** h.length - 1)
   return { r: part(m[1]!), g: part(m[2]!), b: part(m[3]!) }
+}
+
+// Under herdr, the OSC 11 answer (the background of the terminal in front)
+// does not always reach the mod (Claude Code reads it first). A poll with no
+// answer keeps the last answer's mode until OSC11_MISSES polls in a row have
+// none; then the other sources count. `last`: the answer kept and the misses
+// in a row since it (null: none kept).
+export const OSC11_MISSES = 3
+export type Osc11Kept = { seen: HostMode; misses: number } | null
+export function keptOsc11(last: Osc11Kept, answer: HostMode | null): { kept: Osc11Kept; use: HostMode | null } {
+  if (answer) return { kept: { seen: answer, misses: 0 }, use: answer }
+  if (last && last.misses + 1 < OSC11_MISSES) return { kept: { seen: last.seen, misses: last.misses + 1 }, use: last.seen }
+  return { kept: null, use: null }
 }
 
 // Control characters shown as text (\e, \a, \xNN), for /iui probe.

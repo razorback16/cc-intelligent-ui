@@ -2,6 +2,8 @@
 // draws pictures there, and how large a picture sent as bytes (over ssh) can be.
 import { S, type Cell } from './state'
 import { GUTTER, IMAGE_MAX_COLUMNS, SEGMENT_ROWS, type Width } from './settings'
+import { isItermIn } from './terminals'
+import type { EnvName } from './api'
 
 // The columns a picture takes: the viewport less the bullet, at most `width`
 // (`/iui width`; full: no cap) and IMAGE_MAX_COLUMNS, at least 20.
@@ -48,7 +50,15 @@ export function sizeOf(stdout: string, padded = false): { rows: number; columns:
 // padding (iTerm2, kitty and WezTerm do not), and it draws its own font when
 // its config names none. herdr in Ghostty uses Ghostty's font and config (its
 // tty pixels are whole cells, so the round down changes nothing).
-export const isGhosttyHere = () => /ghostty/i.test(S.termProgram + S.termName) || S.isCmux || S.herdrHost === 'ghostty'
+export const isGhosttyHere = () => isGhosttyIn(S.termProgram, S.termName) || S.isCmux || S.herdrHost === 'ghostty'
+
+// The terminals by their variables: Ghostty by TERM_PROGRAM or TERM; kitty
+// by TERM=xterm-kitty, KITTY_WINDOW_ID or KITTY_PID; cmux by one of its
+// CMUX_* variables; Rio by TERM_PROGRAM=rio or TERM=rio.
+export const isGhosttyIn = (program: string, term: string) => /ghostty/i.test(program + term)
+export const isKittyIn = (env: { term: string; windowId?: string; pid?: string }) => /kitty/i.test(env.term) || !!env.windowId || !!env.pid
+export const isCmuxIn = (env: { surface?: string; workspace?: string; socket?: string }) => !!env.surface || !!env.workspace || !!env.socket
+export const isRioIn = (program: string, term: string) => /^rio$/i.test(program) || /^rio$/i.test(term)
 
 // A set flag: anything but empty, 0, false, no or off.
 export const isSet = (value: string | undefined) => !!value && !/^(0|false|no|off)$/i.test(value.trim())
@@ -61,21 +71,107 @@ export function isHerdrIn(env: { program: string; herdrEnv?: string }): boolean 
   return isSet(env.herdrEnv)
 }
 
-// The terminal herdr runs in, from the variables it keeps of the terminal
-// that started its server (most often the one attached now): Ghostty's
-// GHOSTTY_*_DIR, kitty's KITTY_PID or KITTY_INSTALLATION_DIR, iTerm2's
-// ITERM_PROFILE; '' when none.
-export type HerdrHost = 'ghostty' | 'kitty' | 'iterm' | ''
-export function herdrHostOf(env: { ghosttyResources?: string; ghosttyBin?: string; kittyPid?: string; kittyDir?: string; itermProfile?: string }): HerdrHost {
+// The terminal herdr runs in. From the variables it keeps of the terminal
+// that started its server (the fallback, when no client is found): cmux's
+// CMUX_*, Ghostty's GHOSTTY_*_DIR, kitty's KITTY_PID or
+// KITTY_INSTALLATION_DIR, iTerm2's ITERM_PROFILE; '' when none.
+export type HerdrHost = 'ghostty' | 'cmux' | 'kitty' | 'iterm' | 'rio' | ''
+export function herdrHostOf(env: { cmux?: boolean; ghosttyResources?: string; ghosttyBin?: string; kittyPid?: string; kittyDir?: string; itermProfile?: string }): HerdrHost {
+  if (env.cmux) return 'cmux'
   if (env.ghosttyResources || env.ghosttyBin) return 'ghostty'
   if (env.kittyPid || env.kittyDir) return 'kitty'
   if (env.itermProfile) return 'iterm'
   return ''
 }
-const HERDR_HOSTS = { ghostty: 'Ghostty', kitty: 'kitty', iterm: 'iTerm2' } as const
-// herdr in /iui details: `herdr 0.9.5 (in Ghostty)`.
-export const herdrText = (version: string, host: HerdrHost) =>
-  `herdr${version ? ` ${version}` : ''} (${host ? `in ${HERDR_HOSTS[host]}` : 'outer terminal not known'})`
+
+// The variables of the terminal the user sees that the font and mode
+// readers use (host.ts outerEnv): under herdr, the client's.
+export const OUTER_NAMES = ['COLORFGBG', 'GHOSTTY_BIN_DIR', 'GHOSTTY_RESOURCES_DIR', 'ITERM_PROFILE', 'KITTY_CONFIG_DIRECTORY', 'RIO_CONFIG_HOME'] as const satisfies readonly EnvName[]
+export type OuterName = (typeof OUTER_NAMES)[number]
+
+// A herdr client (HERDR_CLIENT_SH): its pid, its tty and the tty's access
+// time (the last key typed there), its command, the nearest ancestor with no
+// tty (the terminal app), its variables and the terminal they give.
+export type HerdrClient = { pid: number; atime: number; tty: string; cmd: string; app: string; env: Record<string, string>; kind: HerdrHost }
+
+// The terminal of a client: by its terminal app's path first (a variable
+// can come from another terminal that started this one), then by TERM,
+// TERM_PROGRAM (another one, as WezTerm's: not known) and the variables of
+// kitty, cmux, Ghostty and iTerm2.
+export function outerKindOf(env: Readonly<Record<string, string>>, app: string): HerdrHost {
+  // The program: an app bundle's path (its folders can hold spaces), else the first word.
+  const path = /^\S*(?: [^ /-][^ ]*)*?\.app\/\S*/.exec(app)?.[0] ?? app.split(' ')[0] ?? ''
+  if (/cmux/i.test(path)) return 'cmux'
+  if (/ghostty/i.test(path)) return 'ghostty'
+  if (/kitty/i.test(path)) return 'kitty'
+  if (/iterm/i.test(path)) return 'iterm'
+  if (/(^|\/)rio(\.app)?(\/|$)/i.test(path)) return 'rio'
+  const program = env.TERM_PROGRAM ?? ''
+  const term = env.TERM ?? ''
+  const cmux = isCmuxIn({ surface: env.CMUX_SURFACE_ID, workspace: env.CMUX_WORKSPACE_ID, socket: env.CMUX_SOCKET_PATH })
+  if (/kitty/i.test(term)) return 'kitty'
+  if (isGhosttyIn(program, term)) return cmux ? 'cmux' : 'ghostty'
+  if (isRioIn(program, term)) return 'rio'
+  if (isItermIn({ program, profile: env.ITERM_PROFILE, session: env.ITERM_SESSION_ID, lcTerminal: env.LC_TERMINAL })) return 'iterm'
+  if (program) return ''
+  if (isKittyIn({ term, windowId: env.KITTY_WINDOW_ID, pid: env.KITTY_PID })) return 'kitty'
+  return herdrHostOf({ cmux, ghosttyResources: env.GHOSTTY_RESOURCES_DIR, ghosttyBin: env.GHOSTTY_BIN_DIR, kittyDir: env.KITTY_INSTALLATION_DIR, itermProfile: env.ITERM_PROFILE })
+}
+
+// The variables of a process: NUL-separated (Linux /proc/<pid>/environ), or
+// as macOS `ps eww` prints them: its command (`cmd`, as ps prints it with no
+// variables), then `NAME=value` words. A value can hold spaces (an iTerm2
+// profile name), so a word starts only where a `NAME=` follows a space.
+export function envOfText(text: string, cmd: string): Record<string, string> {
+  const env: Record<string, string> = {}
+  let words: string[]
+  if (text.includes('\0')) words = text.split('\0')
+  else {
+    const line = text.replace(/\n+$/, '')
+    const bare = !!cmd && (line === cmd || line.startsWith(`${cmd} `))
+    words = (bare ? line.slice(cmd.length) : line).split(/ (?=[A-Za-z_][A-Za-z0-9_]*=)/)
+    // Not known where the command ends: its first word is not a variable.
+    if (!bare) words.shift()
+  }
+  for (const word of words) {
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)=([\s\S]*)$/.exec(word)
+    if (m) env[m[1]!] = m[2]!
+  }
+  return env
+}
+
+// HERDR_CLIENT_SH's output (`pid`, `atime`, `tty`, `cmd` and `app` lines,
+// then `env` and the variables) as a client; null for none. Ghostty with no
+// GHOSTTY_BIN_DIR gets its app's folder (GHOSTTY_SH runs that ghostty).
+export function herdrClientOf(stdout: string): HerdrClient | null {
+  const at = stdout.indexOf('\nenv\n')
+  if (at < 0) return null
+  const head = stdout.slice(0, at).split('\n')
+  const field = (name: string) => head.find(line => line.startsWith(`${name} `))?.slice(name.length + 1).trim() ?? ''
+  const pid = Number(field('pid'))
+  if (!Number.isInteger(pid) || pid <= 0) return null
+  const cmd = field('cmd')
+  const app = field('app')
+  const env = envOfText(stdout.slice(at + 5), cmd)
+  const kind = outerKindOf(env, app)
+  const bin = /^(.*)\/ghostty(?= |$)/.exec(app)?.[1]
+  if (kind === 'ghostty' && !env.GHOSTTY_BIN_DIR && bin) env.GHOSTTY_BIN_DIR = bin
+  return { pid, atime: Number(field('atime')) || 0, tty: field('tty'), cmd, app, env, kind }
+}
+
+// What the font and the mode depend on: the kind and OUTER_NAMES (not the
+// pid or the time: another window of the same terminal changes nothing).
+export const herdrClientKey = (c: HerdrClient | null) => (c ? JSON.stringify([c.kind, ...OUTER_NAMES.map(name => c.env[name] ?? '')]) : '')
+export const herdrClientChanged = (was: HerdrClient | null, now: HerdrClient | null) => herdrClientKey(was) !== herdrClientKey(now)
+
+const HERDR_HOSTS = { ghostty: 'Ghostty', cmux: 'cmux', kitty: 'kitty', iterm: 'iTerm2', rio: 'Rio' } as const
+// herdr in /iui details, and where its terminal came from: the client
+// typed in last, or the server's variables (the fallback).
+export type HerdrFrom = 'client' | 'server'
+export const herdrText = (version: string, host: HerdrHost, from: HerdrFrom = 'server') =>
+  `herdr${version ? ` ${version}` : ''} (${
+    host ? `in ${HERDR_HOSTS[host]}, ${from === 'client' ? 'the client you used last' : "from the server's start"}` : 'outer terminal not known'
+  })`
 
 // Whether /iui setup can turn pictures on: they are off, and this is iTerm2
 // on a Mac or herdr (macOS or Linux), not over ssh, tmux, screen or a

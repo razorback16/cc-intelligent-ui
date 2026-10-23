@@ -9,11 +9,11 @@ import {
 import { DEFAULT_METRICS, refresh, S, type Env } from './state'
 import { resolveMode, settingOf } from './mode'
 import { isItermIn } from './terminals'
-import { canDrawIn, herdrHostOf, isHerdrIn, isSet, needsSetup } from './terminal'
+import { canDrawIn, isHerdrIn, isSet, needsSetup } from './terminal'
 import { claudeTmpOf } from './images'
 import { applyTheme } from './themes'
 import { registerCommand } from './command'
-import { readHostMode, termFontOf, watchHost } from './host'
+import { readHerdrClient, readHostMode, setOuter, termFontOf, watchHost } from './host'
 import { readFrame, setFrame, watchFrame } from './frame'
 import { offerSetup } from './setup'
 import { findClipWay } from './clipboard'
@@ -69,24 +69,18 @@ export function setUp($: EngineInterface): Promise<Env> {
     S.hostOs = os.trim()
     S.termProgram = program
     S.termName = term
-    S.itermProfile = (await envGet($, 'ITERM_PROFILE')) || undefined
     S.isHerdr = isHerdrIn({ program, herdrEnv: await envGet($, 'HERDR_ENV') })
     S.herdrVersion = S.isHerdr ? ((await envGet($, 'TERM_PROGRAM_VERSION')) ?? '').trim() : ''
-    S.herdrHost = S.isHerdr
-      ? herdrHostOf({
-        ghosttyResources: await envGet($, 'GHOSTTY_RESOURCES_DIR'),
-        ghosttyBin: await envGet($, 'GHOSTTY_BIN_DIR'),
-        kittyPid: await envGet($, 'KITTY_PID'),
-        kittyDir: await envGet($, 'KITTY_INSTALLATION_DIR'),
-        itermProfile: S.itermProfile,
-      })
-      : ''
-    S.isKitty = /kitty/i.test(term) || !!(await envGet($, 'KITTY_WINDOW_ID')) || !!(await envGet($, 'KITTY_PID')) || S.herdrHost === 'kitty'
+    // Under herdr the client the user typed in last gives the terminal; else (none found) the server's variables.
+    S.herdrClient = null
+    S.osc11Kept = null
+    if (S.isHerdr) await readHerdrClient($).catch(() => false)
+    await setOuter($)
     S.isRemote = ssh
     S.debug = isSet(await envGet($, 'IUI_DEBUG'))
     S.isIterm = isItermIn({
       program,
-      profile: S.itermProfile,
+      profile: (await envGet($, 'ITERM_PROFILE')) || undefined,
       session: (await envGet($, 'ITERM_SESSION_ID')) || undefined,
       lcTerminal: (await envGet($, 'LC_TERMINAL')) || undefined,
     })
@@ -100,8 +94,6 @@ export function setUp($: EngineInterface): Promise<Env> {
       background: (await envGet($, 'CLAUDE_CODE_SESSION_KIND')) === 'bg',
     })
     if (S.setupNeeded) void offerSetup($).catch(() => undefined)
-    S.isCmux = !!(await envGet($, 'CMUX_SURFACE_ID')) || !!(await envGet($, 'CMUX_WORKSPACE_ID')) || !!(await envGet($, 'CMUX_SOCKET_PATH'))
-    S.colorFgBg = (await envGet($, 'COLORFGBG')) ?? ''
     S.userFontPaths = (await envGet($, 'TYPST_FONT_PATHS')) ?? ''
     if (S.setting === 'auto') S.host = (await readHostMode($).catch(() => null)) ?? S.host
     S.theme = resolveMode(S.setting, S.host)

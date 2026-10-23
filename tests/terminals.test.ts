@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
-  cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, ghosttyBackgroundOf, ghosttyHasColors, ghosttyThemesOf, ghosttyValueOf, herdrHostOf, herdrText,
-  isHerdrIn, isItermIn, jsoncOf, needsSetup,
+  cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, envOfText, ghosttyBackgroundOf, ghosttyHasColors, ghosttyThemesOf, ghosttyValueOf,
+  herdrClientChanged, herdrClientOf, herdrHostOf, herdrText, isHerdrIn, isItermIn, jsoncOf, keptOsc11, needsSetup, OSC11_MISSES, outerKindOf, type HostMode,
   KITTY_DEFAULT_BG, kittyAutoFileOf, kittyBackgroundOf, kittyConfigDirsOf, kittyEntriesOf, kittyFontOf, kittyIncludePath, kittyLinesOf,
   kittySchemeOfGnome, kittyValueOf,
   RIO_DEFAULT_BG, RIO_DEFAULT_FONT, rioBackgroundOf, rioConfigDirOf, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf,
@@ -235,11 +235,135 @@ test("herdr's terminal: Ghostty, then kitty, then iTerm2, by the variables of th
   expect(herdrHostOf({ ghosttyResources: '', kittyPid: '', itermProfile: '' })).toBe('')
 })
 
-test('herdr in /iui details: its version and its terminal', () => {
-  expect(herdrText('0.9.5', 'ghostty')).toBe('herdr 0.9.5 (in Ghostty)')
-  expect(herdrText('0.9.5', 'kitty')).toBe('herdr 0.9.5 (in kitty)')
-  expect(herdrText('', 'iterm')).toBe('herdr (in iTerm2)')
+test('herdr in /iui details: its version, its terminal and where that came from', () => {
+  expect(herdrText('0.9.5', 'kitty', 'client')).toBe('herdr 0.9.5 (in kitty, the client you used last)')
+  expect(herdrText('0.9.5', 'ghostty')).toBe("herdr 0.9.5 (in Ghostty, from the server's start)")
+  expect(herdrText('0.9.5', 'ghostty', 'server')).toBe("herdr 0.9.5 (in Ghostty, from the server's start)")
+  expect(herdrText('', 'iterm', 'client')).toBe('herdr (in iTerm2, the client you used last)')
+  expect(herdrText('', 'cmux', 'client')).toBe('herdr (in cmux, the client you used last)')
+  expect(herdrText('', 'rio', 'client')).toBe('herdr (in Rio, the client you used last)')
+  expect(herdrText('', '', 'client')).toBe('herdr (outer terminal not known)')
   expect(herdrText('', '')).toBe('herdr (outer terminal not known)')
+})
+
+test("herdr's terminal from the server's variables: cmux first", () => {
+  expect(herdrHostOf({ cmux: true, ghosttyResources: '/g' })).toBe('cmux')
+  expect(herdrHostOf({ cmux: false, ghosttyResources: '/g' })).toBe('ghostty')
+})
+
+// The output of HERDR_CLIENT_SH, as measured on a Mac (kitty and Ghostty
+// clients of one herdr server) and on Linux.
+const KITTY_MAC = [
+  'pid 54346', 'atime 1792712692', 'tty ttys021', 'cmd /Users/u/.local/bin/herdr',
+  'app /Applications/kitty.app/Contents/MacOS/kitty /Users/u/.local/bin/herdr', 'env',
+  '/Users/u/.local/bin/herdr USER=u __CFBundleIdentifier=net.kovidgoyal.kitty PATH=/Applications/kitty.app/Contents/MacOS:/usr/bin:/bin HOME=/Users/u ' +
+    'SHELL=/bin/zsh LANG=en_US.UTF-8 KITTY_WINDOW_ID=1 TERM=xterm-kitty COLORTERM=truecolor KITTY_PID=54120 ' +
+    'KITTY_INSTALLATION_DIR=/Applications/kitty.app/Contents/Resources/kitty',
+  '',
+].join('\n')
+const GHOSTTY_MAC = [
+  'pid 50390', 'atime 1792712644', 'tty ttys012', 'cmd herdr', 'app /Applications/Ghostty.app/Contents/MacOS/ghostty -e /Users/u/.local/bin/herdr', 'env',
+  'herdr USER=u GHOSTTY_BIN_DIR=/Applications/Ghostty.app/Contents/MacOS TERM=xterm-ghostty TERM_PROGRAM=ghostty TERM_PROGRAM_VERSION=1.3.1 ' +
+    'GHOSTTY_RESOURCES_DIR=/Applications/Ghostty.app/Contents/Resources/ghostty COLORFGBG=15;0',
+  '',
+].join('\n')
+
+test('a herdr client on macOS (ps eww): its command is not a variable, its variables are whole', () => {
+  const kitty = herdrClientOf(KITTY_MAC)!
+  expect(kitty).toMatchObject({ pid: 54346, atime: 1792712692, tty: 'ttys021', cmd: '/Users/u/.local/bin/herdr', kind: 'kitty' })
+  expect(kitty.env.TERM).toBe('xterm-kitty')
+  expect(kitty.env.KITTY_INSTALLATION_DIR).toBe('/Applications/kitty.app/Contents/Resources/kitty')
+  expect(kitty.env.USER).toBe('u')
+  expect(Object.keys(kitty.env).some(k => k.includes('herdr'))).toBe(false)
+  const ghostty = herdrClientOf(GHOSTTY_MAC)!
+  expect(ghostty).toMatchObject({ pid: 50390, kind: 'ghostty', cmd: 'herdr' })
+  expect(ghostty.env.GHOSTTY_BIN_DIR).toBe('/Applications/Ghostty.app/Contents/MacOS')
+  expect(ghostty.env.COLORFGBG).toBe('15;0')
+})
+
+test('ps eww text: a value with spaces stays whole; the arguments (--session x) are not variables', () => {
+  const ps = 'herdr --session work ITERM_PROFILE=My Dark Profile TERM_PROGRAM=iTerm.app PATH=/a b/bin:/c X=a=b'
+  const env = { ITERM_PROFILE: 'My Dark Profile', TERM_PROGRAM: 'iTerm.app', PATH: '/a b/bin:/c', X: 'a=b' }
+  expect(envOfText(ps, 'herdr --session work')).toEqual(env)
+  // The command not known: its first word goes.
+  expect(envOfText(`${ps}\n`, '')).toEqual(env)
+  expect(envOfText('herdr', 'herdr')).toEqual({})
+  expect(envOfText('', '')).toEqual({})
+  const iterm = herdrClientOf(['pid 7', 'atime 5', 'tty ttys003', 'cmd herdr --session work', 'app /Applications/iTerm.app/Contents/MacOS/iTermServer-3.5.10 x', 'env', ps].join('\n'))!
+  expect(iterm.kind).toBe('iterm')
+  expect(iterm.env.ITERM_PROFILE).toBe('My Dark Profile')
+})
+
+test('a herdr client on Linux (/proc/<pid>/environ): NUL-separated variables; a value can hold = and newlines', () => {
+  const out = 'pid 4242\natime 1792700000\ntty pts/3\ncmd herdr session attach work\napp /usr/bin/kitty\nenv\n' +
+    'TERM=xterm-kitty\0KITTY_CONFIG_DIRECTORY=/home/u/kc\0A=b=c\0B=one\ntwo\0'
+  const c = herdrClientOf(out)!
+  expect(c).toMatchObject({ pid: 4242, tty: 'pts/3', kind: 'kitty', app: '/usr/bin/kitty' })
+  expect(c.env).toEqual({ TERM: 'xterm-kitty', KITTY_CONFIG_DIRECTORY: '/home/u/kc', A: 'b=c', B: 'one\ntwo' })
+})
+
+test('no herdr client: no output, no pid or no env line is null; no variables read gives the app', () => {
+  expect(herdrClientOf('')).toBeNull()
+  expect(herdrClientOf('pid x\nenv\nTERM=xterm-kitty')).toBeNull()
+  expect(herdrClientOf('pid 12\natime 3\ntty ttys001')).toBeNull()
+  const bare = herdrClientOf('pid 12\natime 3\ntty ttys001\ncmd herdr\napp /Applications/Ghostty.app/Contents/MacOS/ghostty\nenv\n')!
+  expect(bare.kind).toBe('ghostty')
+  // Ghostty with no GHOSTTY_BIN_DIR: its app's folder (GHOSTTY_SH runs that ghostty).
+  expect(bare.env).toEqual({ GHOSTTY_BIN_DIR: '/Applications/Ghostty.app/Contents/MacOS' })
+})
+
+test("a client's terminal: its app first, then TERM, TERM_PROGRAM and the terminals' variables", () => {
+  // kitty started from a Ghostty shell keeps Ghostty's variables: the app (or TERM) says kitty.
+  const fromGhostty = { TERM: 'xterm-kitty', TERM_PROGRAM: 'ghostty', GHOSTTY_RESOURCES_DIR: '/g', KITTY_WINDOW_ID: '1' }
+  expect(outerKindOf(fromGhostty, '/Applications/kitty.app/Contents/MacOS/kitty')).toBe('kitty')
+  expect(outerKindOf(fromGhostty, '')).toBe('kitty')
+  expect(outerKindOf({ TERM: 'xterm-ghostty', TERM_PROGRAM: 'ghostty', KITTY_PID: '9' }, '')).toBe('ghostty')
+  expect(outerKindOf({ TERM: 'xterm-ghostty', CMUX_SURFACE_ID: 's' }, '')).toBe('cmux')
+  expect(outerKindOf({}, '/Applications/cmux.app/Contents/MacOS/cmux')).toBe('cmux')
+  expect(outerKindOf({ TERM_PROGRAM: 'rio' }, '')).toBe('rio')
+  expect(outerKindOf({}, '/Applications/rio.app/Contents/MacOS/rio')).toBe('rio')
+  expect(outerKindOf({}, '/usr/bin/rio')).toBe('rio')
+  expect(outerKindOf({ TERM_PROGRAM: 'iTerm.app' }, '')).toBe('iterm')
+  expect(outerKindOf({ LC_TERMINAL: 'iTerm2' }, '')).toBe('iterm')
+  expect(outerKindOf({ KITTY_WINDOW_ID: '2' }, '')).toBe('kitty')
+  expect(outerKindOf({ GHOSTTY_BIN_DIR: '/b' }, '')).toBe('ghostty')
+  // Another terminal (WezTerm) with kitty's variables of the shell that started it: not known.
+  expect(outerKindOf({ TERM_PROGRAM: 'WezTerm', KITTY_PID: '9' }, '/Applications/WezTerm.app/Contents/MacOS/wezterm-gui')).toBe('')
+  expect(outerKindOf({}, '')).toBe('')
+  // An app bundle with spaces in its folder; arguments do not count.
+  expect(outerKindOf({}, '/Applications/My Apps/Ghostty.app/Contents/MacOS/ghostty -e herdr')).toBe('ghostty')
+  expect(outerKindOf({}, '/usr/bin/foot /Applications/kitty.app/x')).toBe('')
+})
+
+test('a change of herdr client: another terminal, profile or config counts; another window of the same does not', () => {
+  const kitty = herdrClientOf(KITTY_MAC)!
+  const ghostty = herdrClientOf(GHOSTTY_MAC)!
+  expect(herdrClientChanged(null, null)).toBe(false)
+  expect(herdrClientChanged(null, kitty)).toBe(true)
+  expect(herdrClientChanged(kitty, ghostty)).toBe(true)
+  expect(herdrClientChanged(kitty, { ...kitty, pid: 1, atime: 2, tty: 'ttys001', env: { ...kitty.env, KITTY_WINDOW_ID: '7', KITTY_PID: '1' } })).toBe(false)
+  expect(herdrClientChanged(kitty, { ...kitty, env: { ...kitty.env, KITTY_CONFIG_DIRECTORY: '/other' } })).toBe(true)
+  const iterm = { ...kitty, kind: 'iterm' as const, env: { ITERM_PROFILE: 'Dark' } }
+  expect(herdrClientChanged(iterm, { ...iterm, env: { ITERM_PROFILE: 'Light' } })).toBe(true)
+  expect(herdrClientChanged(ghostty, { ...ghostty, env: { ...ghostty.env, COLORFGBG: '0;15' } })).toBe(true)
+})
+
+test("herdr's OSC 11: a missed answer keeps the last one until OSC11_MISSES polls in a row miss", () => {
+  expect(OSC11_MISSES).toBe(3)
+  const light: HostMode = { mode: 'light', source: 'herdr' }
+  const dark: HostMode = { mode: 'dark', source: 'herdr' }
+  expect(keptOsc11(null, null)).toEqual({ kept: null, use: null })
+  let step = keptOsc11(null, light)
+  expect(step).toEqual({ kept: { seen: light, misses: 0 }, use: light })
+  step = keptOsc11(step.kept, null)
+  expect(step).toEqual({ kept: { seen: light, misses: 1 }, use: light })
+  step = keptOsc11(step.kept, null)
+  expect(step).toEqual({ kept: { seen: light, misses: 2 }, use: light })
+  // The third miss in a row: the other sources count.
+  expect(keptOsc11(step.kept, null)).toEqual({ kept: null, use: null })
+  // An answer starts again from 0.
+  step = keptOsc11(keptOsc11(step.kept, dark).kept, null)
+  expect(step).toEqual({ kept: { seen: dark, misses: 1 }, use: dark })
 })
 
 test('/iui setup is offered in iTerm2 on a Mac and in herdr (macOS or Linux), with pictures off, not in ssh, tmux, screen or a background session', () => {

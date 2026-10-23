@@ -8,7 +8,7 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 - **herdr support** (the terminal multiplexer). In a herdr pane, Claude Code needs `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` to show pictures. The mod asks one time to add the shell line, as in iTerm2. `/iui setup` also adds it. Then close the pane and open a new herdr pane. herdr must run in a terminal that shows kitty pictures (kitty or Ghostty). Refer to [Terminals](docs/install.md#terminals).
 - `/iui setup` works in herdr on Linux too.
-- `/iui details` names herdr, its version and the terminal that it runs in, for example `herdr 0.9.5 (in Ghostty)`.
+- `/iui details` names herdr, its version, the terminal that it runs in and how the mod found that terminal, for example `herdr 0.9.5 (in kitty, the client you used last)`. If the mod uses the variables of the herdr server, it shows `(in Ghostty, from the server's start)`.
 
 ### Changed
 
@@ -17,7 +17,9 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 ### Fixed
 
-- In herdr, the mod now uses the font and the background of the terminal that herdr runs in (Ghostty, kitty or iTerm2). Before, it used Menlo and the OS appearance, so the text could be dark on a dark background.
+- In herdr, the mod now uses the font and the background of the terminal that herdr runs in (Ghostty, kitty, iTerm2, cmux or Rio). Before, it used Menlo and the OS appearance, so the text could be dark on a dark background.
+  - With the `auto` theme, the background comes from herdr: herdr gives the background of the terminal in front (OSC 11). This also works with `herdr --remote`. If an answer does not come, the mod keeps the last background for up to 2 more checks.
+  - The font comes from the herdr client where you typed last. You can attach to one herdr server from more than one terminal, for example from Ghostty and from kitty. When you type in a different terminal, the mod finds it at the next check (every 3 s), reads its font and draws the pictures again. If the mod cannot find the client, it uses the variables of the terminal that started the herdr server.
 - In herdr, a tall page of a long answer did not show (herdr does not send an image that is too large to the terminal). Refer to [Limitations](docs/limitations.md).
 
 ## 0.3.2 (2026-10-21)

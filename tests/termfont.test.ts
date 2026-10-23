@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { fcPatternOf, KITTY_MAC_FONT, PROGRAM_FONTS_PL, PROGRAM_FONTS_SH, RIO_DEFAULT_FONT, RIO_OLD_FONT } from '../hooks/register'
+import { fcPatternOf, HERDR_CLIENT_SH, KITTY_MAC_FONT, PROGRAM_FONTS_PL, PROGRAM_FONTS_SH, RIO_DEFAULT_FONT, RIO_OLD_FONT } from '../hooks/register'
 import { S } from '../hooks/lib/state'
 
 // The terminal font that the pictures use: the one the terminal draws. A
@@ -16,7 +16,7 @@ const loose = (s: string) => s.replace(/\\(.)/g, '$1').replace(/\s/g, '').toLowe
 // The argument after the one that holds `marker` (a script's first argument).
 const argAfter = (argv: string[], marker: string) => argv[argv.findIndex(a => a.includes(marker)) + 1] ?? ''
 
-type World = { ran: string[][]; fontPaths: string[]; copies: () => string[][] }
+type World = { ran: string[][]; envs: (Record<string, string> | undefined)[]; fontPaths: string[]; copies: () => string[][]; clock: ReturnType<typeof mock.clock> }
 // A Mac or Linux with Typst. `run` answers a command first (undefined: the
 // world's answer); `families` are the installed ones (CoreText or
 // fontconfig), `proportional` those of them with no fixed-pitch style,
@@ -38,9 +38,10 @@ function world(on: any, o: {
 }): World {
   S.fontPaths = ''
   mock.store(on)
-  mock.clock(on)
+  const clock = mock.clock(on)
   mock.env(on, { HOME: '/h', ...o.env })
   const ran: string[][] = []
+  const envs: (Record<string, string> | undefined)[] = []
   const fontPaths: string[] = []
   const families = o.families ?? []
   const nearest = o.nearest ?? 'DejaVu Sans Mono'
@@ -48,6 +49,7 @@ function world(on: any, o: {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
     ran.push(argv)
+    envs.push(e.init?.env)
     const own = o.run?.(argv)
     if (own) return own
     if (/cc-intelligent-ui-/.test(cmd)) return ok(`/c\n${o.isMac ? 'Darwin' : 'Linux'}\n/h/.cache/cc-intelligent-ui/designs\n`)
@@ -83,7 +85,7 @@ function world(on: any, o: {
   const files = o.files ?? {}
   on('fs.read', async ($: any, e: any, next: any) => (e.path in files ? { value: files[e.path] } : e.path.startsWith('/h/') || e.path.startsWith('/c/') ? { deny: 'ENOENT' } : next(e)))
   on('fs.exists', async ($: any, e: any, next: any) => (e.path.startsWith('/h/') ? { value: e.path in files } : e.path === '/usr/bin/typst' ? { value: true } : next(e)))
-  return { ran, fontPaths, copies: () => ran.filter(argv => argv.includes(PROGRAM_FONTS_SH)) }
+  return { ran, fontPaths, copies: () => ran.filter(argv => argv.includes(PROGRAM_FONTS_SH)), clock, envs }
 }
 const details = async ($: any) => (await $.command.run({ command: 'iui', args: 'details' } as any)).text as string
 // A test that leaves S.fontPaths empty after it (pure.test.ts expects it so).
@@ -226,7 +228,7 @@ fontTest("herdr in Ghostty (GHOSTTY_RESOURCES_DIR kept): Ghostty's font-family; 
   })
   const text = await details($)
   expect(text).toContain('terminal font Iosevka.')
-  expect(text).toContain('terminal herdr 0.9.5 (in Ghostty): this terminal draws pictures.')
+  expect(text).toContain("terminal herdr 0.9.5 (in Ghostty, from the server's start): this terminal draws pictures.")
 })
 
 fontTest("herdr in kitty (KITTY_INSTALLATION_DIR kept): kitty's font_family", async ($, on) => {
@@ -238,7 +240,7 @@ fontTest("herdr in kitty (KITTY_INSTALLATION_DIR kept): kitty's font_family", as
   })
   const text = await details($)
   expect(text).toContain('terminal font Iosevka.')
-  expect(text).toContain('terminal herdr (in kitty): ')
+  expect(text).toContain("terminal herdr (in kitty, from the server's start): ")
 })
 
 fontTest('herdr in a terminal it does not know: no font, as before; the details say so', async ($, on) => {
@@ -254,7 +256,73 @@ fontTest('herdr with pictures off: the details point to /iui setup', async ($, o
   // The setup question (pictures are off in herdr) is dismissed.
   on('tool.call', { tool: 'AskUserQuestion' }, async () => ({ deny: 'dismissed' }))
   const text = await details($)
-  expect(text).toContain('terminal herdr (in Ghostty): Claude Code draws no pictures in herdr until CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 is set when it starts (run /iui setup)')
+  expect(text).toContain("terminal herdr (in Ghostty, from the server's start): Claude Code draws no pictures in herdr until CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 is set when it starts (run /iui setup)")
+})
+
+// The herdr client the user typed in last (HERDR_CLIENT_SH's output): the
+// server was started from Ghostty (its variables are in the pane), the
+// client is kitty or Ghostty.
+const HERDR_SERVER_ENV = { TERM_PROGRAM: 'herdr', TERM_PROGRAM_VERSION: '0.9.5', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_RESOURCES_DIR: '/R', GHOSTTY_BIN_DIR: '/B', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' }
+const kittyClient = 'pid 54346\natime 20\ntty ttys021\ncmd herdr\napp /Applications/kitty.app/Contents/MacOS/kitty herdr\nenv\nherdr TERM=xterm-kitty KITTY_WINDOW_ID=1 KITTY_CONFIG_DIRECTORY=/h/kc\n'
+const ghosttyClient = 'pid 50390\natime 10\ntty ttys012\ncmd herdr\napp /Applications/Ghostty.app/Contents/MacOS/ghostty -e herdr\nenv\nherdr TERM=xterm-ghostty TERM_PROGRAM=ghostty GHOSTTY_BIN_DIR=/G\n'
+const clientIs = (out: () => string) => (argv: string[]) => (argv[2] === HERDR_CLIENT_SH ? ok(out()) : undefined)
+
+fontTest("herdr: the client you typed in last (kitty) wins over the server's variables (Ghostty)", async ($, on) => {
+  const w = world(on, {
+    isMac: true,
+    env: HERDR_SERVER_ENV,
+    families: ['Iosevka', 'Fira Code'],
+    files: { '/h/kc/kitty.conf': 'font_family Fira Code\n' },
+    run: argv => clientIs(() => kittyClient)(argv) ?? shows('font-family = Iosevka\n')(argv),
+  })
+  const text = await details($)
+  expect(text).toContain('terminal font Fira Code.')
+  expect(text).toContain('terminal herdr 0.9.5 (in kitty, the client you used last): this terminal draws pictures.')
+  expect(w.ran.some(argv => argv.join(' ').includes('+show-config'))).toBe(false)
+})
+
+fontTest("herdr: no client found (the check fails): the server's variables, as before", async ($, on) => {
+  world(on, {
+    isMac: true,
+    env: HERDR_SERVER_ENV,
+    families: ['Iosevka'],
+    run: argv => (argv[2] === HERDR_CLIENT_SH ? ok('', 1) : shows('font-family = Iosevka\n')(argv)),
+  })
+  const text = await details($)
+  expect(text).toContain('terminal font Iosevka.')
+  expect(text).toContain("terminal herdr 0.9.5 (in Ghostty, from the server's start): ")
+})
+
+fontTest("herdr in Ghostty: Ghostty's +show-config runs with the client's GHOSTTY_BIN_DIR", async ($, on) => {
+  const w = world(on, { isMac: true, env: HERDR_SERVER_ENV, families: ['Iosevka'], run: argv => clientIs(() => ghosttyClient)(argv) ?? shows('font-family = Iosevka\n')(argv) })
+  expect(await details($)).toContain('terminal font Iosevka.')
+  const seen = w.ran.flatMap((argv, i) => (argv.join(' ').includes('+show-config') ? [w.envs[i]?.GHOSTTY_BIN_DIR] : []))
+  expect(seen.length).toBeGreaterThan(0)
+  expect(seen.every(dir => dir === '/G')).toBe(true)
+})
+
+fontTest('herdr: a change of client (Ghostty to kitty) is seen by the next poll: the font is read and measured again', async ($, on) => {
+  let client = ghosttyClient
+  const w = world(on, {
+    isMac: true,
+    env: HERDR_SERVER_ENV,
+    families: ['Iosevka', 'Fira Code'],
+    files: { '/h/kc/kitty.conf': 'font_family Fira Code\n' },
+    run: argv => clientIs(() => client)(argv) ?? shows('font-family = Iosevka\n')(argv),
+  })
+  const first = await details($)
+  expect(first).toContain('terminal font Iosevka.')
+  expect(first).toContain('(in Ghostty, the client you used last)')
+  const measured = w.fontPaths.length
+  // The same terminal in the next poll: nothing is read again.
+  await w.clock.advance(3000)
+  expect(w.fontPaths.length).toBe(measured)
+  client = kittyClient
+  await w.clock.advance(3000)
+  const later = await details($)
+  expect(later).toContain('terminal font Fira Code.')
+  expect(later).toContain('(in kitty, the client you used last)')
+  expect(w.fontPaths.length).toBeGreaterThan(measured)
 })
 
 // ---- kitty ----------------------------------------------------------------------
