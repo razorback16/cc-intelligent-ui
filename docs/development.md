@@ -15,7 +15,7 @@ sh tests/fonts-sh-test.sh      # the copy of a font out of a terminal's program 
 sh tests/bold-sh-test.sh       # the fake bold of md.typ (term-bold=0) with the real Typst and Monaco (skips with no Monaco)
 sh tests/code-sh-test.sh       # code blocks of md.typ (width, header, copy button mark, row grid) with the real Typst (skips with no typst)
 sh tests/gap-sh-test.sh        # the gap at a page break of md.typ (seams), on and off the row grid, with the real Typst (skips with no typst)
-sh tests/herdr-sh-test.sh      # the herdr client finder (HERDR_CLIENT_SH) with fake ps, stat and lsof, in sh, dash and bash
+sh tests/herdr-sh-test.sh      # the herdr client finder (HERDR_CLIENT_SH) with fake ps, stat, lsof and lsappinfo, in sh, dash and bash
 claude plugin validate .
 ```
 

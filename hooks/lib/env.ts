@@ -71,10 +71,11 @@ export function setUp($: EngineInterface): Promise<Env> {
     S.termName = term
     S.isHerdr = isHerdrIn({ program, herdrEnv: await envGet($, 'HERDR_ENV') })
     S.herdrVersion = S.isHerdr ? ((await envGet($, 'TERM_PROGRAM_VERSION')) ?? '').trim() : ''
-    // Under herdr the client the user typed in last gives the terminal; else (none found) the server's variables.
+    // Under herdr the client in use gives the terminal (the one of before stays while the app in front has none); else (none found) the server's variables.
+    const was = S.herdrClient
     S.herdrClient = null
     S.osc11Kept = null
-    if (S.isHerdr) await readHerdrClient($).catch(() => false)
+    if (S.isHerdr) await readHerdrClient($, was).catch(() => false)
     await setOuter($)
     S.isRemote = ssh
     S.debug = isSet(await envGet($, 'IUI_DEBUG'))

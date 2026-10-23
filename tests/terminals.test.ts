@@ -2,11 +2,12 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, envOfText, ghosttyBackgroundOf, ghosttyHasColors, ghosttyThemesOf, ghosttyValueOf,
-  herdrClientChanged, herdrClientOf, herdrHostOf, herdrText, isHerdrIn, isItermIn, jsoncOf, keptOsc11, needsSetup, OSC11_MISSES, outerKindOf, type HostMode,
+  clientFrontKindOf, frontKindOf, herdrClientChanged, herdrClientOf, herdrClientsOf, herdrHostOf, herdrText, herdrTickOf, herdrTickPick, pickHerdrClient, ttyNameOf, type HerdrClient, isHerdrIn, isItermIn, jsoncOf, keptOsc11, needsSetup, OSC11_MISSES, outerKindOf, type HostMode,
   KITTY_DEFAULT_BG, kittyAutoFileOf, kittyBackgroundOf, kittyConfigDirsOf, kittyEntriesOf, kittyFontOf, kittyIncludePath, kittyLinesOf,
   kittySchemeOfGnome, kittyValueOf,
   RIO_DEFAULT_BG, RIO_DEFAULT_FONT, rioBackgroundOf, rioConfigDirOf, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf,
 } from '../hooks/register'
+import { HERDR_SCAN_MS } from '../hooks/lib/settings'
 
 // ---- kitty ------------------------------------------------------------------
 
@@ -242,6 +243,7 @@ test('herdr in /iui details: its version, its terminal and where that came from'
   expect(herdrText('', 'iterm', 'client')).toBe('herdr (in iTerm2, the client you used last)')
   expect(herdrText('', 'cmux', 'client')).toBe('herdr (in cmux, the client you used last)')
   expect(herdrText('', 'rio', 'client')).toBe('herdr (in Rio, the client you used last)')
+  expect(herdrText('0.9.5', 'ghostty', 'front')).toBe('herdr 0.9.5 (in Ghostty, the terminal in front)')
   expect(herdrText('', '', 'client')).toBe('herdr (outer terminal not known)')
   expect(herdrText('', '')).toBe('herdr (outer terminal not known)')
 })
@@ -440,4 +442,116 @@ test("cmux's own Ghostty config: its theme wins; one theme name becomes a light:
   expect(ghosttyValueOf(over, 'theme')).toBe('light:A,dark:B')
   // No theme there: the Ghostty config as shown, with its other values.
   expect(ghosttyHasColors(cmuxConfigOf(shown, 'font-size = 13\n'))).toBe(false)
+})
+
+// HERDR_CLIENT_SH on a Mac with an iTerm2 and a Ghostty client (measured):
+// iTerm2's tty read last (its answers to herdr's picture uploads), Ghostty in front.
+const ITERM_MAC = [
+  'pid 57693', 'atime 1792718368.016685000', 'tty ttys012', 'cmd /Users/u/.local/bin/herdr',
+  'app /Users/u/Library/Application Support/iTerm2/iTermServer-3.7.6 /Users/u/Library/Application Support/iTerm2/iterm2-daemon-2.socket', 'env',
+  '/Users/u/.local/bin/herdr TERM_PROGRAM=iTerm.app TERM=xterm-256color TERM_PROGRAM_VERSION=3.7.6 ITERM_PROFILE=Default COLORFGBG=7;0',
+  '',
+].join('\n')
+const GHOSTTY_MAC2 = GHOSTTY_MAC.replace('atime 1792712644', 'atime 1792718338.716905000')
+
+test('the output of all herdr clients: the app in front, then each client from its pid line', () => {
+  const both = herdrClientsOf(`front com.mitchellh.ghostty\n${ITERM_MAC}${GHOSTTY_MAC2}`)
+  expect(both.front).toBe('com.mitchellh.ghostty')
+  expect(both.clients.map(c => [c.pid, c.kind, c.atime])).toEqual([[57693, 'iterm', 1792718368.016685], [50390, 'ghostty', 1792718338.716905]])
+  expect(both.clients[0]!.env.ITERM_PROFILE).toBe('Default')
+  expect(both.clients[1]!.env.COLORFGBG).toBe('15;0')
+  // No front line (Linux, or lsappinfo failed): null. One client of the old output parses.
+  expect(herdrClientsOf(KITTY_MAC)).toMatchObject({ front: null, clients: [{ pid: 54346, kind: 'kitty' }] })
+  expect(herdrClientsOf('')).toEqual({ front: null, clients: [] })
+  expect(herdrClientsOf('front com.apple.Safari\n')).toEqual({ front: 'com.apple.Safari', clients: [] })
+  // Linux: NUL-separated variables, then a new line before the next client.
+  const linux = herdrClientsOf('pid 1\natime 5\ntty pts/1\ncmd herdr\napp /usr/bin/kitty\nenv\nTERM=xterm-kitty\0\npid 2\natime 9\ntty pts/2\ncmd herdr\napp /usr/bin/ghostty\nenv\nTERM=xterm-ghostty\0\n')
+  expect(linux.clients.map(c => [c.pid, c.kind, c.env.TERM])).toEqual([[1, 'kitty', 'xterm-kitty'], [2, 'ghostty', 'xterm-ghostty']])
+})
+
+test('the app in front: its bundle id as a terminal kind; another app is none', () => {
+  expect(frontKindOf('com.mitchellh.ghostty')).toBe('ghostty')
+  expect(frontKindOf('net.kovidgoyal.kitty')).toBe('kitty')
+  expect(frontKindOf('com.googlecode.iterm2')).toBe('iterm')
+  expect(frontKindOf('com.cmuxterm.app')).toBe('cmux')
+  expect(frontKindOf('com.github.wez.wezterm')).toBe('wezterm')
+  expect(frontKindOf('com.raphaelamorim.rio')).toBe('rio')
+  expect(frontKindOf('com.apple.Terminal')).toBe('terminal')
+  expect(frontKindOf('com.apple.Safari')).toBe('')
+  expect(frontKindOf('')).toBe('')
+  const base = herdrClientOf(GHOSTTY_MAC)!
+  expect(clientFrontKindOf(base)).toBe('ghostty')
+  expect(clientFrontKindOf({ ...base, kind: '', app: '/Applications/WezTerm.app/Contents/MacOS/wezterm-gui start' })).toBe('wezterm')
+  expect(clientFrontKindOf({ ...base, kind: '', app: '/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal' })).toBe('terminal')
+  expect(clientFrontKindOf({ ...base, kind: '', app: '/usr/sbin/sshd' })).toBe('')
+})
+
+test('the herdr client to follow: the terminal in front first, then the tty read last', () => {
+  const iterm = herdrClientOf(ITERM_MAC)!
+  const ghostty = herdrClientOf(GHOSTTY_MAC2)!
+  const ghostty2: HerdrClient = { ...ghostty, pid: 50391, atime: ghostty.atime + 1 }
+  const kitty = herdrClientOf(KITTY_MAC)!
+  // iTerm2's tty read last (picture uploads), but Ghostty in front: Ghostty.
+  expect(pickHerdrClient([iterm, ghostty], 'ghostty', null)).toEqual({ client: ghostty, by: 'front' })
+  expect(pickHerdrClient([iterm, ghostty], 'iterm', ghostty)).toEqual({ client: iterm, by: 'front' })
+  // Two clients of the app in front: the tty read last of them.
+  expect(pickHerdrClient([iterm, ghostty, ghostty2], 'ghostty', null)).toEqual({ client: ghostty2, by: 'front' })
+  // No client in the app in front (a browser, or a terminal with no client): the client of before stays, as read now.
+  expect(pickHerdrClient([iterm, ghostty], '', ghostty)).toEqual({ client: ghostty, by: 'kept' })
+  expect(pickHerdrClient([iterm, ghostty], 'wezterm', { ...ghostty, atime: 1 })).toEqual({ client: ghostty, by: 'kept' })
+  // First read, or the client of before is gone: the tty read last.
+  expect(pickHerdrClient([iterm, ghostty], '', null)).toEqual({ client: iterm, by: 'typed' })
+  expect(pickHerdrClient([iterm, ghostty], '', kitty)).toEqual({ client: iterm, by: 'typed' })
+  // No app in front known (Linux): the tty read last.
+  expect(pickHerdrClient([ghostty, iterm, kitty], null, ghostty)).toEqual({ client: iterm, by: 'typed' })
+  expect(pickHerdrClient([], 'ghostty', ghostty)).toBeNull()
+})
+
+test("herdr's light check output: the app in front and each tty's access time", () => {
+  const tick = herdrTickOf('front com.mitchellh.ghostty\natime /dev/ttys012 1792718368.016685000\natime /dev/ttys021 1792718338\n')
+  expect(tick.front).toBe('com.mitchellh.ghostty')
+  expect([...tick.atimes]).toEqual([['ttys012', 1792718368.016685], ['ttys021', 1792718338]])
+  // Linux: no front line; a tty under /dev/pts keeps its folder.
+  expect(herdrTickOf('atime /dev/pts/3 1792718338\n')).toEqual({ front: null, atimes: new Map([['pts/3', 1792718338]]) })
+  expect(herdrTickOf('')).toEqual({ front: null, atimes: new Map() })
+  // A line with no time is not one.
+  expect(herdrTickOf('atime /dev/ttys012 \natime /dev/ttys013 x\n').atimes.size).toBe(0)
+  expect(ttyNameOf('/dev/ttys003')).toBe('ttys003')
+  expect(ttyNameOf('pts/3')).toBe('pts/3')
+})
+
+test("herdr's light check: the pick on the clients of the last scan, else a full scan", () => {
+  const iterm = herdrClientOf(ITERM_MAC)!
+  // iTerm2 on ttys012, Ghostty on ttys013.
+  const ghostty: HerdrClient = { ...herdrClientOf(GHOSTTY_MAC2)!, tty: 'ttys013' }
+  const kitty = herdrClientOf(KITTY_MAC)!
+  const tickOf = (front: string | null, times: Record<string, number>) => ({ front, atimes: new Map(Object.entries(times)) })
+  const base = { clients: [iterm, ghostty], was: ghostty, scanFront: 'com.mitchellh.ghostty', ageMs: 1000 }
+  // Ghostty in front, as at the scan: the times are new, the pick stays Ghostty, no scan.
+  const same = herdrTickPick({ ...base, tick: tickOf('com.mitchellh.ghostty', { ttys012: 50, ttys013: 40 }) })
+  expect(same?.pick).toEqual({ client: { ...ghostty, atime: 40 }, by: 'front' })
+  expect(same?.clients.map(c => c.atime)).toEqual([50, 40])
+  // A browser in front: the client of before stays.
+  expect(herdrTickPick({ ...base, tick: tickOf('com.apple.Safari', { ttys012: 50, ttys013: 40 }) })?.pick?.by).toBe('kept')
+  // The app in front has another client (iTerm2): a full scan.
+  expect(herdrTickPick({ ...base, tick: tickOf('com.googlecode.iterm2', { ttys012: 50, ttys013: 40 }) })).toBeNull()
+  // A terminal in front with no client (kitty): a full scan, but not again when the scan saw it in front.
+  expect(herdrTickPick({ ...base, tick: tickOf('net.kovidgoyal.kitty', { ttys012: 50, ttys013: 40 }) })).toBeNull()
+  expect(herdrTickPick({ ...base, scanFront: 'net.kovidgoyal.kitty', tick: tickOf('net.kovidgoyal.kitty', { ttys012: 50, ttys013: 40 }) })?.pick?.by).toBe('kept')
+  // A tty gone, or the tick failed: a full scan.
+  expect(herdrTickPick({ ...base, tick: tickOf('com.mitchellh.ghostty', { ttys013: 40 }) })).toBeNull()
+  expect(herdrTickPick({ ...base, tick: null })).toBeNull()
+  // No scan yet, or the last one HERDR_SCAN_MS ago: a full scan.
+  const tick = tickOf('com.mitchellh.ghostty', { ttys012: 50, ttys013: 40 })
+  expect(herdrTickPick({ ...base, tick, ageMs: null })).toBeNull()
+  expect(herdrTickPick({ ...base, tick, ageMs: HERDR_SCAN_MS })).toBeNull()
+  expect(herdrTickPick({ ...base, tick, ageMs: HERDR_SCAN_MS - 1 })).not.toBeNull()
+  // Linux (no app in front): the tty read last; another client than before: a full scan.
+  expect(herdrTickPick({ ...base, scanFront: null, tick: tickOf(null, { ttys012: 30, ttys013: 40 }) })?.pick?.by).toBe('typed')
+  expect(herdrTickPick({ ...base, scanFront: null, tick: tickOf(null, { ttys012: 50, ttys013: 40 }) })).toBeNull()
+  // A tty named with /dev/ (an older scan) is found too.
+  expect(herdrTickPick({ ...base, clients: [{ ...kitty, tty: '/dev/ttys021' }], was: kitty, scanFront: null, tick: tickOf(null, { ttys021: 9 }) })?.pick?.client.atime).toBe(9)
+  // No client at the scan: nothing to follow, and no scan before HERDR_SCAN_MS (unless a new terminal is in front).
+  expect(herdrTickPick({ clients: [], was: null, scanFront: null, ageMs: 1000, tick: tickOf(null, {}) })).toEqual({ clients: [], pick: null })
+  expect(herdrTickPick({ clients: [], was: null, scanFront: null, ageMs: 1000, tick: tickOf('com.mitchellh.ghostty', {}) })).toBeNull()
 })

@@ -6,9 +6,10 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 ### New
 
-- **herdr support** (the terminal multiplexer). In a herdr pane, Claude Code needs `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` to show pictures. The mod asks one time to add the shell line, as in iTerm2. `/iui setup` also adds it. Then close the pane and open a new herdr pane. herdr must run in a terminal that shows kitty pictures (kitty or Ghostty). Refer to [Terminals](docs/install.md#terminals).
+- **herdr support** (the terminal multiplexer). In a herdr pane, Claude Code needs `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` to show pictures. The mod asks one time to add the shell line, as in iTerm2. `/iui setup` also adds it. Then close the pane and open a new herdr pane. herdr must run in a terminal that shows kitty pictures (kitty, Ghostty or iTerm2). Refer to [Terminals](docs/install.md#terminals).
+- **herdr in iTerm2.** iTerm2 shows each row of a herdr picture from the bottom of the image, so the rows of a page showed in the wrong order. When the herdr client in use is iTerm2, the mod stores the bands of rows of each page and picture in reverse order. Then iTerm2 shows them in the correct order. `/iui details` shows `pages and pictures stored upside down by rows` when this is on. It does not work with `herdr --remote` in iTerm2.
 - `/iui setup` works in herdr on Linux too.
-- `/iui details` names herdr, its version, the terminal that it runs in and how the mod found that terminal, for example `herdr 0.9.5 (in kitty, the client you used last)`. If the mod uses the variables of the herdr server, it shows `(in Ghostty, from the server's start)`.
+- `/iui details` names herdr, its version, the terminal that it runs in and how the mod found that terminal, for example `herdr 0.9.5 (in kitty, the terminal in front)`. If the mod uses the variables of the herdr server, it shows `(in Ghostty, from the server's start)`.
 
 ### Changed
 
@@ -19,8 +20,9 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 - In herdr, the mod now uses the font and the background of the terminal that herdr runs in (Ghostty, kitty, iTerm2, cmux or Rio). Before, it used Menlo and the OS appearance, so the text could be dark on a dark background.
   - With the `auto` theme, the background comes from herdr: herdr gives the background of the terminal in front (OSC 11). This also works with `herdr --remote`. If an answer does not come, the mod keeps the last background for up to 2 more checks.
-  - The font comes from the herdr client where you typed last. You can attach to one herdr server from more than one terminal, for example from Ghostty and from kitty. When you type in a different terminal, the mod finds it at the next check (every 3 s), reads its font and draws the pictures again. If the mod cannot find the client, it uses the variables of the terminal that started the herdr server.
+  - The font comes from the herdr client that you use. You can attach to one herdr server from more than one terminal, for example from Ghostty and from kitty. On macOS, the mod uses the client in the terminal app in front. When the app in front is not a terminal (for example a browser), it keeps the last client. On Linux, and between two clients in the same app, it uses the client where you typed last. When you change to a different terminal, the mod finds it at the next check (every 1 s), reads its font and draws the pictures again. If the mod cannot find the client, it uses the variables of the terminal that started the herdr server.
 - In herdr, a tall page of a long answer did not show (herdr does not send an image that is too large to the terminal). Refer to [Limitations](docs/limitations.md).
+- At a page break between two blocks (for example a paragraph and a list, or a table and a heading), the next page starts with the same gap as in one page. Before, the gap was lost. With the row grid off, the gap can be up to 1 row larger.
 
 ## 0.3.2 (2026-10-21)
 

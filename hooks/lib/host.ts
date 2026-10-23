@@ -4,7 +4,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { IuiTheme } from '../../types'
-import { CLIP_WAKE_MS, HOST_CHECK_MS, HOST_POLL_MS, MODES } from './settings'
+import { CLIP_WAKE_MS, HERDR_POLL_MS, HERDR_SCAN_MS, HOST_CHECK_MS, HOST_POLL_MS, MODES } from './settings'
 import { S } from './state'
 import { beginEpoch } from './epoch'
 import { keptOsc11, luminanceOf, modeOfColorFgBg, modeOfLuminance, modeOfMacAppearance, parseOsc11, resolveMode, schemeOfPortal, type HostMode } from './mode'
@@ -16,9 +16,12 @@ import {
   rioConfigDirOf, RIO_DEFAULT_FONT, RIO_OLD_FONT, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf, type CmuxAppearance, type KittyEntries,
 } from './terminals'
 import { firstLine } from './markdown'
-import { herdrClientChanged, herdrClientOf, herdrHostOf, isCmuxIn, isFlipHere, isGhosttyHere, isGhosttyIn, isKittyIn, isRioIn, type OuterName } from './terminal'
+import {
+  frontKindOf, herdrClientChanged, herdrClientsOf, herdrHostOf, herdrTickOf, herdrTickPick, isCmuxIn, isFlipHere, isGhosttyHere, isGhosttyIn, isKittyIn, isRioIn, pickHerdrClient,
+  ttyNameOf, type HerdrClient, type HerdrTick, type OuterName,
+} from './terminal'
 import { refont } from './frame'
-import { clockEvery, envGet, fsExists, fsRead, processRun } from './api'
+import { clockEvery, clockNow, envGet, fsExists, fsRead, processRun } from './api'
 
 // One tty size read: `rows cols xpixel ypixel` (TIOCGWINSZ); exit 1 with no tty.
 export const CELL_SH = `perl -e 'open(T, "</dev/tty") or exit 1; my $w = " " x 8; ioctl(T, ($^O eq "darwin" ? 0x40087468 : 0x5413), $w) or exit 1; print join(" ", unpack("S4", $w))'`
@@ -194,20 +197,25 @@ export const OSC11_PL = [
 export const USE_OSC11 = false
 export const PROBE_RUNS = 5
 export const HEADERS_SH = `for f in "$@"; do head -c 24 "$f" | od -An -v -tx1; echo @; done`
-// herdr: the client the user typed in last, of this pane's server. One ps
-// lists the processes; this pane's server is the `herdr server` above this
-// shell. A client is a `herdr` of this user with a tty (no arguments,
-// `--session <name>`, `session attach <name>` or `client`). With more than
-// one server, lsof keeps the clients whose socket peer is one of this
-// server's sockets (no lsof, or no peer column as on Linux: all stay). The
-// client whose tty has the newest access time (a key read there) wins. It
-// prints `pid`, `atime`, `tty`, `cmd` (its command) and `app` (its nearest
-// ancestor with no tty: the terminal app) lines, then `env` and the
-// client's variables (Linux: /proc/<pid>/environ, NUL-separated; macOS: `ps
-// eww`, its command then the variables). Nothing (exit 0) when none is found.
+// herdr: the clients of this pane's server. One ps lists the processes;
+// this pane's server is the `herdr server` above this shell. A client is a
+// `herdr` of this user with a tty (no arguments, `--session <name>`,
+// `session attach <name>` or `client`). With more than one server, lsof
+// keeps the clients whose socket peer is one of this server's sockets (no
+// lsof, or no peer column as on Linux: all stay). On macOS it prints first
+// `front` and the bundle id of the app in front (lsappinfo; no line when
+// that can't be read). Then for each client: `pid`, `atime` (its tty's
+// access time, a key read there; macOS: with a fraction), `tty`, `cmd` (its
+// command) and `app` (its nearest ancestor with no tty: the terminal app)
+// lines, then `env` and the client's variables (Linux:
+// /proc/<pid>/environ, NUL-separated; macOS: `ps eww`, its command then the
+// variables). pickHerdrClient chooses one. Nothing (exit 0) when none is found.
 export const HERDR_CLIENT_SH = `s=$$
-case $(uname -s) in
-  Darwin|*BSD) t=$(ps -A -o pid= -o ppid= -o uid= -o tdev= -o command= 2>/dev/null) || exit 0; a=$(stat -f '%Hr/%Lr %a %N' /dev/ttys* 2>/dev/null) ;;
+u=$(uname -s)
+case $u in
+  Darwin|*BSD) t=$(ps -A -o pid= -o ppid= -o uid= -o tdev= -o command= 2>/dev/null) || exit 0
+    f='%Fa'; case $(stat -f %Fa /dev/null 2>/dev/null) in [0-9]*.[0-9]*) ;; *) f='%a' ;; esac
+    a=$(stat -f "%Hr/%Lr $f %N" /dev/ttys* 2>/dev/null) ;;
   *) t=$(ps -A -o pid= -o ppid= -o uid= -o tty= -o command= 2>/dev/null) || exit 0; a=$(stat -c '%n %X %n' /dev/pts/[0-9]* /dev/tty[0-9]* 2>/dev/null | sed 's|^/dev/||') ;;
 esac
 c=$({ printf '%s\\n' "$a" | sed 's/^/@ /'; printf '%s\\n' "$t"; } | awk -v me="$(id -u)" -v self="$s" '
@@ -233,11 +241,33 @@ if [ "\${n:-0}" -gt 1 ]; then
     case $k in *peers*) l=$({ printf '%s\\n@\\n' "$k"; printf '%s\\n' "$l"; } | awk -F '\\t' 'f == 0 { if ($0 == "@") f = 1; else m[$0] = 1; next } $3 in m') ;; esac
   fi
 fi
-b=$(printf '%s\\n' "$l" | awk -F '\\t' '$1 == "cl" && (z == "" || $2 + 0 > za) { z = $0; za = $2 + 0 } END { print z }')
-[ -n "$b" ] || exit 0
-p=$(printf '%s\\n' "$b" | cut -f3)
-printf '%s\\n' "$b" | awk -F '\\t' '{ printf "pid %s\\natime %s\\ntty %s\\ncmd %s\\napp %s\\nenv\\n", $3, $2, $4, $5, $6 }'
-if [ -r "/proc/$p/environ" ]; then cat "/proc/$p/environ"; else ps eww -o command= -p "$p"; fi`
+if [ "$u" = Darwin ] && command -v lsappinfo >/dev/null 2>&1; then
+  f=$(lsappinfo info -only bundleid "$(lsappinfo front 2>/dev/null)" 2>/dev/null | sed -n 's/^"CFBundleIdentifier"="\\(.*\\)"$/\\1/p')
+  [ -n "$f" ] && printf 'front %s\\n' "$f"
+fi
+printf '%s\\n' "$l" | cut -f3 | while read -r p; do
+  printf '%s\\n' "$l" | awk -F '\\t' -v p="$p" '$3 == p { printf "pid %s\\natime %s\\ntty %s\\ncmd %s\\napp %s\\nenv\\n", $3, $2, $4, $5, $6 }'
+  if [ -r "/proc/$p/environ" ]; then cat "/proc/$p/environ"; echo; else ps eww -o command= -p "$p"; fi
+done
+exit 0`
+// herdr's light check, each HERDR_POLL_MS: argument 1 is the OS (uname -s),
+// the others the known clients' ttys (/dev/...). On macOS it prints `front`
+// and the bundle id of the app in front (as HERDR_CLIENT_SH), then an
+// `atime <tty> <time>` line per tty (with a fraction on macOS; none for a
+// tty that is gone). No ps: it costs a tenth of the full scan.
+export const HERDR_TICK_SH = `o=$1; shift
+if [ "$o" = Darwin ] && command -v lsappinfo >/dev/null 2>&1; then
+  f=$(lsappinfo info -only bundleid "$(lsappinfo front 2>/dev/null)" 2>/dev/null)
+  case $f in '"CFBundleIdentifier"="'*'"') f=\${f#*=\\"}; printf 'front %s\\n' "\${f%\\"}" ;; esac
+fi
+[ $# -gt 0 ] || exit 0
+case $o in
+  Darwin|*BSD) a=$(stat -f 'atime %N %Fa' "$@" 2>/dev/null)
+    case $a in *[0-9].[0-9]*) ;; *) a=$(stat -f 'atime %N %a' "$@" 2>/dev/null) ;; esac ;;
+  *) a=$(stat -c 'atime %n %X' "$@" 2>/dev/null) ;;
+esac
+[ -n "$a" ] && printf '%s\\n' "$a"
+exit 0`
 
 // The terminal's font family: iTerm2's profile font, Ghostty's font-family,
 // kitty's font_family, Rio's [fonts] family; '' elsewhere or when it can't
@@ -395,15 +425,48 @@ export async function setOuter($: EngineInterface) {
   S.isKitty = isKittyIn({ term: S.termName, windowId: await envGet($, 'KITTY_WINDOW_ID'), pid: await envGet($, 'KITTY_PID') }) || S.herdrHost === 'kitty'
 }
 
-// herdr: reads the client the user typed in last (HERDR_CLIENT_SH). True
-// when its terminal changed (herdrClientChanged); a read that finds none
-// keeps the last one.
-export async function readHerdrClient($: EngineInterface): Promise<boolean> {
+// herdr: reads the clients (HERDR_CLIENT_SH; the full scan) and follows the
+// one that pickHerdrClient chooses (`was`: the client of before, kept while
+// the app in front has none). True when its terminal changed
+// (herdrClientChanged); a read that finds none keeps the last one. The
+// clients and the app in front are kept for the light check.
+export async function readHerdrClient($: EngineInterface, was: HerdrClient | null = S.herdrClient): Promise<boolean> {
   const got = await processRun($, ['sh', '-c', HERDR_CLIENT_SH], { timeoutMs: HOST_CHECK_MS }).catch(() => null)
-  const client = got?.exitCode === 0 ? herdrClientOf(got.stdout) : null
-  if (!client) return false
-  const changed = herdrClientChanged(S.herdrClient, client)
-  S.herdrClient = client
+  const read = got?.exitCode === 0 ? herdrClientsOf(got.stdout) : null
+  // A failed scan counts too, so the next one waits HERDR_SCAN_MS.
+  S.herdrScanAt = await clockNow($).catch(() => Date.now())
+  if (read) {
+    S.herdrClients = read.clients
+    S.herdrScanFront = read.front
+  }
+  const pick = read ? pickHerdrClient(read.clients, read.front === null ? null : frontKindOf(read.front), was) : null
+  if (!pick) return false
+  if (pick.by !== 'kept') S.herdrBy = pick.by
+  const changed = herdrClientChanged(S.herdrClient, pick.client)
+  S.herdrClient = pick.client
+  return changed
+}
+
+// herdr's check each HERDR_POLL_MS: the light check (HERDR_TICK_SH, then
+// herdrTickPick on the clients of the last scan), else the full scan
+// (readHerdrClient). True when the terminal changed.
+export async function checkHerdrClient($: EngineInterface): Promise<boolean> {
+  const now = await clockNow($).catch(() => Date.now())
+  const ageMs = S.herdrScanAt === null ? null : now - S.herdrScanAt
+  let tick: HerdrTick | null = null
+  if (ageMs !== null && ageMs < HERDR_SCAN_MS) {
+    const ttys = S.herdrClients.map(c => `/dev/${ttyNameOf(c.tty)}`)
+    // Nothing to read (no client, no app in front off macOS, as a remote pane): no process.
+    const got = ttys.length || S.hostOs === 'Darwin' ? await processRun($, ['sh', '-c', HERDR_TICK_SH, 'sh', S.hostOs, ...ttys], { timeoutMs: HOST_CHECK_MS }).catch(() => null) : { exitCode: 0, stdout: '' }
+    tick = got?.exitCode === 0 ? herdrTickOf(got.stdout) : null
+  }
+  const light = herdrTickPick({ clients: S.herdrClients, tick, was: S.herdrClient, scanFront: S.herdrScanFront, ageMs })
+  if (!light) return readHerdrClient($)
+  S.herdrClients = light.clients
+  if (!light.pick) return false
+  if (light.pick.by !== 'kept') S.herdrBy = light.pick.by
+  const changed = herdrClientChanged(S.herdrClient, light.pick.client)
+  S.herdrClient = light.pick.client
   return changed
 }
 
@@ -693,16 +756,20 @@ async function readLinuxScheme($: EngineInterface): Promise<LinuxScheme | null> 
 // One poll (never two at once): under herdr the client first (another
 // terminal sets the terminal values again, then the font and its metrics
 // are read again), then with auto the mode. A changed mode, font or flip
-// mode (isFlipHere: iTerm2 in or out) redraws.
-export async function pollHost($: EngineInterface) {
+// mode (isFlipHere: iTerm2 in or out) redraws. Under herdr the mode is read
+// each HOST_POLL_MS (every third poll), at once for another terminal, and
+// with `modeNow`.
+export async function pollHost($: EngineInterface, modeNow = false) {
   if (S.checking || (S.setting !== 'auto' && !S.isHerdr)) return
   S.checking = true
   let refonted = false
   const flipWas = isFlipHere()
   try {
-    const moved = S.isHerdr && (await readHerdrClient($).catch(() => false))
+    const moved = S.isHerdr && (await checkHerdrClient($).catch(() => false))
     if (moved) await setOuter($)
-    if (S.setting === 'auto') S.host = (await readHostMode($).catch(() => null)) ?? S.host
+    const due = !S.isHerdr || modeNow || moved || ++S.hostTicks >= HOST_POLL_MS / HERDR_POLL_MS
+    if (due) S.hostTicks = 0
+    if (S.setting === 'auto' && due) S.host = (await readHostMode($).catch(() => null)) ?? S.host
     if (moved) refonted = await refont($).catch(() => false)
   } finally {
     S.checking = false
@@ -721,17 +788,22 @@ export function showMode($: EngineInterface) {
   beginEpoch($)
 }
 
-// Polls while the setting is auto or under herdr (its client can change), and only then.
+// Polls while the setting is auto or under herdr (its client can change), and
+// only then: each HOST_POLL_MS, under herdr each HERDR_POLL_MS.
 export function watchHost($: EngineInterface) {
   const wanted = S.setting === 'auto' || S.isHerdr
+  const ms = S.isHerdr ? HERDR_POLL_MS : HOST_POLL_MS
+  // Started before setUp knew of herdr: started again with its period.
+  if (S.watch && (!wanted || S.watchMs !== ms)) {
+    S.watch.cancel()
+    S.watch = null
+  }
   if (wanted && !S.watch) {
     try {
-      S.watch = clockEvery($, HOST_POLL_MS, () => void pollHost($).catch(() => undefined))
+      S.watch = clockEvery($, ms, () => void pollHost($).catch(() => undefined))
+      S.watchMs = ms
     } catch {
       S.watch = null
     }
-  } else if (!wanted && S.watch) {
-    S.watch.cancel()
-    S.watch = null
   }
 }

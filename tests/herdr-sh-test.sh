@@ -1,10 +1,13 @@
 #!/bin/sh
 # Runs the herdr client check (HERDR_CLIENT_SH in hooks/lib/host.ts) in sh,
-# dash and bash with a fake ps, stat, uname and lsof: it finds this pane's
-# server above the shell, keeps the clients of this user with a tty, keeps
-# with two servers only the clients of this one (by lsof), picks the tty
-# read last, and prints that client's lines, its terminal app and its
-# variables; nothing when no client is found.
+# dash and bash with a fake ps, stat, uname, lsof and lsappinfo: it finds
+# this pane's server above the shell, keeps the clients of this user with a
+# tty, keeps with two servers only the clients of this one (by lsof),
+# prints on macOS the app in front (`front`, by lsappinfo), then each
+# client's lines (its tty's access time, with a fraction on macOS), its
+# terminal app and its variables; nothing when no client is found. Then
+# the light check (HERDR_TICK_SH) with a fake stat and lsappinfo: the app
+# in front on macOS, and the access time of each tty asked that is there.
 # Usage: sh tests/herdr-sh-test.sh   (exit 0 when all pass)
 set -u
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,6 +21,8 @@ bad() { fail=$((fail + 1)); echo "FAIL: $*"; }
 # The TypeScript text as sh: the escapes undone.
 perl -0ne 'if (/^export const HERDR_CLIENT_SH = `(.*?)`$/ms) { $_ = $1; s/\\\\/\x00/g; s/\\\$/\$/g; s/\x00/\\/g; print }' "$here/hooks/lib/host.ts" > "$tmp/client.sh"
 [ -s "$tmp/client.sh" ] && ok || bad "HERDR_CLIENT_SH: not found in host.ts"
+perl -0ne 'if (/^export const HERDR_TICK_SH = `(.*?)`$/ms) { $_ = $1; s/\\\\/\x00/g; s/\\\$/\$/g; s/\x00/\\/g; print }' "$here/hooks/lib/host.ts" > "$tmp/tick.sh"
+[ -s "$tmp/tick.sh" ] && ok || bad "HERDR_TICK_SH: not found in host.ts"
 
 uid=$(id -u)
 realps=$(command -v ps)
@@ -37,10 +42,20 @@ if [ -z "\${NOSELF:-}" ]; then
 fi
 cat "\$FAKE/table"
 EOF
-printf '#!/bin/sh\ncat "$FAKE/stat"\n' > "$bin/stat"
+# stat: `/dev/null` (the check for fractional times) gives one; else $FAKE/stat.
+printf '#!/bin/sh\ncase "$*" in *" /dev/null") echo 1792718368.016685000; exit 0 ;; esac\ncat "$FAKE/stat"\n' > "$bin/stat"
 printf '#!/bin/sh\necho "$FAKE_OS"\n' > "$bin/uname"
 chmod +x "$bin/ps" "$bin/stat" "$bin/uname"
 lsof_bin() { printf '#!/bin/sh\ncat "$FAKE/lsof"\n' > "$bin/lsof"; chmod +x "$bin/lsof"; }
+# lsappinfo: `front` gives an ASN; `info -only bundleid <asn>` that app's id ($FRONT).
+cat > "$bin/lsappinfo" <<'EOF2'
+#!/bin/sh
+case "$1" in
+  front) echo 'ASN:0x0-0x1a01a:' ;;
+  info) [ "$4" = 'ASN:0x0-0x1a01a:' ] && [ -n "${FRONT:-}" ] && printf '"CFBundleIdentifier"="%s"\n' "$FRONT" ;;
+esac
+EOF2
+chmod +x "$bin/lsappinfo"
 
 # A Mac: a server (and its pane's shell and claude), Ghostty's and kitty's
 # clients, and processes that are not clients (a CLI call, no tty, another
@@ -63,7 +78,7 @@ cat > "$F/table" <<EOF
 4999206 4999200 $uid 16/25 herdr session attach work
 EOF
 cat > "$F/stat" <<EOF
-16/12 1000 /dev/ttys012
+16/12 1000.25 /dev/ttys012
 16/14 9999 /dev/ttys014
 16/21 2000 /dev/ttys021
 16/22 9999 /dev/ttys022
@@ -87,51 +102,114 @@ for s in sh dash bash; do command -v "$s" >/dev/null 2>&1 && shells="$shells $s"
 for s in $shells; do
   # By its path: PATH holds only the fake tools.
   [ "$s" = bash ] && s="$(command -v bash) --posix" || s=$(command -v "$s")
-  run() { PATH=$bin FAKE=$F FAKE_OS=Darwin NOTTY=?? NOSELF=$noself $s "$tmp/client.sh"; }
+  run() { PATH=$bin FAKE=$F FAKE_OS=Darwin NOTTY=?? NOSELF=$noself FRONT=$front $s "$tmp/client.sh"; }
+  # The pids of the clients printed, in order of pid; one client's lines.
+  pids() { echo "$1" | grep '^pid ' | cut -d' ' -f2 | sort | tr '\n' ' '; }
+  block() { echo "$1" | awk -v p="$2" '/^pid / { q = $2 } q == p'; }
   noself=
+  front=
   rm -f "$bin/lsof"
-  # One server: the tty read last (kitty's) wins.
+  # One server: all its clients (Ghostty's, kitty's and the named session's), not the others.
   out=$(run)
-  [ "$(echo "$out" | sed -n 1p)" = "pid 4999201" ] && ok || bad "$s: not kitty's client ($out)"
-  [ "$(echo "$out" | sed -n 2,5p | tr '\n' '|')" = "atime 2000|tty ttys021|cmd /Users/u/.local/bin/herdr|app /Applications/kitty.app/Contents/MacOS/kitty /Users/u/.local/bin/herdr|" ] && ok || bad "$s: kitty's lines ($out)"
-  [ "$(echo "$out" | sed -n 6,7p | tr '\n' '|')" = "env|/Users/u/.local/bin/herdr TERM=xterm-kitty KITTY_WINDOW_ID=1|" ] && ok || bad "$s: kitty's variables ($out)"
-  # Ghostty read last: its app is above login (which has a tty).
-  sed 's/^16\/12 1000/16\/12 3000/' "$F/stat" > "$F/stat2" && mv "$F/stat2" "$F/stat"
-  out=$(run)
-  [ "$(echo "$out" | sed -n 1p)" = "pid 4999102" ] && ok || bad "$s: not Ghostty's client ($out)"
-  [ "$(echo "$out" | grep '^app ')" = "app /Applications/Ghostty.app/Contents/MacOS/ghostty -e /Users/u/.local/bin/herdr" ] && ok || bad "$s: Ghostty's app ($out)"
-  sed 's/^16\/12 3000/16\/12 1000/' "$F/stat" > "$F/stat2" && mv "$F/stat2" "$F/stat"
-  # Two servers: lsof keeps this server's client (Ghostty), though kitty's was read last.
+  [ "$(pids "$out")" = "4999102 4999201 4999205 4999206 " ] && ok || bad "$s: not the four clients ($out)"
+  [ "$(block "$out" 4999201 | sed -n 2,5p | tr '\n' '|')" = "atime 2000|tty ttys021|cmd /Users/u/.local/bin/herdr|app /Applications/kitty.app/Contents/MacOS/kitty /Users/u/.local/bin/herdr|" ] && ok || bad "$s: kitty's lines ($out)"
+  [ "$(block "$out" 4999201 | sed -n 6,7p | tr '\n' '|')" = "env|/Users/u/.local/bin/herdr TERM=xterm-kitty KITTY_WINDOW_ID=1|" ] && ok || bad "$s: kitty's variables ($out)"
+  # Ghostty: its app is above login (which has a tty); its time keeps the fraction.
+  [ "$(block "$out" 4999102 | grep '^app ')" = "app /Applications/Ghostty.app/Contents/MacOS/ghostty -e /Users/u/.local/bin/herdr" ] && ok || bad "$s: Ghostty's app ($out)"
+  [ "$(block "$out" 4999102 | grep '^atime ')" = "atime 1000.25" ] && ok || bad "$s: Ghostty's time ($out)"
+  [ "$(block "$out" 4999102 | sed -n 7p)" = "herdr TERM=xterm-ghostty TERM_PROGRAM=ghostty" ] && ok || bad "$s: Ghostty's variables ($out)"
+  # No app in front known: no front line.
+  [ -z "$(echo "$out" | grep '^front')" ] && ok || bad "$s: a front line with no app in front ($out)"
+  # The app in front: its bundle id first.
+  front=com.mitchellh.ghostty; out=$(run); front=
+  [ "$(echo "$out" | sed -n 1p)" = "front com.mitchellh.ghostty" ] && ok || bad "$s: not the app in front ($out)"
+  [ "$(pids "$out")" = "4999102 4999201 4999205 4999206 " ] && ok || bad "$s: with the app in front, not the four clients ($out)"
+  # Two servers: lsof keeps this server's client (Ghostty) only.
   echo "4999701 1 $uid ?? /opt/herdr server" >> "$F/table"
   lsof_bin
   out=$(run)
-  [ "$(echo "$out" | sed -n 1p)" = "pid 4999102" ] && ok || bad "$s: two servers, not this server's client ($out)"
+  [ "$(pids "$out")" = "4999102 " ] && ok || bad "$s: two servers, not this server's client ($out)"
   # No lsof: all clients stay.
   rm -f "$bin/lsof"
   out=$(run)
-  [ "$(echo "$out" | sed -n 1p)" = "pid 4999201" ] && ok || bad "$s: two servers, no lsof, not the last read ($out)"
+  [ "$(pids "$out")" = "4999102 4999201 4999205 4999206 " ] && ok || bad "$s: two servers, no lsof, not all clients ($out)"
   # lsof with no peer column (Linux): all clients stay.
   lsof_bin
   cp "$F/lsof" "$F/lsof.keep"
   sed 's/->0x[0-9a-f]*/type=STREAM/' "$F/lsof.keep" > "$F/lsof"
   out=$(run)
-  [ "$(echo "$out" | sed -n 1p)" = "pid 4999201" ] && ok || bad "$s: two servers, no peers, not the last read ($out)"
+  [ "$(pids "$out")" = "4999102 4999201 4999205 4999206 " ] && ok || bad "$s: two servers, no peers, not all clients ($out)"
   mv "$F/lsof.keep" "$F/lsof"
   # Two servers and this pane's not found: nothing.
-  noself=1; out=$(run); noself=
+  noself=1; front=com.mitchellh.ghostty; out=$(run); noself=; front=
   [ -z "$out" ] && ok || bad "$s: two servers, none above the shell, but output ($out)"
   sed '$d' "$F/table" > "$F/table2" && mv "$F/table2" "$F/table"
   rm -f "$bin/lsof"
   # No client (the only one left has no tty): nothing, exit 0.
   grep -v -e ' 16/2[1-5] ' -e ' 16/12 herdr' "$F/table" > "$F/table.none"
-  out=$(cp "$F/table" "$F/table.keep" && cp "$F/table.none" "$F/table" && run; echo "exit $?"; cp "$F/table.keep" "$F/table")
+  out=$(cp "$F/table" "$F/table.keep" && cp "$F/table.none" "$F/table" && front=com.mitchellh.ghostty run; echo "exit $?"; cp "$F/table.keep" "$F/table")
   [ "$out" = "exit 0" ] && ok || bad "$s: no client, but output ($out)"
-  # Linux: tty names (pts/N), stat -c, no tty is ?.
+  # Linux: tty names (pts/N), stat -c, no tty is ?, no front line (lsappinfo is not asked).
   sed -e 's/ 16\/\([0-9]*\) / pts\/\1 /' -e 's/ ?? / ? /' "$F/table" > "$tmp/linux-table"
   L=$tmp/linux; mkdir -p "$L"; cp "$tmp/linux-table" "$L/table"; cp "$F"/env-* "$L/"
-  sed 's|^16/\([0-9]*\) \([0-9]*\) .*|/dev/pts/\1 \2 /dev/pts/\1|' "$F/stat" > "$L/stat"
-  out=$(PATH=$bin FAKE=$L FAKE_OS=Linux NOTTY=? NOSELF= $s "$tmp/client.sh")
-  [ "$(echo "$out" | sed -n 1,3p | tr '\n' '|')" = "pid 4999201|atime 2000|tty pts/21|" ] && ok || bad "$s: Linux, not kitty's client ($out)"
+  sed 's|^16/\([0-9]*\) \([0-9.]*\) .*|/dev/pts/\1 \2 /dev/pts/\1|' "$F/stat" > "$L/stat"
+  out=$(PATH=$bin FAKE=$L FAKE_OS=Linux NOTTY=? NOSELF= FRONT=com.mitchellh.ghostty $s "$tmp/client.sh")
+  [ "$(pids "$out")" = "4999102 4999201 4999205 4999206 " ] && ok || bad "$s: Linux, not the four clients ($out)"
+  [ "$(block "$out" 4999201 | sed -n 1,3p | tr '\n' '|')" = "pid 4999201|atime 2000|tty pts/21|" ] && ok || bad "$s: Linux, kitty's lines ($out)"
+  [ -z "$(echo "$out" | grep '^front')" ] && ok || bad "$s: Linux, a front line ($out)"
+done
+
+# The light check: its own stat, which prints the format for each path in
+# $FAKE/times (`path time`) and fails for the others; %a and %X give whole
+# seconds; %Fa gives no number with NOFRAC (a stat with no %F).
+tbin=$tmp/tbin
+mkdir -p "$tbin"
+for t in awk sed; do ln -s "$(command -v "$t")" "$tbin/$t"; done
+ln -s "$bin/lsappinfo" "$tbin/lsappinfo"
+cat > "$tbin/stat" <<'EOF2'
+#!/bin/sh
+fmt=$2; shift 2
+rc=0
+for p; do
+  t=$(awk -v p="$p" '$1 == p { print $2 }' "$FAKE/times")
+  if [ -z "$t" ]; then echo "stat: $p: No such file or directory" >&2; rc=1; continue; fi
+  case $fmt in *%Fa) [ -n "${NOFRAC:-}" ] && t=Fa ;; *) t=${t%%.*} ;; esac
+  printf '%s\n' "$fmt" | sed "s|%[Nn]|$p|; s|%Fa|$t|; s|%[aX]|$t|"
+done
+exit $rc
+EOF2
+chmod +x "$tbin/stat"
+T=$tmp/tick; mkdir -p "$T"
+printf '/dev/ttys012 1000.250000000\n/dev/ttys021 2000.000000000\n/dev/pts/21 2000.000000000\n' > "$T/times"
+for s in $shells; do
+  [ "$s" = bash ] && s="$(command -v bash) --posix" || s=$(command -v "$s")
+  tick() { PATH=$tbin FAKE=$T FRONT=$front NOFRAC=$nofrac $s "$tmp/tick.sh" "$@"; echo "exit $?"; }
+  front=; nofrac=
+  nl='
+'
+  # macOS: the app in front, then each tty's time with its fraction.
+  front=com.mitchellh.ghostty; out=$(tick Darwin /dev/ttys012 /dev/ttys021); front=
+  [ "$out" = "front com.mitchellh.ghostty${nl}atime /dev/ttys012 1000.250000000${nl}atime /dev/ttys021 2000.000000000${nl}exit 0" ] && ok || bad "$s: tick, macOS ($out)"
+  # No app in front known: no front line.
+  out=$(tick Darwin /dev/ttys012)
+  [ "$out" = "atime /dev/ttys012 1000.250000000${nl}exit 0" ] && ok || bad "$s: tick, no front ($out)"
+  # A tty that is gone: no line for it; the others stay.
+  out=$(tick Darwin /dev/ttys099 /dev/ttys021)
+  [ "$out" = "atime /dev/ttys021 2000.000000000${nl}exit 0" ] && ok || bad "$s: tick, a tty gone ($out)"
+  # All gone: nothing, exit 0.
+  out=$(tick Darwin /dev/ttys099)
+  [ "$out" = "exit 0" ] && ok || bad "$s: tick, all gone ($out)"
+  # A stat with no %Fa: whole seconds.
+  nofrac=1; out=$(tick Darwin /dev/ttys012 /dev/ttys021); nofrac=
+  [ "$out" = "atime /dev/ttys012 1000${nl}atime /dev/ttys021 2000${nl}exit 0" ] && ok || bad "$s: tick, no %Fa ($out)"
+  # No tty asked: the app in front only.
+  front=com.googlecode.iterm2; out=$(tick Darwin); front=
+  [ "$out" = "front com.googlecode.iterm2${nl}exit 0" ] && ok || bad "$s: tick, no tty ($out)"
+  # Linux: stat -c, whole seconds, and no front line (lsappinfo is not asked).
+  front=com.mitchellh.ghostty; out=$(tick Linux /dev/pts/21 /dev/pts/9); front=
+  [ "$out" = "atime /dev/pts/21 2000${nl}exit 0" ] && ok || bad "$s: tick, Linux ($out)"
+  out=$(tick Linux)
+  [ "$out" = "exit 0" ] && ok || bad "$s: tick, Linux, no tty ($out)"
 done
 
 echo "herdr-sh-test: $pass passed, $fail failed (shells:$shells)"

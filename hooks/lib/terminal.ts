@@ -1,7 +1,7 @@
 // What the terminal can draw: its columns and cell size, whether the engine
 // draws pictures there, and how large a picture sent as bytes (over ssh) can be.
 import { S, type Cell } from './state'
-import { GUTTER, IMAGE_MAX_COLUMNS, SEGMENT_ROWS, type Width } from './settings'
+import { GUTTER, HERDR_SCAN_MS, IMAGE_MAX_COLUMNS, SEGMENT_ROWS, type Width } from './settings'
 import { isItermIn } from './terminals'
 import type { EnvName } from './api'
 
@@ -159,24 +159,107 @@ export function herdrClientOf(stdout: string): HerdrClient | null {
   return { pid, atime: Number(field('atime')) || 0, tty: field('tty'), cmd, app, env, kind }
 }
 
+// HERDR_CLIENT_SH's output: the bundle id of the app in front (`front`;
+// null when not read, as on Linux) and each client (a block from its `pid`
+// line). An old output of one client with no `front` line also parses.
+export function herdrClientsOf(stdout: string): { front: string | null; clients: HerdrClient[] } {
+  const [head = '', ...blocks] = `\n${stdout}`.split(/\n(?=pid [^\n]*\n)/)
+  const front = /^front (.+)$/m.exec(head)?.[1]?.trim() || null
+  return { front, clients: blocks.map(block => herdrClientOf(block)).filter((c): c is HerdrClient => !!c) }
+}
+
+// The terminal kinds of the app in front (macOS bundle ids): the herdr
+// hosts, and WezTerm and Terminal (no herdr host of their own). '' for
+// another app (a browser, an editor).
+export type FrontKind = HerdrHost | 'wezterm' | 'terminal'
+const FRONT_APPS: Readonly<Record<string, FrontKind>> = {
+  'com.mitchellh.ghostty': 'ghostty',
+  'net.kovidgoyal.kitty': 'kitty',
+  'com.googlecode.iterm2': 'iterm',
+  'com.cmuxterm.app': 'cmux',
+  'com.github.wez.wezterm': 'wezterm',
+  'com.raphaelamorim.rio': 'rio',
+  'com.apple.Terminal': 'terminal',
+}
+export const frontKindOf = (bundleId: string): FrontKind => FRONT_APPS[bundleId] ?? ''
+// A client's kind to compare with the app in front: its terminal, else
+// WezTerm or Terminal by its terminal app's path.
+export const clientFrontKindOf = (c: HerdrClient): FrontKind =>
+  c.kind || (/wezterm/i.test(c.app) ? 'wezterm' : /\/Terminal\.app\//.test(c.app) ? 'terminal' : '')
+
+// The herdr client to follow, and why: `front` (macOS: a client in the
+// terminal app in front; with more than one, the tty read last), `typed`
+// (the tty read last: no front app known, as on Linux, or no client kept),
+// `kept` (the app in front has no client, as a browser: the client of
+// before stays). The tty time alone is not enough: iTerm2 answers each
+// picture upload of herdr, so its client's tty is read with no key typed.
+// null when there is no client.
+export type HerdrPick = { client: HerdrClient; by: 'front' | 'typed' | 'kept' }
+export function pickHerdrClient(clients: readonly HerdrClient[], front: FrontKind | null, was: HerdrClient | null): HerdrPick | null {
+  const newest = (list: readonly HerdrClient[]) => list.reduce((a, b) => (b.atime > a.atime ? b : a))
+  if (!clients.length) return null
+  if (front === null) return { client: newest(clients), by: 'typed' }
+  const same = front ? clients.filter(c => clientFrontKindOf(c) === front) : []
+  if (same.length) return { client: newest(same), by: 'front' }
+  const kept = was ? clients.find(c => c.pid === was.pid) : undefined
+  return kept ? { client: kept, by: 'kept' } : { client: newest(clients), by: 'typed' }
+}
+
+// A tty as the scan names it (`ttys012`, `pts/3`), with no `/dev/`.
+export const ttyNameOf = (tty: string) => tty.replace(/^\/dev\//, '')
+
+// HERDR_TICK_SH's output: the bundle id of the app in front (`front`; null
+// when not read, as on Linux) and each tty's access time (`atime /dev/<tty>
+// <time>`; a tty that is gone has no line), by ttyNameOf.
+export type HerdrTick = { front: string | null; atimes: Map<string, number> }
+export function herdrTickOf(stdout: string): HerdrTick {
+  const front = /^front (.+)$/m.exec(stdout)?.[1]?.trim() || null
+  const atimes = new Map<string, number>()
+  for (const m of stdout.matchAll(/^atime \/dev\/(\S+) ([0-9]+(?:\.[0-9]+)?)$/gm)) atimes.set(m[1]!, Number(m[2]))
+  return { front, atimes }
+}
+
+// The light check under herdr: the clients of the last full scan with the
+// tick's tty times, and the pick among them (null: no client). Null when a
+// full scan must run: none yet (`ageMs` null) or HERDR_SCAN_MS since the
+// last, the tick failed, a client's tty is gone, the app in front is a
+// terminal with no client (and not the one in front at the scan), or the
+// pick is another client than `was`.
+export function herdrTickPick(o: { clients: readonly HerdrClient[]; tick: HerdrTick | null; was: HerdrClient | null; scanFront: string | null; ageMs: number | null }): { clients: HerdrClient[]; pick: HerdrPick | null } | null {
+  const { tick } = o
+  if (!tick || o.ageMs === null || o.ageMs >= HERDR_SCAN_MS) return null
+  const clients: HerdrClient[] = []
+  for (const c of o.clients) {
+    const atime = tick.atimes.get(ttyNameOf(c.tty))
+    if (atime === undefined) return null
+    clients.push({ ...c, atime })
+  }
+  const front = tick.front === null ? null : frontKindOf(tick.front)
+  if (front && tick.front !== o.scanFront && !clients.some(c => clientFrontKindOf(c) === front)) return null
+  if (!clients.length) return { clients, pick: null }
+  const pick = pickHerdrClient(clients, front, o.was)
+  return pick && pick.client.pid === o.was?.pid ? { clients, pick } : null
+}
+
 // What the font and the mode depend on: the kind and OUTER_NAMES (not the
 // pid or the time: another window of the same terminal changes nothing).
 export const herdrClientKey = (c: HerdrClient | null) => (c ? JSON.stringify([c.kind, ...OUTER_NAMES.map(name => c.env[name] ?? '')]) : '')
 export const herdrClientChanged = (was: HerdrClient | null, now: HerdrClient | null) => herdrClientKey(was) !== herdrClientKey(now)
 
-// Flip mode (flip.ts): herdr, not over ssh, and the client the user typed in
-// last is iTerm2. A remote herdr pane (`herdr --remote`) finds no client.
+// Flip mode (flip.ts): herdr, not over ssh, and the client in use
+// (pickHerdrClient) is iTerm2. A remote herdr pane (`herdr --remote`) finds no client.
 export const flipOf = (o: { herdr?: boolean; inline: boolean; client: HerdrClient | null }) => !!o.herdr && !o.inline && o.client?.kind === 'iterm'
 export const isFlipHere = (env: { herdr?: boolean; inline: boolean } | null = S.env) => !!env && flipOf({ herdr: env.herdr, inline: env.inline, client: S.herdrClient })
 
 const HERDR_HOSTS = { ghostty: 'Ghostty', cmux: 'cmux', kitty: 'kitty', iterm: 'iTerm2', rio: 'Rio' } as const
-// herdr in /iui details, and where its terminal came from: the client
-// typed in last, or the server's variables (the fallback); `flip`: flip mode is on.
-export type HerdrFrom = 'client' | 'server'
+// herdr in /iui details, and where its terminal came from: the client in
+// the terminal app in front (`front`), the client typed in last
+// (`client`), or the server's variables (the fallback); `flip`: flip mode is on.
+export type HerdrFrom = 'front' | 'client' | 'server'
 export const FLIP_TEXT = "pages and pictures stored upside down by rows, for iTerm2's placement bug"
 export const herdrText = (version: string, host: HerdrHost, from: HerdrFrom = 'server', flip = false) =>
   `herdr${version ? ` ${version}` : ''} (${
-    host ? `in ${HERDR_HOSTS[host]}, ${from === 'client' ? 'the client you used last' : "from the server's start"}${flip ? `; ${FLIP_TEXT}` : ''}` : 'outer terminal not known'
+    host ? `in ${HERDR_HOSTS[host]}, ${from === 'front' ? 'the terminal in front' : from === 'client' ? 'the client you used last' : "from the server's start"}${flip ? `; ${FLIP_TEXT}` : ''}` : 'outer terminal not known'
   })`
 
 // Whether /iui setup can turn pictures on: they are off, and this is iTerm2

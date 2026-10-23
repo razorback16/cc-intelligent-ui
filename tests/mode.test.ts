@@ -192,8 +192,11 @@ test('with the theme on auto, herdr takes the OSC 11 background first, and keeps
   const mode = async () => (await $.command.run({ command: 'iui', args: 'details' } as any)).text as string
   const herdrLight = 'mode light (auto, from herdr: OSC 11 background of the terminal in front)'
   expect(await mode()).toContain(herdrLight)
+  // Under herdr the poll runs each second, but the mode is read each 3 s.
+  await clock.advance(2000)
+  expect(probes).toBe(1)
   // Two polls with no answer: the last answer stays.
-  await clock.advance(3000)
+  await clock.advance(1000)
   expect(await mode()).toContain(herdrLight)
   await clock.advance(3000)
   expect(await mode()).toContain(herdrLight)

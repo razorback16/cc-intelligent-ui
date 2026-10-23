@@ -181,15 +181,23 @@ export const S = {
   // iTerm2 (isItermIn) and cmux (Ghostty inside, with its CMUX_* variables), set in setUp (cmux: setOuter).
   isIterm: false,
   isCmux: false,
-  // herdr (isHerdrIn), its version ('' not known), the client the user
-  // typed in last (HERDR_CLIENT_SH; null: none found, so the server's
-  // variables count), the terminal it runs in ('' outside herdr or not
-  // known; setOuter), all set in setUp and kept by the poll; and the last
-  // OSC 11 answer of its pane (keptOsc11).
+  // herdr (isHerdrIn), its version ('' not known), the client in use
+  // (pickHerdrClient: in the terminal app in front, or typed in last; null:
+  // none found, so the server's variables count) and how it was chosen, the
+  // terminal it runs in ('' outside herdr or not known; setOuter), all set
+  // in setUp and kept by the poll; and the last OSC 11 answer of its pane
+  // (keptOsc11).
   isHerdr: false,
   herdrVersion: '',
   herdrClient: null as HerdrClient | null,
+  herdrBy: 'typed' as 'front' | 'typed',
   herdrHost: '' as HerdrHost,
+  // The clients, the app in front and the time of the last full scan (null: none yet), for the light check.
+  herdrClients: [] as HerdrClient[],
+  herdrScanFront: null as string | null,
+  herdrScanAt: null as number | null,
+  // Polls under herdr since the last mode read (it runs every HOST_POLL_MS).
+  hostTicks: 0,
   osc11Kept: null as Osc11Kept,
   // A font folder for Typst (TYPST_FONT_PATHS): the font a terminal carries
   // in its program (Ghostty's, Rio's), when it draws it. '' for none.
@@ -206,6 +214,8 @@ export const S = {
   setupNeeded: false,
   setupAsked: false,
   watch: null as { cancel: () => void } | null,
+  // The poll timer's period (watchHost).
+  watchMs: 0,
   checking: false,
   // Linux: the tool that reads the desktop portal's colour scheme (host.ts;
   // null: not tried yet, '': none works, so GNOME's gsettings is read).

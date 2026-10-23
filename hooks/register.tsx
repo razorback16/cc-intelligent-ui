@@ -82,7 +82,7 @@ export {
 } from './lib/themes'
 export { commandSuggestions, parseCommand, type Command, type Suggestion } from './lib/command'
 export { hasNewSetup, hasSetup, SETUP_END, SETUP_NOT_MAC, SETUP_START, setupBlock, setupWordsOf, shellRcOf, withoutSetup, withSetup, type ShellRc } from './lib/setup'
-export { fcPatternOf, HERDR_CLIENT_SH, OSC11_PL, perlFor, PROGRAM_FONTS_PL, PROGRAM_FONTS_SH, WATCH_PL } from './lib/host'
+export { fcPatternOf, HERDR_CLIENT_SH, HERDR_TICK_SH, OSC11_PL, perlFor, PROGRAM_FONTS_PL, PROGRAM_FONTS_SH, WATCH_PL } from './lib/host'
 export {
   convertCall, isSafePage, measureCall, noNetworkEnv, pageRowsOf, parseOd, pngSize, probeCall, resultOf, roomInputs, shouldRetrySafe, typstCall, typstInputs,
 } from './lib/typst'
@@ -828,7 +828,7 @@ export const register: Register = on => {
         ? 'Claude Code draws no pictures in herdr until CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 is set when it starts (run /iui setup), so answers stay text'
         : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+, Rio 0.5.27+ and herdr with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
       // In herdr: its version, the terminal it runs in and where that came from (and flip mode).
-      const herdr = S.isHerdr ? `terminal ${herdrText(S.herdrVersion, S.herdrHost, S.herdrClient ? 'client' : 'server', isFlipHere(ready))}: ` : ''
+      const herdr = S.isHerdr ? `terminal ${herdrText(S.herdrVersion, S.herdrHost, S.herdrClient ? (S.herdrBy === 'front' ? 'front' : 'client') : 'server', isFlipHere(ready))}: ` : ''
       await clipWayReady()
       const auto = `Picture select: ${selectState()}\n/iui grab hint: ${hintOf(state === 'on')}`
       const updates = `Update checks: ${updateLine(await updateState($))}`
@@ -858,7 +858,7 @@ export const register: Register = on => {
     S.settingRaw = typeof set.value === 'string' ? set.value : ''
     S.setting = settingOf(set.value)
     // Not awaited: the setting is saved at once; the OS read redraws later.
-    if (S.setting === 'auto') void pollHost($).catch(() => undefined)
+    if (S.setting === 'auto') void pollHost($, true).catch(() => undefined)
     else showMode($)
     watchHost($)
     return set
