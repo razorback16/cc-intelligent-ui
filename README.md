@@ -14,6 +14,28 @@ Intelligent UI draws each answer from Claude as a typeset picture, with [Typst](
 
 ## Install
 
+In a shell, on macOS or Linux:
+
+```
+curl -fsSL https://intelligentui.art/install.sh | bash
+```
+
+Then restart Claude Code, or type `/reload-plugins` in a session. To update, run the command again. You can [read the script](site/install.sh) before you run it.
+
+What `install.sh` does:
+
+1. It checks that the system is macOS or Linux (arm64 or x86_64) and that Claude Code is installed. If Claude Code is not installed, it stops and changes nothing.
+2. If it finds no Typst 0.15 or later, it downloads the official Typst 0.15.1 release from GitHub, checks its SHA-256 (written in the script), and puts `typst` in `~/.local/bin`. It never uses `sudo`.
+3. It adds the `razorback16` marketplace and installs the mod with the `claude plugin` commands. If they are installed, it updates them. If your `razorback16` marketplace comes from another source (a fork, a pinned ref or a local folder), an update can not get the newest version: the script removes that marketplace, adds it again from GitHub and installs the mod again (a disabled mod stays disabled). It uninstalls a second user copy of the mod from another marketplace, and only shows copies in a project. It tells you each change and how to undo it.
+4. It turns on auto-update for the `razorback16` marketplace: `"autoUpdate": true` for `razorback16` in `extraKnownMarketplaces` of `~/.claude/settings.json`. It keeps all other settings and keeps the file before this change as `settings.json.bak-iui` (step 3 changed the file already; the backup undoes only the auto-update change). If the file is not valid JSON, the script does not change it and shows the lines to add.
+5. If iTerm2 or herdr is there, it adds the mod's own `/iui setup` block to the start file of your login shell (`~/.zshrc`, `~/.bash_profile` on macOS, `~/.bashrc` on Linux, or a fish `conf.d` file), with a backup `<file>.bak-iui`. The block sets `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` in iTerm2 and herdr only. Undo: `/iui setup remove` in Claude Code.
+
+`IUI_NO_TYPST=1` skips step 2, `IUI_NO_AUTO_UPDATE=1` skips step 4, and `IUI_NO_SHELL_SETUP=1` skips step 5, for example `curl -fsSL https://intelligentui.art/install.sh | IUI_NO_AUTO_UPDATE=1 bash`.
+
+To undo: `claude plugin uninstall cc-intelligent-ui@razorback16`, then `claude plugin marketplace remove razorback16` (this also removes its entry in `settings.json`). If the script installed Typst: `rm ~/.local/bin/typst`. Refer to [The install script](docs/install.md#the-install-script).
+
+### Install by hand
+
 ```
 brew install typst
 ```
@@ -28,9 +50,11 @@ Then, in Claude Code:
 
 It works at once, with no restart.
 
+### Fullscreen, updates and terminals
+
 Intelligent UI works best in fullscreen mode (recommended). To use it, run `/tui fullscreen` in Claude Code.
 
-To get new versions, turn on auto-update for the `razorback16` marketplace in `/plugin`, or update manually. Refer to [Update](docs/install.md#update). The mod also shows a notice when a new version is available (`/iui updates off` stops it).
+To get new versions, turn on auto-update for the `razorback16` marketplace in `/plugin` (the install script does this for you), or update manually. Refer to [Update](docs/install.md#update). The mod also shows a notice when a new version is available (`/iui updates off` stops it).
 
 You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15, and macOS or Linux (X11 or Wayland). The pictures show only in some terminals:
 
@@ -109,7 +133,7 @@ The mod sends nothing about you or your sessions anywhere.
 - **Network:** one GET request each day at most, to `raw.githubusercontent.com`, for the public `plugin.json` of this mod. It only tells you about a new version. `/iui updates off` stops it. It also stops when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_UPDATES` or `DISABLE_AUTOUPDATER` is set.
 - **Clipboard, read:** a small `perl` process watches the clipboard while the mod is on and has drawn a picture (not over ssh). On macOS it reads only the change counter; when the counter changes, the mod reads the text once with a short `perl` script (PerlObjCBridge). On Linux a notifier (`wl-paste --watch`, `clipnotify` or GTK 3 from `python3`) tells it of each change, and it then reads the text with `wl-paste`, `xclip` or GTK. `/iui grab` with no mouse selection also reads the clipboard once. The text is only checked for picture cells (then a toast names `/iui grab`); it is kept in memory only and sent nowhere (`/iui dump` writes the last clipboard with picture cells to `copy-debug.json` in the cache folder). A password manager's copy is never read: on macOS a copy with a concealed or transient type, on Linux a copy that offers the `x-kde-passwordManagerHint` target, and on Wayland also a copy marked sensitive. (On Wayland, `wl-paste --watch` hands each new copy to `cat`, which drops it.)
 - **Clipboard, written:** only at these times: when you release a picture selection, when you click a link, a file path, a command or a copy button in a picture, on `/iui grab`, when you press the command button in a link row (in fullscreen with `/iui select off`, where Claude Code gets the click), and when the mod changes a `$.ui.copy` that has picture cells to its text.
-- **Files:** a private cache folder in `$TMPDIR` (`cc-intelligent-ui-<uid>`, `/tmp` when `TMPDIR` is not set; mode 700, its folders deleted after 2 days). Each compile makes a folder of its own in it (the Typst root, see below) and deletes it after the compile. Also `~/.cache/cc-intelligent-ui/designs` (files deleted after 180 days) and `~/.cache/cc-intelligent-ui/fonts` (fonts copied out of a terminal app, such as Ghostty's JetBrains Mono; `$XDG_CACHE_HOME` in place of `~/.cache` when it is set). The previews of pasted images are made in the cache folder too, from the image files that Claude Code writes when you paste. `/iui setup` (iTerm2 on macOS, and herdr) changes your shell start file, only when you run it or agree to its question.
+- **Files:** a private cache folder in `$TMPDIR` (`cc-intelligent-ui-<uid>`, `/tmp` when `TMPDIR` is not set; mode 700, its folders deleted after 2 days). Each compile makes a folder of its own in it (the Typst root, see below) and deletes it after the compile. Also `~/.cache/cc-intelligent-ui/designs` (files deleted after 180 days) and `~/.cache/cc-intelligent-ui/fonts` (fonts copied out of a terminal app, such as Ghostty's JetBrains Mono; `$XDG_CACHE_HOME` in place of `~/.cache` when it is set). The previews of pasted images are made in the cache folder too, from the image files that Claude Code writes when you paste. `/iui setup` (iTerm2 on macOS, and herdr) changes your shell start file, only when you run it or agree to its question. The install script adds the same block when iTerm2 or herdr is there (`IUI_NO_SHELL_SETUP=1` stops it).
 - **Processes:** `typst`, the `perl` watcher, and short helper commands such as `perl`, `sh`, `osascript`, `defaults`, `plutil`, `fc-list` and `fc-match`. In herdr, while the mod is on and pictures show, a check each second finds the herdr client that you use: `stat` of the terminals' devices (the time of the last key), and on macOS `lsappinfo` (the app in front); each 10 s also `ps` (the processes and, of your own herdr clients, their variables) and `lsof`. Of a client's variables, the mod keeps only those of the terminal (for example `TERM`, `ITERM_PROFILE`, `GHOSTTY_RESOURCES_DIR`); it writes none of this anywhere. On Linux also `wl-paste`, `xclip`, `clipnotify` or `python3 -I` (GTK 3; isolated, so it loads no code from the project folder) for the clipboard.
 - **Typst:** each compile of an answer or a plan runs with a narrow root: a new folder with the mod's template, the theme and the images that the text names. So the code in an answer cannot read other files on your computer. The skill's `check.sh` compiles the same way, and so does the preview of a pasted image (a folder with only its template and the pasted image).
 
