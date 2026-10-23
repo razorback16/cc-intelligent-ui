@@ -47,7 +47,7 @@ Needs Claude Code 2.1.298 or later. Works best in fullscreen mode (`/tui fullscr
 - **LaTeX math:** inline and display, typeset.
 - **Diagrams, charts and plots:** Claude draws them live with Typst, in your theme's colours, offline.
 - **Images and files:** images in answers, images and Markdown files that Claude sends, and a preview of images you paste, above the prompt box.
-- **Copy from pictures:** in fullscreen, drag over a picture to select and copy its text. Click a link, path or command to copy it.
+- **Copy answers as usual:** in fullscreen, drag over an answer to select and copy its text, as you do with normal text. Click a link, path or command to copy it. [How copy works](docs/usage.md#copy-text-from-a-picture).
 - **Readable plans:** plan mode shows the plan rendered, with approve, edit and reject.
 - **Light and dark themes:** Claude Code's colours or VS Code's, or your own.
 
