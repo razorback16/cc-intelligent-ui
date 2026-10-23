@@ -12,7 +12,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { chunk, concat, decodeSteps, deflatePiece, fromBase64, headOf, tailOf, toBase64, type Piece, type Rgba } from './png'
-import { delay, cat, exec } from './api'
+import { delay, cat, exec, nowMs } from './api'
 
 // The source rows herdr places for row k of a picture `height` pixels tall drawn `rows` rows tall.
 export function herdrBand(k: number, height: number, rows: number): { y: number; h: number } {
@@ -37,15 +37,24 @@ export function flipRows(img: Rgba, rows: number): Rgba {
 }
 
 // The picture `rows` × B pixels tall, B = round(height / rows) (1 at least):
-// rows past it cut, or the last row repeated.
+// the last row repeated when it is shorter; when it is taller, row k is the
+// band herdr shows for it (herdrBand), so the rows it drops are spread, as
+// on a right terminal, and the bottom is never cut.
 export function padRows(img: Rgba, rows: number): Rgba {
-  const height = rows * Math.max(1, Math.round(img.height / rows))
+  const band = Math.max(1, Math.round(img.height / rows))
+  const height = rows * band
   if (height === img.height) return img
   const stride = img.width * 4
   const data = new Uint8Array(height * stride)
-  const kept = Math.min(height, img.height)
-  data.set(img.data.subarray(0, kept * stride))
-  for (let y = kept; y < height; y++) data.copyWithin(y * stride, (kept - 1) * stride, kept * stride)
+  if (height > img.height) {
+    data.set(img.data)
+    for (let y = img.height; y < height; y++) data.copyWithin(y * stride, (img.height - 1) * stride, img.height * stride)
+  } else {
+    for (let k = 0; k < rows; k++) {
+      const y = Math.floor((k * img.height) / rows)
+      data.set(img.data.subarray(y * stride, (y + band) * stride), k * band * stride)
+    }
+  }
   return { width: img.width, height, data }
 }
 
@@ -87,17 +96,19 @@ export function* encodeSteps(img: Rgba): Generator<undefined, Uint8Array, void> 
 
 // A PNG stored for flip mode, in steps: decoded, made `rows` × B tall when
 // `isPage` (padRows), its bands moved (flipRows), encoded; with its size.
-export function* flipSteps(png: Uint8Array, rows: number, isPage: boolean): Generator<undefined, Rgba & { png: Uint8Array }, void> {
-  let img = yield* decodeSteps(png)
-  if (isPage) img = padRows(img, rows)
+// `tall`: the height its rows map to (copy.ts), the PNG's own when padRows
+// dropped rows (they were spread over the page, as herdr does).
+export function* flipSteps(png: Uint8Array, rows: number, isPage: boolean): Generator<undefined, Rgba & { png: Uint8Array; tall: number }, void> {
+  const made = yield* decodeSteps(png)
+  const img = isPage ? padRows(made, rows) : made
   yield
-  img = flipRows(img, rows)
+  const flipped = flipRows(img, rows)
   yield
-  return { ...img, png: yield* encodeSteps(img) }
+  return { ...flipped, png: yield* encodeSteps(flipped), tall: Math.max(made.height, img.height) }
 }
 
 // The same at once (tests).
-export function flipPng(png: Uint8Array, rows: number, isPage: boolean): Rgba & { png: Uint8Array } {
+export function flipPng(png: Uint8Array, rows: number, isPage: boolean): Rgba & { png: Uint8Array; tall: number } {
   const steps = flipSteps(png, rows, isPage)
   for (;;) {
     const got = steps.next()
@@ -107,23 +118,41 @@ export function flipPng(png: Uint8Array, rows: number, isPage: boolean): Rgba & 
 
 // ---- Files -------------------------------------------------------------------------
 
-// Writes stdin's base64 to the file (its folder made, a temporary name,
-// then renamed), and deletes the older frames named after it (blit.ts).
-export const WRITE_PL = 'use MIME::Base64; local $/; my $b = <STDIN>; my ($f, @old) = @ARGV; my ($d) = $f =~ m{^(.*)/}; mkdir($d, 0700) unless -d $d; open(my $o, ">:raw", "$f.tmp") or die "$!\\n"; print $o decode_base64($b); close($o) or die "$!\\n"; rename("$f.tmp", $f) or die "$!\\n"; unlink(@old)'
+// Writes stdin's base64 to the file (its folder made, a temporary name of
+// this process, then renamed), and deletes the older frames named after it (blit.ts).
+export const WRITE_PL = 'use MIME::Base64; local $/; my $b = <STDIN>; my ($f, @old) = @ARGV; my ($d) = $f =~ m{^(.*)/}; mkdir($d, 0700) unless -d $d; my $t = "$f.$$.tmp"; open(my $o, ">:raw", $t) or die "$!\\n"; print $o decode_base64($b); close($o) or die "$!\\n"; rename($t, $f) or die "$!\\n"; unlink(@old)'
 
 // A slice of the steps: the hooks run between slices (clock.after(0)).
 const SLICE_MS = 8
 
-// Runs `steps` in slices; null when `signal` stopped them.
+// The time a slice reads (a test can set it).
+export const sliceClock = { now: () => performance.now() }
+
+// The engine's time; NaN when it can not be read.
+async function engineNow($: EngineInterface): Promise<number> {
+  try {
+    return await nowMs($)
+  } catch {
+    return NaN
+  }
+}
+
+// Runs `steps` in slices; null when `signal` stopped them. No yield while
+// the engine's clock stands still (a test's: it fires no clock.after(0)
+// while a draw is awaited).
 async function runSliced<T>($: EngineInterface, steps: Generator<undefined, T, void>, signal?: AbortSignal): Promise<T | null> {
+  let at = await engineNow($)
   for (;;) {
-    const t0 = performance.now()
+    const t0 = sliceClock.now()
     for (;;) {
       const got = steps.next()
       if (got.done) return got.value
-      if (performance.now() - t0 >= SLICE_MS) break
+      if (sliceClock.now() - t0 >= SLICE_MS) break
     }
     if (signal?.aborted) return null
+    const now = await engineNow($)
+    if (now === at) continue
+    at = now
     await new Promise<void>(done => delay($, 0, done))
     if (signal?.aborted) return null
   }
@@ -140,7 +169,7 @@ export async function flipFile(
     const made = await runSliced($, flipSteps(fromBase64(base64), o.rows, o.isPage), o.signal)
     if (!made) return null
     const ran = await exec($, [o.perl, '-e', WRITE_PL, o.out], { stdin: toBase64(made.png) })
-    return ran.exitCode === 0 ? { width: made.width, height: made.height } : null
+    return ran.exitCode === 0 ? { width: made.width, height: made.tall } : null
   } catch {
     return null
   }

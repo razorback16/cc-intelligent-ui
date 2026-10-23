@@ -19,6 +19,7 @@ sh tests/fill-sh-test.sh       # the root of a pasted image's preview (FILL_SH):
 sh tests/check-sh-test.sh      # the skill's check.sh: a private cache folder, and a block reads no other file (skips with no Typst 0.15)
 sh tests/footprint-sh-test.sh  # release gate: the validator's footprint is whole (no [+N chars] mark, calls line of 850 characters at most)
 sh tests/gap-sh-test.sh        # the gap at a page break of md.typ (seams), on and off the row grid, with the real Typst (skips with no typst)
+sh tests/flip-sh-test.sh       # the write of a flipped PNG or a frame (WRITE_PL) with the real perl, also two writers of one file at once
 sh tests/herdr-sh-test.sh      # the herdr client finder (HERDR_CLIENT_SH) with fake ps, stat, lsof and lsappinfo, in sh, dash and bash
 sh tests/install-sh-test.sh    # the installer site/install.sh in a sandbox HOME with a fake claude, curl and uname (shellcheck when installed)
 claude plugin validate .

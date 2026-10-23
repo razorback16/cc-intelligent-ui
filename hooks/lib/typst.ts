@@ -701,7 +701,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
 
 // The pages of a compile stored for flip mode (flip.ts: rows × B pixels
 // tall, the bands reversed), each as a file of its own (`f` before its
-// name: a flip of a flipped page would undo it), with its new height.
+// name: a flip of a flipped page would undo it), with the height its rows map to (flipSteps).
 async function flipPages($: EngineInterface, job: Job, pages: readonly Page[], signal?: AbortSignal): Promise<Page[] | 'failed' | 'cancelled'> {
   const flipped: Page[] = []
   for (const p of pages) {

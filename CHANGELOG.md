@@ -31,7 +31,8 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
   - With the `auto` theme, the background comes from herdr: herdr gives the background of the terminal in front (OSC 11). This also works with `herdr --remote`. If an answer does not come, the mod keeps the last background for up to 2 more checks.
   - The font comes from the herdr client that you use. You can attach to one herdr server from more than one terminal, for example from Ghostty and from kitty. On macOS, the mod uses the client in the terminal app in front. When the app in front is not a terminal (for example a browser), it keeps the last client. On Linux, and between two clients in the same app, it uses the client where you typed last. When you change to a different terminal, the mod finds it at the next check (every 1 s), reads its font and draws the pictures again. If the mod cannot find the client, it uses the variables of the terminal that started the herdr server.
 - In herdr, a tall page of a long answer did not show (herdr does not send an image that is too large to the terminal). Refer to [Limitations](docs/limitations.md).
-- At a page break between two blocks (for example a paragraph and a list, or a table and a heading), the next page starts with the same gap as in one page. Before, the gap was lost. With the row grid off, the gap can be up to 1 row larger.
+- herdr in iTerm2: the last rows of a page taller than 255 rows no longer go missing, and a picture that two sessions stored at the same time no longer stays blank.
+- At a page break between two blocks (for example a paragraph and a list, or a table and a heading), the next page starts with the same gap as in one page. Before, the gap was lost. With the row grid off, the gap can be up to 1 row larger. At a break between two items of a list, the gap is the gap between the items (it was 1 or 2 rows too large).
 
 ### Changed
 
