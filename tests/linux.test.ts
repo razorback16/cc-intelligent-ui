@@ -2,7 +2,8 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import {
   clipToolsOf, clipWayOf, editorArgv, familyOfFc, FIND_SH, GHOSTTY_DEFAULT_FONT, GTK_READ_PY, GTK_WATCH_PY, guiEditorOf, hintText, LINUX_EDITORS,
-  placeholderCell, schemeOfPortal, SETUP_NOT_MAC, WATCH_PL, WL_WATCH_SH, X11_WATCH_SH, type ClipWay,
+  placeholderCell, READ_PL, schemeOfPortal, SECRET_TARGET, SECRET_TYPES, SETUP_NOT_MAC, WATCH_PL, WL_READ_SH, WL_WATCH_SH, X11_WATCH_SH, XCLIP_READ_SH,
+  type ClipWay,
 } from '../hooks/register'
 import { CACHE_SH } from '../hooks/lib/env'
 import { clipboardNow, clipWatchArgs, clipWayReady, findClipWay } from '../hooks/lib/clipboard'
@@ -20,15 +21,15 @@ test('the tools found: `name path` lines, absolute paths only', () => {
     'wl-paste': '/usr/bin/wl-paste', xclip: '/usr/bin/xclip', gtk: '/usr/bin/python3',
   })
   expect(clipToolsOf('')).toEqual({})
-  // GTK is checked only when there is no clipnotify.
-  expect(FIND_SH).toContain('command -v clipnotify >/dev/null 2>&1 || {')
+  // GTK is checked only when there is no clipnotify or no xclip.
+  expect(FIND_SH).toContain('{ command -v clipnotify && command -v xclip; } >/dev/null 2>&1 || {')
   expect(FIND_SH).toContain('echo "gtk $p"')
 })
 
 test('Wayland (not GNOME): wl-paste reads, and its --watch sees each change', () => {
   const way = clipWayOf({ wayland: true, x11: true, desktop: 'KDE', found: ALL })
   expect(way).toEqual({
-    name: 'wl-paste --watch (Wayland)', read: ['/usr/bin/wl-paste', '-n', '-t', 'text'],
+    name: 'wl-paste --watch (Wayland)', read: ['sh', '-c', WL_READ_SH, '/usr/bin/wl-paste'],
     watch: ['/usr/bin/wl-paste', '--watch', 'sh', '-c', WL_WATCH_SH], wayland: true,
   })
   // The data goes to the end, and a sensitive copy gives no line.
@@ -37,7 +38,7 @@ test('Wayland (not GNOME): wl-paste reads, and its --watch sees each change', ()
 
 test('GNOME on Wayland (no data-control): the X11 tools through Xwayland come first, wl-paste last', () => {
   expect(clipWayOf({ wayland: true, x11: true, desktop: 'ubuntu:GNOME', found: ALL })).toEqual({
-    name: 'clipnotify and xclip (X11, Xwayland)', read: ['/usr/bin/xclip', '-o', '-selection', 'clipboard', '-t', 'UTF8_STRING'],
+    name: 'clipnotify and xclip (X11, Xwayland)', read: ['sh', '-c', XCLIP_READ_SH, '/usr/bin/xclip'],
     watch: ['sh', '-c', X11_WATCH_SH, '/usr/local/bin/clipnotify'], wayland: false,
   })
   // Only GTK (a GNOME desktop with no other tool): GTK reads and watches.
@@ -49,18 +50,21 @@ test('GNOME on Wayland (no data-control): the X11 tools through Xwayland come fi
   expect(clipWayOf({ wayland: true, x11: true, desktop: 'GNOME', found: { 'wl-paste': '/w' } })).toMatchObject({ name: 'wl-paste --watch (Wayland)', wayland: true })
 })
 
-test('X11: clipnotify or GTK sees the changes; xclip, xsel or GTK reads', () => {
-  expect(clipWayOf({ wayland: false, x11: true, desktop: 'XFCE', found: { xsel: '/x/xsel', clipnotify: '/x/cn' } })).toMatchObject({
-    name: 'clipnotify and xsel (X11)', read: ['/x/xsel', '-o', '-b'],
+test('X11: clipnotify or GTK sees the changes; xclip or GTK reads (xsel can not see a password manager\'s copy)', () => {
+  expect(clipWayOf({ wayland: false, x11: true, desktop: 'XFCE', found: { xsel: '/x/xsel', clipnotify: '/x/cn' } })).toEqual({
+    off: 'xsel can not see a password manager\'s copy: install xclip',
+  })
+  expect(clipWayOf({ wayland: false, x11: true, desktop: 'XFCE', found: { xsel: '/x/xsel', clipnotify: '/x/cn', gtk: '/p' } })).toMatchObject({
+    name: 'clipnotify and GTK (X11)', read: ['/usr/bin/env', 'GDK_BACKEND=x11', 'PYTHONIOENCODING=utf-8', '/p', '-c', GTK_READ_PY],
   })
   expect(clipWayOf({ wayland: false, x11: true, desktop: '', found: { xclip: '/x/xclip', gtk: '/p' } })).toMatchObject({
-    name: 'GTK and xclip (X11)', read: ['/x/xclip', '-o', '-selection', 'clipboard', '-t', 'UTF8_STRING'],
+    name: 'GTK and xclip (X11)', read: ['sh', '-c', XCLIP_READ_SH, '/x/xclip'],
   })
   // wl-paste is not used with no Wayland display.
   expect(clipWayOf({ wayland: false, x11: true, desktop: '', found: { 'wl-paste': '/w', xclip: '/x/xclip' } })).toEqual({
     off: 'no clipnotify and no GTK 3 for Python: X11 has no clipboard event for xclip',
   })
-  expect(clipWayOf({ wayland: false, x11: true, desktop: '', found: {} })).toEqual({ off: 'no xclip, xsel or GTK 3 for Python, and no clipnotify' })
+  expect(clipWayOf({ wayland: false, x11: true, desktop: '', found: {} })).toEqual({ off: 'no xclip or GTK 3 for Python, and no clipnotify' })
   expect(clipWayOf({ wayland: true, x11: false, desktop: 'sway', found: { xclip: '/x' } })).toEqual({ off: 'no wl-paste (install wl-clipboard)' })
   expect(clipWayOf({ wayland: false, x11: false, desktop: '', found: ALL })).toEqual({ off: 'no Wayland or X11 display' })
   // clipnotify 1.0.3+ loops by itself (-l); an older one exits at each change.
@@ -73,6 +77,31 @@ test('the GTK scripts: X11 events, a line at the start, a text read that fails w
   expect(GTK_WATCH_PY).toContain('if Gdk.Display.get_default() is None: sys.exit(1)')
   expect(GTK_READ_PY).toContain('.wait_for_text()')
   expect(GTK_READ_PY).toContain('if t is None: sys.exit(1)')
+})
+
+test('a password manager\'s copy is never read: each Linux read looks at the targets before and after it (exit 3, its text dropped)', async () => {
+  expect(SECRET_TARGET).toBe('x-kde-passwordManagerHint')
+  expect(SECRET_TYPES).toEqual(['org.nspasteboard.ConcealedType', 'org.nspasteboard.TransientType'])
+  const check = (list: string) => `secret() { ${list} 2>/dev/null | grep -qx 'x-kde-passwordManagerHint'; }; secret && exit 3;`
+  expect(XCLIP_READ_SH).toBe(`${check('"$0" -o -selection clipboard -t TARGETS')} "$0" -o -selection clipboard -t UTF8_STRING || exit; secret && exit 3; exit 0`)
+  expect(WL_READ_SH).toBe(`${check('"$0" -l')} "$0" -n -t text || exit; secret && exit 3; exit 0`)
+  // GTK: the targets before the text and after it.
+  const before = GTK_READ_PY.indexOf('if secret(): sys.exit(3)')
+  expect(GTK_READ_PY).toContain('return ok and any(a.name() == "x-kde-passwordManagerHint" for a in targets)')
+  expect(before).toBeGreaterThan(-1)
+  expect(before).toBeLessThan(GTK_READ_PY.indexOf('.wait_for_text()'))
+  expect(GTK_READ_PY.lastIndexOf('if secret(): sys.exit(3)')).toBeGreaterThan(GTK_READ_PY.indexOf('.wait_for_text()'))
+  // Each way found reads through its guard; xsel (no targets) is never a reader.
+  for (const found of [ALL, { xclip: '/x/xclip', clipnotify: '/x/cn' }, { gtk: '/p' }, { xsel: '/x/xsel', gtk: '/p' }]) {
+    for (const wayland of [true, false]) {
+      const way = clipWayOf({ wayland, x11: true, desktop: wayland ? 'KDE' : 'XFCE', found }) as Extract<ClipWay, { name: string }>
+      expect([XCLIP_READ_SH, WL_READ_SH, GTK_READ_PY].some(g => way.read.includes(g))).toBe(true)
+      expect(way.read.some(a => a.endsWith('xsel'))).toBe(false)
+    }
+  }
+  // Exit 3 (the mark seen): null, whatever was printed.
+  expect(await withClip(false, WL_WAY, () => clipboardNow(fake$({ exitCode: 3, stdout: 'hunter2' }).$))).toBe(null)
+  expect(await withClip(true, null, () => clipboardNow(fake$({ exitCode: 3, stdout: '' }).$))).toBe(null)
 })
 
 test('the /iui grab hint line: on when the watcher sees the changes, else off with the reason', () => {
@@ -135,13 +164,13 @@ test('the watcher arguments after clip: none on macOS, the notifier on Linux, nu
   await withClip(false, null, () => expect(clipWatchArgs(false)).toBe(null))
 })
 
-test('the clipboard now: pbpaste on macOS (UTF-8), the way found on Linux; null when it can not be read', async () => {
+test('the clipboard now: PerlObjCBridge on macOS, the way found on Linux; null when it can not be read', async () => {
   const mac = fake$({ exitCode: 0, stdout: 'héllo' })
   expect(await withClip(true, null, () => clipboardNow(mac.$))).toBe('héllo')
-  expect(mac.argvs).toEqual([['pbpaste']])
+  expect(mac.argvs).toEqual([['/usr/bin/perl', '-e', READ_PL]])
   const lin = fake$({ exitCode: 0, stdout: 'text' })
   expect(await withClip(false, WL_WAY, () => clipboardNow(lin.$))).toBe('text')
-  expect(lin.argvs).toEqual([['/usr/bin/wl-paste', '-n', '-t', 'text']])
+  expect(lin.argvs).toEqual([['sh', '-c', WL_READ_SH, '/usr/bin/wl-paste']])
   // A read that fails, throws, or has no tool to run.
   expect(await withClip(true, null, () => clipboardNow(fake$({ exitCode: 1, stdout: 'x' }).$))).toBe(null)
   expect(await withClip(false, WL_WAY, () => clipboardNow(fake$(new Error('timeout')).$))).toBe(null)
@@ -163,7 +192,7 @@ test('looking up the clipboard way sets S.clipWay from the display, the desktop 
     // The tools can not be looked up: no tool, so the way is off.
     const failed = findClipWay(fake$(new Error('boom'), { DISPLAY: ':0' }).$)
     await clipWayReady()
-    expect(await failed).toEqual({ off: 'no xclip, xsel or GTK 3 for Python, and no clipnotify' })
+    expect(await failed).toEqual({ off: 'no xclip or GTK 3 for Python, and no clipnotify' })
   } finally {
     S.clipWay = was
   }
@@ -297,7 +326,7 @@ function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Rec
     if (argv[0] === 'gsettings') return ok("'prefer-light'\n")
     if (argv[0] === 'fc-match' && argv[1] === 'monospace') return ok('DejaVu Sans Mono')
     if (argv[0] === 'fc-list' && argv[2] === 'JetBrains Mono') return ok('', o.jetbrains ? 0 : 1)
-    if (cmd === '/usr/bin/wl-paste -n -t text') {
+    if (argv[0] === 'sh' && argv[2] === WL_READ_SH && argv[3] === '/usr/bin/wl-paste') {
       w.reads++
       return ok(w.clipboard)
     }
@@ -376,8 +405,8 @@ test('Linux on Wayland: the watcher runs wl-paste --watch after clip; picture ce
   // /iui grab copies the text of the selection.
   expect((await $.command.run({ command: 'iui', args: 'grab' } as any)).text).toBe('Intelligent UI: copied 35 chars (1 of 1 picture runs read).')
   expect(w.copies).toEqual([COPIED])
-  // pbpaste is never run on Linux.
-  expect(w.ran.some(argv => argv[0] === 'pbpaste')).toBe(false)
+  // The macOS read is never run on Linux.
+  expect(w.ran.some(argv => argv.includes(READ_PL))).toBe(false)
   // No shim: no env var set, no shim files, no ask reader.
   expect(w.envSets).toEqual([])
   expect(w.vars.PATH).toBe('/usr/local/bin:/usr/bin')

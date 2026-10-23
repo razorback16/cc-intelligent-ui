@@ -94,7 +94,10 @@ export * from './lib/images'
 export { rowsAfter, type Under } from './lib/pictures'
 export * from './lib/copy'
 export { targetAt, targetsOf, type PageTarget, type Target } from './lib/targets'
-export { CLIP_TOOLS, clipToolsOf, clipWayOf, FIND_SH, GTK_READ_PY, GTK_WATCH_PY, hintText, WL_WATCH_SH, X11_WATCH_SH, type ClipTool, type ClipWay } from './lib/clipboard'
+export {
+  CLIP_TOOLS, clipToolsOf, clipWayOf, FIND_SH, GTK_READ_PY, GTK_WATCH_PY, hintText, READ_PL, SECRET_TARGET, SECRET_TYPES, WL_READ_SH, WL_WATCH_SH, X11_WATCH_SH, XCLIP_READ_SH,
+  type ClipTool, type ClipWay,
+} from './lib/clipboard'
 export {
   agoText, checkedOf, compareVersions, isDue, isNewer, parseVersion, shouldTell, toldOf, UPDATE_EVERY_MS, UPDATE_FETCH_MS, UPDATE_STEPS, UPDATE_TOAST_MS,
   UPDATE_URL, updateLine, updateNotice, updateToast, versionOf,
@@ -232,12 +235,13 @@ async function planEnv($: EngineInterface): Promise<Env | null> {
 // copy that still puts kitty placeholder cells on the clipboard (the main
 // screen's, a native drag over text and pictures) is seen by the watcher
 // (lib/frame.ts), which prints a line when the clipboard changes: the
-// clipboard is read once (pbpaste, wl-paste, xclip, xsel or GTK), and cells
-// that fit a page drawn here get a toast that names /iui grab, which reads
-// them (see lib/copy.ts; the drawn pages and the words of a page are in
-// lib/probe.ts). The clipboard is never written but by a copy the person
-// asked for. No timer reads the clipboard; the selection is read every
-// 250 ms only while a picture selection shows (watchNative).
+// clipboard is read once (perl on macOS, wl-paste, xclip or GTK; never a
+// password manager's copy), and cells that fit a page drawn here get a
+// toast that names /iui grab, which reads them (see lib/copy.ts; the drawn
+// pages and the words of a page are in lib/probe.ts). The clipboard is
+// never written but by a copy the person asked for, and never over a newer
+// copy (isNewest). No timer reads the clipboard; the selection is read
+// every 250 ms only while a picture selection shows (watchNative).
 
 // Notes a drawing for a copy (noteDrawn, noteDrawnAgain), turns on the
 // watcher's clipboard part and queues its pages for picture select's
@@ -310,8 +314,10 @@ function hintGrab($: EngineInterface, text: string) {
 }
 
 // The clipboard changed: one read (clipboardNow). A clipboard with no
-// placeholders, and our own write, are never touched. A change while a
-// read runs reads once more after it.
+// placeholders, and our own write, are never touched. A new text that no
+// $.ui.copy wrote (another app's copy, Claude Code's copy on select, a
+// password manager's: null) is a newer copy. A change while a read runs
+// reads once more after it.
 async function readClipboard($: EngineInterface) {
   if (clip.busy) {
     clip.again = true
@@ -322,9 +328,10 @@ async function readClipboard($: EngineInterface) {
     do {
       clip.again = false
       const text = await clipboardNow($)
-      if (text === null || text === clip.seen) continue
+      if (text === clip.seen) continue
       clip.seen = text
-      if (text === clip.wrote || !hasPlaceholders(text)) continue
+      if (text !== copiedText) copies++
+      if (text === null || text === clip.wrote || !hasPlaceholders(text)) continue
       hintGrab($, text)
     } while (clip.again)
   } finally {
@@ -367,15 +374,38 @@ async function updateState($: EngineInterface): Promise<UpdateState> {
   return { on: S.updates, off: S.updatesOff, own: S.ownVersion, checked: S.updateChecked, now }
 }
 
-// The newest copy (a grab, a click or an up): an older one that still
-// reads its text when a newer one starts copies nothing.
+// The newest copy (a grab, a click, an up, any $.ui.copy, or a copy from
+// outside that the watcher sees): an older one that still reads its text
+// when a newer one starts copies nothing. `copiedText`: the text of the
+// last $.ui.copy (its clipboard change is no copy from outside).
 let copies = 0
+let copiedText: string | undefined
+
+// A copy's turn: its number and the native selection when it began.
+type Turn = { n: number; native: Promise<string> }
+const nativeKey = (s: { text: string; requestId?: string } | undefined) => (s ? `${s.requestId ?? ''}|${s.text}` : '')
+function nativeNow($: EngineInterface): Promise<string> {
+  try {
+    return Promise.resolve(uiSelection($)).then(nativeKey, () => '?')
+  } catch {
+    return Promise.resolve('?')
+  }
+}
+const takeTurn = ($: EngineInterface, native?: Promise<string>): Turn => ({ n: ++copies, native: native ?? nativeNow($) })
+
+// Whether a copy is still the newest when its text is read: no newer copy
+// came, and no new native selection (Claude Code copies that itself, past
+// every hook; no poll runs for a click).
+async function isNewest($: EngineInterface, turn: Turn): Promise<boolean> {
+  if (turn.n !== copies) return false
+  const [was, now] = await Promise.all([turn.native, nativeNow($)])
+  return turn.n === copies && was === now
+}
 
 // /iui grab: the last mouse selection, read and copied. With no selection
 // (the main screen), the picture cells on the clipboard: the command says
 // that the copy is this session's.
 async function grab($: EngineInterface): Promise<string> {
-  const mine = ++copies
   const selected = await uiSelection($).catch(() => undefined)
   let raw = selected?.text
   if (raw === undefined) {
@@ -389,8 +419,10 @@ async function grab($: EngineInterface): Promise<string> {
   const row = selected?.requestId
   clip.raw = raw
   clip.rawRow = row
+  // Only a grab that copies takes a turn.
+  const turn = takeTurn($, Promise.resolve(nativeKey(selected)))
   const read = await readCopy($, raw, row)
-  if (mine !== copies) return 'Intelligent UI: a newer copy came first; this one copied nothing.'
+  if (!(await isNewest($, turn))) return 'Intelligent UI: a newer copy came first; this one copied nothing.'
   if (!read.resolved) return `Intelligent UI: found ${read.runs} picture run(s) but could not read them (see /iui dump).`
   clip.wrote = read.text
   clip.seen = read.text
@@ -521,14 +553,14 @@ function lightHover($: EngineInterface) {
 
 // A click (a clear) on a target of the page copies its text (a link's URL,
 // a file's path, a command, a code block's code). The page's words are probed first when they
-// are not known; a newer copy while they are: the newer one copies.
+// are not known; a newer copy while they are (or a new native selection): the newer one copies.
 async function clickAt($: EngineInterface, d: Drawn & { job?: Job }, post: SelectPost, surface: RenderSurface) {
-  const mine = ++copies
+  const turn = takeTurn($)
   const links = () => clickLinks.get(d.id) ?? NO_LINKS
   let targets = knownTargets(d, post.page, links())
   if (!targets) {
     await wordsOf($, d, post.page)
-    if (mine !== copies) return
+    if (!(await isNewest($, turn))) return
     targets = knownTargets(d, post.page, links())
   }
   const target = targets?.[targetAt(targets, post.anchor.x, post.anchor.y)]?.target
@@ -563,13 +595,13 @@ async function selectionText($: EngineInterface, d: Drawn & { job?: Job }, sel: 
 
 // The button came up: the selection's text on the clipboard, with the
 // toast of a copy. No text under it: nothing is copied; a newer up while
-// its words are read (or a newer click or grab): the newer one copies.
+// its words are read (or any newer copy, or a new native selection): the newer one copies.
 async function copySelection($: EngineInterface, d: Drawn & { job?: Job }, sel: Selection, surface: RenderSurface) {
   const t = performance.now()
-  const mine = ++copies
+  const turn = takeTurn($)
   const probed: number[] = []
   const text = await selectionText($, d, sel, probed)
-  if (mine !== copies) return
+  if (!(await isNewest($, turn))) return
   const read = performance.now() - t
   if (text === null) {
     uiToast($, 'Intelligent UI: could not read the selected picture')
@@ -643,18 +675,27 @@ export const register: Register = on => {
 
   // A copy with placeholders (a copy of picture cells, when the engine sends
   // one through `$.ui.copy`): the words under them instead. Our own copies
-  // hold no placeholders and pass on as they are.
+  // hold no placeholders and pass on as they are. Any copy is the newest:
+  // one with placeholders whose words are read when a newer one came is refused.
   on('ui.copy', async ($, e, next) => {
-    if (!hasPlaceholders(e.text) || !drawnAnswers.size) return next(e)
+    copiedText = e.text
+    if (!hasPlaceholders(e.text) || !drawnAnswers.size) {
+      copies++
+      return next(e)
+    }
     if (S.debug) traceDebug($, 'select: native copy seen: a $.ui.copy with picture cells (read as their text)')
-    const selected = await uiSelection($).catch(() => undefined)
+    const selection = uiSelection($).catch(() => undefined)
+    const turn = takeTurn($, selection.then(nativeKey))
+    const selected = await selection
     clip.raw = e.text
     clip.rawRow = selected?.text === e.text ? selected.requestId : undefined
     const read = await readCopy($, e.text, clip.rawRow)
+    if (!(await isNewest($, turn))) return { value: { isCopied: false, reason: 'refused' } }
     if (!read.resolved) return next(e)
     // The clipboard change of this write is not read again.
     clip.wrote = read.text
     clip.seen = read.text
+    copiedText = read.text
     return next({ ...e, text: read.text })
   }).catch(($, e, next) => next(e))
 

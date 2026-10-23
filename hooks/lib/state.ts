@@ -293,16 +293,16 @@ export const DRAWN_KEPT = 64
 // The clipboard (register.tsx): the change count last seen (null: none
 // yet; the first of each watcher child is only noted), whether the watcher
 // found no PerlObjCBridge (`none`), a read that runs (`busy`) and a change
-// that came during it (`again`), the clipboard text last seen and last
-// written (so a write is never read back as new), the last text with
-// placeholders with its row (`rawRow`, when known) and how it was read (for
-// dump), and the order of the drawings (`seq`).
+// that came during it (`again`), the clipboard text last seen (null: none
+// could be read) and last written (so a write is never read back as new),
+// the last text with placeholders with its row (`rawRow`, when known) and
+// how it was read (for dump), and the order of the drawings (`seq`).
 export const clip = {
   count: null as number | null,
   none: false,
   busy: false,
   again: false,
-  seen: '',
+  seen: '' as string | null,
   wrote: '',
   raw: '',
   rawRow: undefined as string | undefined,

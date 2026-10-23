@@ -1,10 +1,11 @@
 // The clipboard of this computer: how a copy reads it and how its changes
-// are seen. macOS: pbpaste, and the change count of the watcher's
-// PerlObjCBridge (host.ts). Linux: Wayland's wl-paste (its --watch sees each
-// change), else X11 (also Xwayland): xclip or xsel to read, clipnotify for
-// an event at each change, else GTK 3 from Python (python3-gi, on most GNOME
-// desktops) for both. The changes give the /iui grab hint (where no tool sees
-// them there is none: the clipboard is never read at intervals).
+// are seen. macOS: READ_PL (PerlObjCBridge) to read, and the watcher's
+// change count (host.ts). Linux: Wayland's wl-paste (its --watch sees each
+// change), else X11 (also Xwayland): xclip to read, clipnotify for an event
+// at each change, else GTK 3 from Python (python3-gi, on most GNOME desktops)
+// for both. The changes give the /iui grab hint (where no tool sees them
+// there is none: the clipboard is never read at intervals). A password
+// manager's copy is never read: each read looks at the marks first.
 import type { EngineInterface } from 'claude-code'
 
 import { S } from './state'
@@ -21,6 +22,37 @@ export type ClipTool = (typeof CLIP_TOOLS)[number]
 // clipboard then is no new copy); `name` for /iui details. `off`: why the
 // /iui grab hint is off.
 export type ClipWay = { name: string; read: string[]; watch: string[]; wayland: boolean } | { off: string }
+
+// A password manager's copy (KeePassXC, KDE's and others' on Linux) offers
+// this target (its data "secret"); such a copy is never read. On macOS the
+// marks are pasteboard types (nspasteboard.org): concealed or transient.
+export const SECRET_TARGET = 'x-kde-passwordManagerHint'
+export const SECRET_TYPES = ['org.nspasteboard.ConcealedType', 'org.nspasteboard.TransientType'] as const
+
+// A read with the targets looked at before it and after it (`$0` the tool):
+// the mark in either gives exit 3, and its text is dropped (a change between
+// the two can be such a copy). xclip on X11, wl-paste on Wayland.
+const guardedRead = (list: string, read: string) =>
+  `secret() { ${list} 2>/dev/null | grep -qx '${SECRET_TARGET}'; }; secret && exit 3; ${read} || exit; secret && exit 3; exit 0`
+export const XCLIP_READ_SH = guardedRead('"$0" -o -selection clipboard -t TARGETS', '"$0" -o -selection clipboard -t UTF8_STRING')
+export const WL_READ_SH = guardedRead('"$0" -l', '"$0" -n -t text')
+
+// The read on macOS (/usr/bin/perl: its PerlObjCBridge): exit 3 when the
+// pasteboard has a concealed or transient type (its text is not read), or
+// when it changed during the read; exit 2 with no bridge, 1 with no text;
+// else the text (UTF-8).
+export const READ_PL = [
+  'my $pb = eval { require Foundation; Foundation->import;',
+  '  NSBundle->bundleWithPath_("/System/Library/Frameworks/AppKit.framework")->load;',
+  '  @NSPasteboard::ISA = ("PerlObjCBridge"); my $p = NSPasteboard->generalPasteboard; defined $p->changeCount ? $p : undef } or exit 2;',
+  `my %secret = map { $_ => 1 } qw(${SECRET_TYPES.join(' ')});`,
+  'my $n = $pb->changeCount; my $t = $pb->types;',
+  'if ($t && $$t) { for my $i (0 .. $t->count - 1) { exit 3 if $secret{$t->objectAtIndex_($i)->UTF8String} } }',
+  'my $s = $pb->stringForType_("public.utf8-plain-text");',
+  'exit 3 if $pb->changeCount != $n;',
+  'exit 1 unless $s && $$s;',
+  'my $u = $s->UTF8String; utf8::encode($u) if utf8::is_utf8($u); binmode STDOUT; print $u;',
+].join(' ')
 
 // The Wayland notifier's command: wl-paste runs it at each change (and once
 // at its start) with the new data on stdin, which it reads to the end so the
@@ -56,7 +88,13 @@ export const GTK_READ_PY = [
   'gi.require_version("Gtk", "3.0")',
   'from gi.repository import Gtk, Gdk',
   'if Gdk.Display.get_default() is None: sys.exit(1)',
-  't = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).wait_for_text()',
+  'c = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)',
+  'def secret():',
+  '    ok, targets = c.wait_for_targets()',
+  `    return ok and any(a.name() == "${SECRET_TARGET}" for a in targets)`,
+  'if secret(): sys.exit(3)',
+  't = c.wait_for_text()',
+  'if secret(): sys.exit(3)',
   'if t is None: sys.exit(1)',
   'sys.stdout.write(t)',
 ].join('\n')
@@ -66,19 +104,19 @@ const GTK_ENV = ['/usr/bin/env', 'GDK_BACKEND=x11', 'PYTHONIOENCODING=utf-8']
 // (WAYLAND_DISPLAY, DISPLAY, the desktop) and the tools found (their paths).
 // Wayland: wl-paste, whose --watch needs the data-control protocol. GNOME
 // does not have it (and its wl-paste read shows a window), so on GNOME the
-// X11 ways through Xwayland come first. X11: xclip, xsel or GTK to read, and
+// X11 ways through Xwayland come first. X11: xclip or GTK to read, and
 // clipnotify or GTK to see the changes (X11 has no other event for them).
 export function clipWayOf(o: { wayland: boolean; x11: boolean; desktop: string; found: Partial<Record<ClipTool, string>> }): ClipWay {
   const { found } = o
   const wl = o.wayland && found['wl-paste'] ? found['wl-paste'] : ''
   const gtk = found.gtk ? { read: [...GTK_ENV, found.gtk, '-c', GTK_READ_PY], watch: [...GTK_ENV, found.gtk, '-c', GTK_WATCH_PY] } : null
-  const reader = found.xclip ? { tool: 'xclip', read: [found.xclip, '-o', '-selection', 'clipboard', '-t', 'UTF8_STRING'] }
-    : found.xsel ? { tool: 'xsel', read: [found.xsel, '-o', '-b'] }
+  // xsel is no reader: it can not list the targets (a password manager's copy would be read).
+  const reader = found.xclip ? { tool: 'xclip', read: ['sh', '-c', XCLIP_READ_SH, found.xclip] }
     : gtk ? { tool: 'GTK', read: gtk.read } : null
   const watcher = found.clipnotify ? { tool: 'clipnotify', watch: ['sh', '-c', X11_WATCH_SH, found.clipnotify] } : gtk ? { tool: 'GTK', watch: gtk.watch } : null
   const isGnome = /gnome/i.test(o.desktop)
   const waylandWay = () =>
-    ({ name: 'wl-paste --watch (Wayland)', read: [wl, '-n', '-t', 'text'], watch: [wl, '--watch', 'sh', '-c', WL_WATCH_SH], wayland: true })
+    ({ name: 'wl-paste --watch (Wayland)', read: ['sh', '-c', WL_READ_SH, wl], watch: [wl, '--watch', 'sh', '-c', WL_WATCH_SH], wayland: true })
   const x11Way = () => {
     if (!o.x11 || !reader || !watcher) return null
     const name = watcher.tool === reader.tool ? watcher.tool : `${watcher.tool} and ${reader.tool}`
@@ -90,15 +128,16 @@ export function clipWayOf(o: { wayland: boolean; x11: boolean; desktop: string; 
   if (wl) return waylandWay()
   if (!o.wayland && !o.x11) return { off: 'no Wayland or X11 display' }
   if (o.x11 && reader) return { off: `no clipnotify and no GTK 3 for Python: X11 has no clipboard event for ${reader.tool}` }
-  return { off: o.wayland ? 'no wl-paste (install wl-clipboard)' : 'no xclip, xsel or GTK 3 for Python, and no clipnotify' }
+  if (o.wayland) return { off: 'no wl-paste (install wl-clipboard)' }
+  return { off: found.xsel ? 'xsel can not see a password manager\'s copy: install xclip' : 'no xclip or GTK 3 for Python, and no clipnotify' }
 }
 
 // Prints `tool path` for each clipboard tool on the PATH, and `gtk <python3>`
-// when there is no clipnotify and python3 loads GTK 3.
+// when there is no clipnotify or no xclip, and python3 loads GTK 3.
 const GTK_CHECK_PY = 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk'
 export const FIND_SH = [
   `for c in ${CLIP_TOOLS.filter(c => c !== 'gtk').join(' ')}; do p=$(command -v "$c" 2>/dev/null) && echo "$c $p"; done`,
-  `command -v clipnotify >/dev/null 2>&1 || { p=$(command -v python3 2>/dev/null) && "$p" -c '${GTK_CHECK_PY}' >/dev/null 2>&1 && echo "gtk $p"; }`,
+  `{ command -v clipnotify && command -v xclip; } >/dev/null 2>&1 || { p=$(command -v python3 2>/dev/null) && "$p" -c '${GTK_CHECK_PY}' >/dev/null 2>&1 && echo "gtk $p"; }`,
 ].join('; ')
 
 // The tools of `FIND_SH`'s output, by name; only absolute paths.
@@ -132,11 +171,12 @@ async function lookUp($: EngineInterface): Promise<ClipWay> {
   return S.clipWay
 }
 
-// The clipboard now as text: pbpaste (UTF-8) on macOS, else the way found
-// on Linux; null when it can not be read (no tool, or no text in it).
+// The clipboard now as text: READ_PL on macOS, else the way found on Linux;
+// null when it can not be read (no tool or no bridge, no text in it, or a
+// password manager's copy, which is never read).
 export async function clipboardNow($: EngineInterface): Promise<string | null> {
   if (S.env?.isMac) {
-    const got = await processRun($, ['pbpaste'], { timeoutMs: 2000, env: { LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' } }).catch(() => null)
+    const got = await processRun($, ['/usr/bin/perl', '-e', READ_PL], { timeoutMs: 2000 }).catch(() => null)
     return got && got.exitCode === 0 ? got.stdout : null
   }
   const way = S.clipWay

@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import {
   codePointsOf, commandSuggestions, decodeSelection, DIACRITICS, hasPlaceholders, isDrawnIn, joinSegments, pageTopsOf, pickPages,
-  placeholderCell, isSafePage, positionsOf, screenOf, textOfRun, WATCH_PL, type Drawn, type TextBlock, type Item, type Mark, type OnScreen,
+  placeholderCell, isSafePage, positionsOf, READ_PL, screenOf, textOfRun, WATCH_PL, type Drawn, type TextBlock, type Item, type Mark, type OnScreen,
   type Place,
 } from '../hooks/register'
 import * as registerModule from '../hooks/register'
@@ -576,7 +576,7 @@ test('/iui grab and dump are commands with typeahead rows; dump with nothing see
   expect(ran.text).toContain('Intelligent UI: no clipboard text with picture cells seen yet')
 })
 
-// ---- The pipeline: the watcher's clip lines, pbpaste, the probe of a page ------
+// ---- The pipeline: the watcher's clip lines, the read, the probe of a page ----
 
 const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: exitCode ? 'error: boom' : '', isStdoutTruncated: false, isStderrTruncated: false } })
 // The first 24 bytes of a 1568 x 512 PNG (the fixture's page), as `od` prints them.
@@ -587,9 +587,10 @@ const inputsOf = (argv: readonly string[]) => Object.fromEntries(argv.flatMap((a
 // The world beneath the mod: a cache at /c, a typst whose compile writes a
 // 1568 x 512 page per segment and whose query of page n gives the fixture's
 // marks on page n (`hold` holds the next query until `release`; a kill ends
-// it), the watcher (WATCH_PL: its PID, then with `clip` the change count at
+// it; `holdReads` the clipboard reads until `releaseReads`), the watcher (WATCH_PL: its PID, then with `clip` the change count at
 // its start and at each change of the clipboard; `clip none` with
-// `noBridge`), pbpaste reading `clipboard`, and the copies, toasts and
+// `noBridge`), the read (READ_PL) giving `clipboard` (exit 3 for a
+// password manager's copy: `concealed`), and the copies, toasts and
 // selection the test sees. `copy` is a native copy (a drag over text and
 // pictures, the main screen's terminal copy): while `selects`, picture cells
 // are this session's selection too; the text goes on the clipboard, one
@@ -630,7 +631,7 @@ function world(
   const w = {
     clock, files, compiles, queries, kills, watchers, vars, envSets,
     ran: [] as string[][], spawned: [] as string[][], reads: [] as string[],
-    clipboard: 'nothing yet', count: 40, pastes: 0, copies: [] as string[], toasts: [] as string[], traces: [] as string[], logs: [] as string[],
+    clipboard: 'nothing yet', secret: false, count: 40, pastes: 0, copies: [] as string[], toasts: [] as string[], traces: [] as string[], logs: [] as string[],
     frames: [] as { path: string; old: string[]; png: Uint8Array }[], blits: [] as any[], writes: 0, selectionReads: 0,
     selection: undefined as { text: string; requestId?: string } | undefined,
     selects: true,
@@ -638,12 +639,23 @@ function world(
     hold() {
       w.gate = new Promise<void>(r => (w.release = r))
     },
+    readGate: null as Promise<void> | null, releaseReads: () => {},
+    holdReads() {
+      w.readGate = new Promise<void>(r => (w.releaseReads = r))
+    },
     copy(text: string) {
       if (w.selects && hasPlaceholders(text)) w.selection = { text }
       w.foreign(text)
     },
     foreign(text: string) {
       w.clipboard = text
+      w.secret = false
+      w.change()
+    },
+    // A password manager's copy (concealed): the clipboard read gives exit 3.
+    concealed(text: string) {
+      w.clipboard = text
+      w.secret = true
       w.change()
     },
     change() {
@@ -718,9 +730,11 @@ function world(
     if (cmd.includes('command -v typst')) return ok('/usr/bin/typst\n')
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
     if (cmd.includes('od -An')) return ok(argv.filter(a => a.endsWith('.png')).map(() => `${HEAD}\n@\n`).join(''))
-    if (argv[0] === 'pbpaste') {
+    if (argv[0] === '/usr/bin/perl' && argv[2] === READ_PL) {
       w.pastes++
-      return ok(w.clipboard)
+      if (w.readGate) await w.readGate
+      // A password manager's copy: exit 3, its text not read.
+      return w.secret ? ok('', 3) : ok(w.clipboard)
     }
     return ok('', 1)
   })
@@ -1775,7 +1789,7 @@ test('picture select: with no perl the first frame write fails, is logged once a
 // the link "the docs" row 3 columns 4 to 11, the bare URL row 3 16 to 45,
 // `! ls -la` row 4 50 to 58, src/a.ts row 6 5 to 13, the bash block's copy
 // button row 8 8 to 15 (its code rows 11 and 12: no target).
-async function drawTargets($: any, on: any, o: { env?: Record<string, string>; marks?: readonly object[] } = {}, isFullscreen: boolean | null = true) {
+async function drawTargets($: any, on: any, o: { env?: Record<string, string>; marks?: readonly object[]; noBridge?: boolean } = {}, isFullscreen: boolean | null = true) {
   const w = world(on, { tty: TTY, marks: TARGETS_MARKS, ...o })
   on('session.cwd', async () => ({ value: '/w' }))
   on('fs.exists', async ($: any, e: any) => ({ value: e.path === '/w/src/a.ts' }))
@@ -2008,4 +2022,174 @@ test('no private cache folder: nothing is drawn (no shared folder instead); /iui
   expect(w.toasts).toContain(`Intelligent UI: no pictures, ${why} (see /iui details)`)
   // The old shared folder is never used.
   expect([...w.ran.flat(), ...w.reads, ...w.files.keys()].some(t => t.includes('/tmp/cc-intelligent-ui'))).toBe(false)
+})
+
+// ---- The newest copy wins -----------------------------------------------------
+// A copy that still reads its words when a newer copy came (ours, another
+// plugin's $.ui.copy, Claude Code's copy on select, another app's) copies nothing.
+
+test('picture select: an up whose words are still read copies nothing after a native selection (the watcher sees its copy)', async ($, on) => {
+  const w = world(on, { tty: TTY })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  w.hold()
+  const ui = await drawAnswer($, w)
+  await drag(ui)
+  await settle(w)
+  expect(w.copies).toEqual([])
+  // Claude Code's own selection: it copies on select, past every hook.
+  w.selection = { text: 'native text', requestId: 'ans-0' }
+  w.foreign('native text')
+  await w.clock.advance(600)
+  await settle(w)
+  expect(isPlain(w)).toBe(true)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual([])
+  expect(w.clipboard).toBe('native text')
+})
+
+test('picture select: an up whose words are still read copies nothing after a native selection, with no watcher and no poll in between', async ($, on) => {
+  const w = world(on, { tty: TTY, noBridge: true })
+  await $.command.run({ command: 'iui', args: '' } as any)
+  w.hold()
+  const ui = await drawAnswer($, w)
+  await drag(ui)
+  await settle(w)
+  // The native selection comes just before the words: no poll ran, no clipboard change is seen.
+  w.selection = { text: 'native text', requestId: 'ans-0' }
+  w.foreign('native text')
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual([])
+  expect(w.clipboard).toBe('native text')
+})
+
+test('picture select: a click whose words are still read copies nothing after a native selection (no poll runs for a click)', async ($, on) => {
+  const { w } = await drawTargets($, on, { noBridge: true })
+  w.hold()
+  const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  await click(slow, 6, 3)
+  await settle(w)
+  expect(w.copies).toEqual([])
+  w.selection = { text: 'native text', requestId: 'ans-0' }
+  w.foreign('native text')
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual([])
+  expect(w.clipboard).toBe('native text')
+  // A native selection made before the click does not stop it.
+  await click(slow, 6, 3)
+  await settle(w)
+  expect(w.copies).toEqual(['https://example.com'])
+})
+
+test('picture select: a click whose words are still read copies nothing after a copy in another app; a password manager\'s copy too', async ($, on) => {
+  const { w } = await drawTargets($, on)
+  w.hold()
+  const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  await click(slow, 6, 3)
+  await settle(w)
+  w.foreign('copied in another app')
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual([])
+  expect(w.clipboard).toBe('copied in another app')
+  // A password manager's copy: never read (exit 3), and a newer copy still.
+  w.hold()
+  const slower = await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nTwo more lines.\n\nHere.`)
+  await click(slower, 6, 3)
+  await settle(w)
+  w.concealed('hunter2')
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual([])
+  expect(w.clipboard).toBe('hunter2')
+})
+
+test('a $.ui.copy of picture cells whose words are still read is refused after a newer click', { plugins: [COPIER] }, async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  w.hold()
+  // A newer drawing (its own folder): its words held. The cells fit it first (the newest).
+  await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  const cp = $.command.run({ command: 'cp', args: [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n') } as any)
+  await settle(w)
+  await click(ui, 6, 3)
+  await settle(w)
+  expect(w.copies).toEqual(['https://example.com'])
+  w.release()
+  expect(JSON.parse((await cp).text!)).toEqual({ isCopied: false, reason: 'refused' })
+  await settle(w)
+  expect(w.copies).toEqual(['https://example.com'])
+  expect(w.clipboard).toBe('https://example.com')
+})
+
+test('another plugin\'s $.ui.copy cancels a click whose words are still read; its clipboard change is no copy from outside', { plugins: [COPIER] }, async ($, on) => {
+  const { w } = await drawTargets($, on)
+  w.hold()
+  const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  await click(slow, 6, 3)
+  await settle(w)
+  await $.command.run({ command: 'cp', args: 'plain text' } as any)
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual(['plain text'])
+  expect(w.clipboard).toBe('plain text')
+  // Its clipboard change read only after a newer click started: that click still copies.
+  w.holdReads()
+  await $.command.run({ command: 'cp', args: 'more text' } as any)
+  w.hold()
+  const slower = await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nTwo more lines.\n\nHere.`)
+  await click(slower, 6, 3)
+  await settle(w)
+  w.releaseReads()
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual(['plain text', 'more text', 'https://example.com'])
+  expect(w.clipboard).toBe('https://example.com')
+})
+
+test('/iui grab that copies nothing (no selection, no picture cells) does not cancel a click whose words are still read', async ($, on) => {
+  const { w } = await drawTargets($, on)
+  w.hold()
+  const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
+  await click(slow, 6, 3)
+  await settle(w)
+  // The same text the clipboard had: no change seen.
+  const said = await grab($)
+  expect(said).toContain('no picture cells')
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual(['https://example.com'])
+  expect(w.clipboard).toBe('https://example.com')
+})
+
+test('a password manager\'s copy is never read: no hint, no /iui grab, nothing in dump; the read looks at the marks first', async ($, on) => {
+  const w = world(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  const pastes = w.pastes
+  w.concealed(COPY)
+  await w.clock.settle()
+  // One read, which gives exit 3 (no text).
+  expect(w.pastes).toBe(pastes + 1)
+  expect(hints(w)).toBe(0)
+  expect(await grab($)).toBe('Intelligent UI: no mouse selection, and the clipboard can not be read (see /iui details).')
+  expect((await $.command.run({ command: 'iui', args: 'dump' } as any)).text).toContain('no clipboard text with picture cells seen yet')
+  expect(w.copies).toEqual([])
+  // The perl read: the concealed and transient types (nspasteboard.org) before the text, and a change during the read drops it.
+  for (const type of ['org.nspasteboard.ConcealedType', 'org.nspasteboard.TransientType']) {
+    expect(READ_PL.indexOf(type)).toBeGreaterThan(-1)
+    expect(READ_PL.indexOf(type)).toBeLessThan(READ_PL.indexOf('stringForType_'))
+  }
+  expect(READ_PL).toContain('exit 3 if $secret{$t->objectAtIndex_($i)->UTF8String}')
+  expect(READ_PL.indexOf('exit 3 if $pb->changeCount != $n')).toBeGreaterThan(READ_PL.indexOf('stringForType_'))
+  expect(READ_PL.indexOf('exit 3 if $pb->changeCount != $n')).toBeLessThan(READ_PL.indexOf('print $u'))
+  // The same cells copied the usual way: the hint.
+  w.foreign(COPY)
+  await w.clock.settle()
+  expect(hints(w)).toBe(1)
 })
