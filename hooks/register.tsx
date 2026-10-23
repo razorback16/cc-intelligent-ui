@@ -52,9 +52,9 @@ import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/fra
 import { herdrText, isFlipHere, roomColumns } from './lib/terminal'
 import { onScreenOf, pastedNumbers, sentFiles } from './lib/images'
 import { drawPageField, pasteDir, pdfPagesOf, rowsAfter, sentOf, underRow, type Under } from './lib/pictures'
-import { drawPreviews, previewRetry, previewsOf, previewsUnder, sameNumbers, type Preview } from './lib/composer'
+import { drawPreviews, forgetPaths, keepPaths, pathPaste, pathsOf, previewRetry, previewsOf, previewsUnder, sameNumbers, type Preview } from './lib/composer'
 import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
-import { nowMs, write, surf, save, copy, uiSelection, toast } from './lib/api'
+import { nowMs, write, surf, save, copy, uiSelection, toast, sid } from './lib/api'
 import {
   currentPlan, decidePlan, decisionOf, drawAskLine, drawPlanResult, drawPlanUse, isPlanQuestion, planFileOf, planInputOf, planOf,
   planShownOf, scheduleClear, type PlanVerdict,
@@ -63,7 +63,7 @@ import {
 // The names this module exported before the split (the tests import them).
 export {
   BASE_THEME, DEFAULT_CELL, DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_THEME, DEFAULT_WIDTH, gridText, heightText, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH,
-  MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, PICTURE_ROOM_ROWS, PREVIEW_RETRY_MS, PREVIEW_ROWS, SEGMENT_ROWS, TYPST_PROMPT, widthText, type Height, type Width,
+  MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, PICTURE_ROOM_ROWS, PATH_RECHECK_MS, PREVIEW_RETRY_MS, PREVIEW_ROWS, SEGMENT_ROWS, TYPST_PROMPT, widthText, type Height, type Width,
   COMMIT_MAX_MS, COMMIT_MIN_MS, DESIGNS_KEPT_DAYS, RESIZE_QUIET_MS, RESULTS_KEPT, TOUCH_FLUSH_MS,
 } from './lib/settings'
 export { DEFAULT_METRICS, keep, type Cell, type Design, type FontMetrics, type Frame, type Look, type Metrics, type Room } from './lib/state'
@@ -155,18 +155,37 @@ async function answerEnv($: EngineInterface, e: { viewport?: RenderViewport }): 
 
 // The draft's `[Image #N]` numbers to the `draft` atom, only when they
 // changed (the band above the prompt draws again): a key that keeps them
-// writes nothing. Never throws. `draftSeq` counts the box changes seen: an
-// edit's box that comes after a newer change is not noted.
+// writes nothing. The numbers that are new, in order. Never throws.
+// `draftSeq` counts the box changes seen: an edit's box that comes after a
+// newer change is not noted.
 let draftSeq = 0
-function noteDraft($: EngineInterface, text: string) {
+function noteDraft($: EngineInterface, text: string): number[] {
   try {
     const now = pastedNumbers(text)
-    if (S.draftImages && sameNumbers(S.draftImages, now)) return
+    if (S.draftImages && sameNumbers(S.draftImages, now)) return []
+    const was = S.draftImages ?? []
     S.draftImages = now
+    keepPaths(now)
     // The newest numbers at the write, should two writes cross.
     void update($, draft, () => S.draftImages ?? []).catch(() => undefined)
-  } catch {}
+    return now.filter(n => !was.includes(n))
+  } catch {
+    return []
+  }
 }
+
+// New image marks of a paste: those with no file are a pasted path, whose
+// file the clipboard names (composer.tsx pathPaste); the band draws again
+// once one is found. Only while pictures draw here (not over ssh).
+function pastedPaths($: EngineInterface, fresh: number[]) {
+  const envOf = async () => ((await read($, isOn)) && S.env?.canDraw && !S.isRemote ? S.env : null)
+  void pathPaste($, fresh, envOf)
+    .then(found => (found ? update($, draft, ns => [...ns]) : undefined))
+    .catch(() => undefined)
+}
+
+// The change kinds that are no paste: a recall, a clear, an undo, a fill.
+const NOT_PASTES: readonly string[] = ['history', 'clear', 'undo', 'plugin', 'app']
 
 // ---- Rows drawn before ----------------------------------------------------------
 
@@ -808,6 +827,7 @@ export const register: Register = on => {
   // the next picture. Any other end (/exit): the watcher stops, and no new
   // child starts.
   on('session.end', async ($, e, next) => {
+    forgetPaths()
     if (e.reason === 'clear' || e.reason === 'resume') stopClipboard($)
     else {
       stopWatch()
@@ -876,7 +896,10 @@ export const register: Register = on => {
     void Promise.resolve().then(() => nowMs($)).then(t => void (S.keyAt = t), () => undefined)
     const seq = ++draftSeq
     const box = await next(e)
-    if (isEdit && e.origin.kind === 'composer' && seq === draftSeq) noteDraft($, box.text)
+    if (isEdit && e.origin.kind === 'composer' && seq === draftSeq) {
+      const fresh = noteDraft($, box.text)
+      if (fresh.length && e.inputText.includes('[Image #')) pastedPaths($, fresh)
+    }
     return box
   }).catch(($, e, next) => next(e))
 
@@ -886,7 +909,9 @@ export const register: Register = on => {
   on('prompt.change', async ($, e, next) => {
     if (picked.now && e.origin.kind !== 'plugin' && e.origin.kind !== 'app') clearSelection($)
     draftSeq++
-    noteDraft($, e.text)
+    const fresh = noteDraft($, e.text)
+    // A path pasted (an engine change): its file from the clipboard.
+    if (fresh.length && !NOT_PASTES.includes(e.origin.kind)) pastedPaths($, fresh)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -1272,13 +1297,16 @@ export const register: Register = on => {
       if (ready) {
         // The paste folder in the key: a new session (/clear) numbers from #1 again.
         const dir = await pasteDir($, ready.env)
-        const k = { text: numbers.join(','), extra: `${e.props.bodyColumns}x${e.props.maxRows}|${dir}`, stamp: stampOf(ready, e.viewport), onScreen: undefined }
+        // The files of pasted paths (by the session: /clear numbers from #1 again).
+        const paths = pathsOf(await sid($), numbers)
+        const named = [...paths].map(([n, path]) => `${n}=${path}`).join('\n')
+        const k = { text: numbers.join(','), extra: `${e.props.bodyColumns}x${e.props.maxRows}|${dir}|${named}`, stamp: stampOf(ready, e.viewport), onScreen: undefined }
         const kept = memoOf(drafts, 'draft', k, () => false)
         if (kept) lines = kept
         else {
           // The same numbers written again: only the band reads them.
           const redraw = () => void update($, draft, ns => [...ns]).catch(() => undefined)
-          const made = await previewsOf($, e.viewport, ready.env, numbers, { columns: e.props.bodyColumns, maxRows: e.props.maxRows - 1, labelled: true, redraw })
+          const made = await previewsOf($, e.viewport, ready.env, numbers, { columns: e.props.bodyColumns, maxRows: e.props.maxRows - 1, labelled: true, redraw, paths })
           lines = made.lines
           if (made.isWhole && made.isFinal) memoSet(drafts, 'draft', k, lines)
           else drafts.delete('draft')

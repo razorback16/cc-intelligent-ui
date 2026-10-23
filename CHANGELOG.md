@@ -2,6 +2,16 @@
 
 All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Code finds a new version by the `version` in `.claude-plugin/plugin.json`. To get it, refer to [Update](docs/install.md#update).
 
+## Unreleased
+
+### New
+
+- **A preview of pasted image paths.** When you paste the path of an image file (path text that you copied), Claude Code shows `[Image #N]` but writes no file until you send the prompt. The mod now reads the clipboard one time to find the file, and shows its preview. Absolute paths, `~/` paths, paths from the session folder, `file://` URLs, quoted paths and paths with escaped spaces work. It shows PNG, JPEG and WebP files (JPEG and WebP need Typst).
+
+### Fixed
+
+- **An empty row above the previews.** The previews of pasted images no longer touch the line above them (for example "Crunched for 7s").
+
 ## 0.3.3 (2026-10-23)
 
 ### New

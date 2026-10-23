@@ -6,18 +6,21 @@
 // its cells exactly (render/fill.typ: no empty cell area under it, unless
 // that cuts more than half a cell: fillFitOf); the plain image shows until it is made. The draft's numbers are in the `draft` atom
 // (register.tsx, which writes it at each edit that changes them); the
-// pictures are the files Claude Code wrote at the paste (pasteDir).
+// pictures are the files Claude Code wrote at the paste (pasteDir), else, for
+// a pasted path (no file there until the prompt is sent), the file that the
+// clipboard named (pathPaste).
 import type { EngineInterface, ImageSource, RenderElement, RenderInput, RenderViewport } from 'claude-code'
 
-import { COMPILE_TIMEOUT_MS, GUTTER, PICTURES_KEPT, PREVIEW_GAP, PREVIEW_RETRY_MS, PREVIEW_ROWS, PREVIEW_TRIES } from './settings'
-import { keep, type Cell, type Env } from './state'
-import { folderOf, pastedImagePath, pictureCells, type PixelBox } from './images'
-import { pasteDir, pictureOf, sourceOf, type Picture } from './pictures'
+import { COMPILE_TIMEOUT_MS, GUTTER, PATH_RECHECK_MS, PICTURES_KEPT, PREVIEW_GAP, PREVIEW_RETRY_MS, PREVIEW_ROWS, PREVIEW_TRIES } from './settings'
+import { keep, S, type Cell, type Env } from './state'
+import { clipImagePaths, convertBox, folderOf, pastedImagePath, pictureCells, type PixelBox } from './images'
+import { convertedOf, pasteDir, pictureOf, sourceOf, type Picture } from './pictures'
+import { clipboardRead } from './clipboard'
 import { shownFor } from './frame'
 import { hashOf } from './draw'
 import { FILL_SH, fillCall, logDebug } from './typst'
 import { isFlipHere } from './terminal'
-import { delay, stat, write, exec, uiResolve } from './api'
+import { delay, stat, write, exec, sid, uiResolve } from './api'
 
 export type BandInput = RenderInput<'AbovePrompt', 'terminal'>
 export type RowInput = RenderInput<'UserMessage', 'terminal'>
@@ -104,23 +107,27 @@ export function linesOf(widths: readonly number[], columns: number): number[][] 
 // else after the gutter: each one's filled copy
 // once made, else the plain image (in flip mode none while the copy is
 // made: only a PNG stored for its rows draws; with no copy, the image as it
-// is stored so). A file that is gone or not a PNG is left out;
+// is stored so). A number with no file in the paste folder draws its
+// `paths` file (a pasted path: a JPEG or WebP as the PNG Typst makes of it).
+// A file that is gone or not a PNG is left out;
 // `isWhole` is false then (it may not be written yet: previewRetry).
 // `isFinal` is false while a copy is made (`redraw` once it is).
 export async function previewsOf(
-  $: EngineInterface, view: RenderViewport | undefined, ready: Env, numbers: readonly number[], o: { columns: number; maxRows: number; labelled: boolean; redraw: () => void },
+  $: EngineInterface, view: RenderViewport | undefined, ready: Env, numbers: readonly number[],
+  o: { columns: number; maxRows: number; labelled: boolean; redraw: () => void; paths?: ReadonlyMap<number, string> },
 ): Promise<{ lines: Preview[][]; isWhole: boolean; isFinal: boolean }> {
   const dir = await pasteDir($, ready)
-  if (!dir) return { lines: [], isWhole: false, isFinal: true }
+  if (!dir && !o.paths?.size) return { lines: [], isWhole: false, isFinal: true }
   const flip = isFlipHere(ready)
+  const cell = shownFor(view).cell
   const found: { n: number; plain: ImageSource | null; p: Picture }[] = []
   for (const n of numbers) {
-    const p = await pictureOf($, pastedImagePath(dir, n))
+    const path = o.paths?.get(n)
+    const p = (dir ? await pictureOf($, pastedImagePath(dir, n)) : null) ?? (path ? await pathPicture($, ready, path, convertBox(o.columns, PREVIEW_ROWS, cell)) : null)
     const plain = p && !flip ? await sourceOf($, ready, p) : null
     if (p && (flip || plain)) found.push({ n, plain, p })
   }
   const isWhole = found.length === numbers.length
-  const cell = shownFor(view).cell
   const laid = o.labelled
     ? previewLayout(found.map(f => f.p), cell, o.columns, o.maxRows, found.map(f => labelColumns(f.n)))
     : previewLayout(found.map(f => f.p), cell, o.columns - GUTTER, o.maxRows)
@@ -139,6 +146,93 @@ export async function previewsOf(
   }
   const lines = laid.lines.map(line => line.flatMap(i => previews.get(i) ?? [])).filter(line => line.length)
   return { lines, isWhole, isFinal }
+}
+
+// A pasted path's picture: a PNG as it is, a JPEG or WebP as the PNG Typst
+// makes of it to fit `box` (none with no Typst).
+async function pathPicture($: EngineInterface, ready: Env, path: string, box: PixelBox): Promise<Picture | null> {
+  if (/\.png$/i.test(path)) return pictureOf($, path)
+  const png = await convertedOf($, ready, path, box)
+  return png ? pictureOf($, png) : null
+}
+
+// ---- Pasted paths ---------------------------------------------------------------
+
+// The files of pasted paths by number, for one session (its id): a new
+// session (/clear) numbers from #1 again. `pathTurn` counts the pastes that
+// look for a file: a read of an older one maps nothing.
+let pathed = { sid: '', paths: new Map<number, string>() }
+let pathTurn = 0
+
+// The pasted paths' files of `numbers` in session `id`.
+export function pathsOf(id: string, numbers: readonly number[]): Map<number, string> {
+  const paths = new Map<number, string>()
+  if (pathed.sid !== id) return paths
+  for (const n of numbers) {
+    const path = pathed.paths.get(n)
+    if (path) paths.set(n, path)
+  }
+  return paths
+}
+
+// Only the files of the numbers still in the draft are kept.
+export function keepPaths(numbers: readonly number[]) {
+  for (const n of [...pathed.paths.keys()]) if (!numbers.includes(n)) pathed.paths.delete(n)
+}
+
+// A session ends (/clear, a resume, an exit): no file is kept.
+export function forgetPaths() {
+  pathed = { sid: '', paths: new Map() }
+  pathTurn++
+}
+
+// New `[Image #N]` marks (`fresh`, in order) of one change: those with no
+// file in the paste folder (looked for again after PATH_RECHECK_MS: Claude
+// Code may write it just after) are a pasted path. Then one clipboard read
+// (clipboardRead: a password manager's copy is never read); a text that is
+// a path list (clipImagePaths) with one path per new mark gives each mark
+// its file, when it is a file. `envOf` is null when no picture draws. True
+// when a file was found (the band draws again). A newer paste, a new
+// session, a mark gone from the draft or a failed read maps nothing.
+export async function pathPaste($: EngineInterface, fresh: readonly number[], envOf: () => Promise<Env | null>): Promise<boolean> {
+  const turn = ++pathTurn
+  const live = () => turn === pathTurn
+  const ready = await envOf()
+  if (!ready || !live()) return false
+  const id = await sid($)
+  const missing = async (numbers: readonly number[]) => {
+    const dir = await pasteDir($, ready)
+    const left: number[] = []
+    const isFile = async (n: number) => (await stat($, pastedImagePath(dir, n)).catch(() => null))?.kind === 'file'
+    for (const n of numbers) if (!dir || !(await isFile(n))) left.push(n)
+    return left
+  }
+  let left = await missing(fresh)
+  if (left.length) {
+    await new Promise<void>(done => void delay($, PATH_RECHECK_MS, done))
+    if (live()) left = await missing(left)
+  }
+  if (!left.length || !live()) return false
+  const text = await clipboardRead($).catch(() => undefined)
+  if (typeof text !== 'string' || !live()) return false
+  const paths = clipImagePaths(text, { cwd: ready.cwd, home: ready.home })
+  if (!paths || paths.length !== fresh.length) return false
+  const found = new Map<number, string>()
+  for (const [i, n] of fresh.entries()) {
+    if (!left.includes(n)) continue
+    const st = await stat($, paths[i]!).catch(() => null)
+    if (st?.kind === 'file' && st.size > 0) found.set(n, paths[i]!)
+  }
+  if (!found.size || !live() || (await sid($)) !== id) return false
+  if (pathed.sid !== id) pathed = { sid: id, paths: new Map() }
+  const draft = S.draftImages ?? []
+  let mapped = false
+  for (const [n, path] of found) {
+    if (!draft.includes(n)) continue
+    pathed.paths.set(n, path)
+    mapped = true
+  }
+  return mapped
 }
 
 // The filled copies made in this load by key (null: it failed), and the

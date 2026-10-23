@@ -134,6 +134,12 @@ export const PREVIEW_ROWS = 5
 export const PREVIEW_GAP = 2
 export const PREVIEW_RETRY_MS = 250
 export const PREVIEW_TRIES = 8
+// A pasted path (an `[Image #N]` with no file): the file looked for once
+// more after PATH_RECHECK_MS before the clipboard is read; a clipboard text
+// over PATH_TEXT_MAX chars, or with more than PATHS_MOST paths, is no path list.
+export const PATH_RECHECK_MS = 200
+export const PATH_TEXT_MAX = 4096
+export const PATHS_MOST = 20
 // The file paths of the link rows under a picture: whether each one is a
 // file, kept for this many paths (the oldest go).
 export const LINK_FILES_KEPT = 512

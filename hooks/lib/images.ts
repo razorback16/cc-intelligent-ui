@@ -3,7 +3,7 @@
 // keeps pasted images, the cells a picture takes, and the pages of a PDF.
 // The drawing on the host is in pictures.tsx.
 import type { Cell } from './state'
-import { CONVERT_MAX_SIDE, MAX_IMAGE_ROWS, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, PICTURE_ROOM_ROWS, type Height } from './settings'
+import { CONVERT_MAX_SIDE, MAX_IMAGE_ROWS, PATH_TEXT_MAX, PATHS_MOST, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, PICTURE_ROOM_ROWS, type Height } from './settings'
 import { hashOf } from './draw'
 
 // The most rows a picture under a row (or a drawing's room) takes in a
@@ -201,3 +201,97 @@ export function claudeTmpOf(o: { tmpdir?: string; uid: string; isMac: boolean })
 // Where Claude Code keeps the images pasted in a session, and image N there.
 export const pasteDirOf = (claudeTmp: string, cwd: string, sessionId: string) => `${claudeTmp}/${projectSlug(cwd)}/${sessionId}/images`
 export const pastedImagePath = (dir: string, n: number) => `${dir}/${n}.png`
+
+// ---- Pasted paths ---------------------------------------------------------------
+// A pasted path of an image file (copied path text) is an `[Image #N]` with
+// no file in the paste folder until the prompt is sent; the clipboard text
+// names its file (composer.tsx pathPaste).
+
+// The image files a pasted path can show: PNG, and JPEG and WebP (Typst
+// makes a PNG of them), by the name's end.
+export const isPastedImage = (path: string) => /\.(png|jpe?g|webp)$/i.test(path)
+
+// The image files a clipboard text names, as absolute paths, in order. Each
+// line is one path (a name may have spaces), or several paths apart by
+// spaces when each word is one, or when quotes or backslash escapes split
+// them (as a terminal or a file manager copies them). A path is absolute,
+// `~/…`, from `cwd`, or a file:// URL (percent-decoded). Null for any other
+// text (a word that is not an image file's path), an empty one, or one over
+// PATH_TEXT_MAX chars or PATHS_MOST paths.
+export function clipImagePaths(text: string, o: { cwd: string; home: string }): string[] | null {
+  if (text.length > PATH_TEXT_MAX) return null
+  const words: string[] = []
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    const got = lineWords(line.trim())
+    if (!got) return null
+    words.push(...got)
+  }
+  if (!words.length || words.length > PATHS_MOST) return null
+  const paths = words.map(w => absolutePath(w, o))
+  return paths.every((p): p is string => !!p && isPastedImage(p)) ? paths : null
+}
+
+// One line's words: split at spaces outside quotes and escapes; a plain
+// line (no quote, no backslash) is one path unless each word is an image's.
+// Null for an open quote, a backslash at the end, or a plain line whose
+// later word starts as a path does.
+function lineWords(line: string): string[] | null {
+  if (!/['"\\]/.test(line)) {
+    const plain = line.split(/\s+/)
+    if (plain.length > 1 && plain.every(isPastedImage)) return plain
+    return plain.slice(1).some(w => /^(\/|~|file:)/i.test(w)) ? null : [line]
+  }
+  const words: string[] = []
+  let word = ''
+  let has = false
+  let quote = ''
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!
+    if (quote) {
+      if (c === quote) quote = ''
+      else if (c === '\\' && quote === '"' && /["\\$`]/.test(line[i + 1] ?? '')) word += line[++i]
+      else word += c
+    } else if (c === '\'' || c === '"') {
+      quote = c
+      has = true
+    } else if (c === '\\') {
+      if (i + 1 >= line.length) return null
+      word += line[++i]
+      has = true
+    } else if (/\s/.test(c)) {
+      if (has) words.push(word)
+      word = ''
+      has = false
+    } else {
+      word += c
+      has = true
+    }
+  }
+  if (quote) return null
+  if (has) words.push(word)
+  return words
+}
+
+// A word as an absolute path; null for a control character, another URL
+// scheme, `~user`, or a bad percent escape.
+function absolutePath(word: string, o: { cwd: string; home: string }): string | null {
+  const bad = /[\x00-\x1f\x7f]/
+  if (!word || bad.test(word)) return null
+  if (/^file:\/\//i.test(word)) {
+    const rest = word.slice(7).replace(/^localhost(?=\/)/i, '')
+    if (!rest.startsWith('/')) return null
+    let path: string
+    try {
+      path = decodeURIComponent(rest)
+    } catch {
+      return null
+    }
+    return bad.test(path) ? null : path
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(word)) return null
+  if (word.startsWith('~/')) return o.home ? `${o.home.replace(/\/+$/, '')}/${word.slice(2)}` : null
+  if (word.startsWith('~')) return null
+  if (word.startsWith('/')) return word
+  return o.cwd ? `${o.cwd.replace(/\/+$/, '')}/${word.replace(/^(\.\/)+/, '')}` : null
+}

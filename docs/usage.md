@@ -43,6 +43,7 @@ When you paste an image into the prompt box, the box shows `[Image #N]`. The mod
 - The previews show side by side. When they do not fit in one line, they go on to the next line.
 - A preview is approximately 5 rows tall, or less when the space above the prompt box is small. The image keeps its shape.
 - When you delete the `[Image #N]` text, the preview of that image goes away. When you send or clear the prompt, all the previews go away.
+- A pasted path of an image file (path text that you copied) also shows a preview. Claude Code writes no file for it until you send the prompt, so the mod reads the clipboard one time to find the file. It shows PNG, JPEG and WebP files (JPEG and WebP need Typst).
 - The mod shows PNG images only. If Claude Code wrote no PNG file for an image, that image has no preview.
 - A survey above the prompt box hides the previews until it closes.
 - With `/iui off`, or in a terminal that shows no pictures, there are no previews.

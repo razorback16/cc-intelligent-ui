@@ -9,6 +9,7 @@ import {
   claudeTmpOf, convertBox, convertCall, convertedPath, DEFAULT_CELL, factsAfter, folderOf, imageKindOf, isMarkdownPath, isNoPageError, isPdfPath, lastKnownPage,
   NO_FACTS, pageControls, pageCountOf, pageOf, parsePage, pasteDirOf, pastedImagePath, pastedNumbers, COMMIT_MIN_MS, DEFAULT_HEIGHT, RESIZE_QUIET_MS, PICTURE_MAX_ROWS, PICTURE_ROOM_ROWS, pictureCells,
   pictureRowsFor, projectSlug, renderKey, rowsAfter, sentFiles, sentImages, shortError, type Under, altOf, cellPixels, fillCall, filledPath, labelColumns, labelOf, linesOf, previewLayout, PREVIEW_RETRY_MS, sameNumbers,
+  clipImagePaths, PATH_RECHECK_MS, READ_PL,
 } from '../hooks/register'
 
 // ---- Pure helpers -----------------------------------------------------------
@@ -379,6 +380,8 @@ function world(on: any, o: {
   failStage?: boolean
   // The first flip writes (WRITE_PL) that fail.
   failWrites?: number
+  // The clipboard's text (READ_PL; none: no text; false: the read fails).
+  clipboard?: string | false
 } = {}) {
   // Intelligent UI's store in memory (as mock.store), and its writes by key;
   // `redrawsAt`: by key, the `done` writes (redraws) made when its write ended.
@@ -413,6 +416,8 @@ function world(on: any, o: {
   const reads: string[] = []
   const converts: string[][] = []
   const fills: string[][] = []
+  // The clipboard reads, and the session's id (a /clear gives a new one).
+  const clipboard: { text: string | false | undefined; reads: number; sid: string } = { text: o.clipboard, reads: 0, sid: 'sid-1' }
   // The roots of the fills made (FILL_SH's arguments), and the folders removed.
   const fillRoots: string[][] = []
   const removed: string[] = []
@@ -450,6 +455,11 @@ function world(on: any, o: {
     const cmd = argv.join(' ')
     if (argv[0] === 'kill') return ok('')
     if (o.herdr && argv[0] === 'sh' && argv[2] === HERDR_CLIENT_SH) return ok(`pid 77\natime 5\ntty /dev/ttys003\ncmd herdr\napp ${o.herdr}\nenv\nherdr TERM=xterm-256color\n`)
+    if (argv[0] === '/usr/bin/perl' && argv[2] === READ_PL) {
+      clipboard.reads++
+      if (clipboard.text === false) throw new Error('no bridge')
+      return clipboard.text === undefined ? ok('', 1) : ok(clipboard.text)
+    }
     if (argv[0] === '/usr/bin/perl' && argv[2] === WRITE_PL) return writes++ < (o.failWrites ?? 0) ? ok('', 1) : (pngs.set(argv[3]!, fromBase64(e.init.stdin)), ok(''))
     if (/cc-intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (argv[0] === 'id' && argv[1] === '-u') return ok('501\n')
@@ -496,7 +506,7 @@ function world(on: any, o: {
     }
     return ok('', 1)
   })
-  on('session.id', async () => ({ value: 'sid-1' }))
+  on('session.id', async () => ({ value: clipboard.sid }))
   on('session.cwd', async () => ({ value: '/w/app' }))
   on('session.root', async () => ({ value: '/w/app' }))
   on('fs.stat', async ($: any, e: any, next: any) => {
@@ -527,7 +537,7 @@ function world(on: any, o: {
   })
   on('ui.toast', async () => ({ value: undefined }))
   on('ui.render', () => ENGINE as any)
-  return { clock, heads, reads, converts, moves, pngs, writes: () => writes, docs, logs, files, texts, mtimes, written, kept, redrawsAt, redraws: () => redraws, sets, stats, fills, fillRoots, removed }
+  return { clipboard, dirs, clock, heads, reads, converts, moves, pngs, writes: () => writes, docs, logs, files, texts, mtimes, written, kept, redrawsAt, redraws: () => redraws, sets, stats, fills, fillRoots, removed }
 }
 
 const sent = (output: unknown, isErrored = false, id = 'tu-1') =>
@@ -1731,6 +1741,264 @@ test('the band stays as it is with a survey, with no image, with Intelligent UI 
   await prompt.change({ text: '[Image #5]', cursor: 10, origin: { kind: 'undo' } })
   await $.command.run({ command: 'iui', args: 'off' } as any)
   expect(await (await $.ui.mount({ ...band(), requestId: 'band-5' })).drawn()).toMatchObject(ENGINE)
+})
+
+test('the band leaves its first row empty: the previews do not touch the line above', async ($, on) => {
+  world(on, { files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED] })
+  editor(on)
+  await ready($)
+  const ui = await $.ui.mount(band({ maxRows: 6 }))
+  await ($ as any).prompt.edit(typed('', '[Image #5]'))
+  const tree: any = await ui.drawn()
+  // One empty row above the previews, and the previews one row shorter for it (5 rows less the free one).
+  expect(tree.props.marginTop).toBe(1)
+  expect(images(tree)[0].props.rows).toBe(4)
+})
+
+// ---- Pasted paths ---------------------------------------------------------------
+
+test('a clipboard text is a list of image paths, or nothing', () => {
+  const o = { cwd: '/w/app', home: '/h' }
+  expect(clipImagePaths('/t/shot.png', o)).toEqual(['/t/shot.png'])
+  expect(clipImagePaths('  /t/shot.png\n', o)).toEqual(['/t/shot.png'])
+  // From the cwd, from home, a file:// URL (percent-decoded).
+  expect(clipImagePaths('shots/a.png', o)).toEqual(['/w/app/shots/a.png'])
+  expect(clipImagePaths('./a.PNG', o)).toEqual(['/w/app/a.PNG'])
+  expect(clipImagePaths('~/Desktop/a.jpg', o)).toEqual(['/h/Desktop/a.jpg'])
+  expect(clipImagePaths('file:///t/My%20Shot.png', o)).toEqual(['/t/My Shot.png'])
+  expect(clipImagePaths('file://localhost/t/a.webp', o)).toEqual(['/t/a.webp'])
+  // Quotes and backslash escapes, as terminals copy them; several paths.
+  expect(clipImagePaths(`'/t/My Shot.png'`, o)).toEqual(['/t/My Shot.png'])
+  expect(clipImagePaths('"/t/My Shot.png" /t/b.jpeg', o)).toEqual(['/t/My Shot.png', '/t/b.jpeg'])
+  expect(clipImagePaths('/t/My\\ Shot.png /t/b.png', o)).toEqual(['/t/My Shot.png', '/t/b.png'])
+  expect(clipImagePaths('/t/a.png /t/b.png', o)).toEqual(['/t/a.png', '/t/b.png'])
+  expect(clipImagePaths('/t/a.png\n/t/b.png\n', o)).toEqual(['/t/a.png', '/t/b.png'])
+  // A plain line with spaces is one path (a file manager's copy).
+  expect(clipImagePaths('/t/My Shot.png', o)).toEqual(['/t/My Shot.png'])
+  expect(clipImagePaths('/t/My Shot.png\n/t/b.png', o)).toEqual(['/t/My Shot.png', '/t/b.png'])
+  // Anything else: no list.
+  for (const text of [
+    '', '  \n', 'hello world', 'see /t/a.png', '/t/notes.txt', '/t/a.png /t/notes.txt', '/t/a.gif', 'https://x.test/a.png', '~bob/a.png',
+    '"/t/a.png', '/t/a.png\\', 'file://host/t/a.png', 'file:///t/%E0%A4%A.png', 'file:///t/a%0A.png', `/t/${'a'.repeat(5000)}.png`,
+    Array.from({ length: 21 }, (_, i) => `/t/${i}.png`).join(' '),
+  ]) expect([text.slice(0, 40), clipImagePaths(text, o)]).toEqual([text.slice(0, 40), null])
+  // No cwd or home: no relative or ~ path.
+  expect(clipImagePaths('a.png', { cwd: '', home: '' })).toBe(null)
+  expect(clipImagePaths('~/a.png', { cwd: '', home: '' })).toBe(null)
+})
+
+// A path pasted (Cmd+V of a copied path, a drag into the terminal): the
+// engine's change with the new mark; no edit carries it, and no file is in
+// the paste folder until the prompt is sent.
+const pathPasted = (text: string) => ({ text, cursor: text.length, origin: { kind: 'engine' } }) as any
+const sources = (tree: any): string[] => images(tree).map(i => i.props.source.file)
+
+test('a pasted image path shows its preview from that file: the clipboard is read once', async ($, on) => {
+  const { clipboard, clock } = world(on, { files: { '/t/shot.png': HEAD }, clipboard: '/t/shot.png' })
+  editor(on)
+  await ready($)
+  const ui = await $.ui.mount(band())
+  await ($ as any).prompt.change(pathPasted('look [Image #1]'))
+  // The file may come a moment after the change: no read yet.
+  await clock.settle()
+  expect(clipboard.reads).toBe(0)
+  await clock.advance(PATH_RECHECK_MS)
+  expect(clipboard.reads).toBe(1)
+  const tree: any = await ui.drawn()
+  expect(alts(tree)).toEqual(['[Image #1]'])
+  expect(sources(tree)).toEqual(['/t/shot.png'])
+  expect(images(tree)[0].props).toMatchObject({ columns: 20, rows: 5 })
+  // Typing after it reads nothing more; the preview stays.
+  await ($ as any).prompt.edit(typed('look [Image #1]', ' what'))
+  await clock.advance(1000)
+  expect(clipboard.reads).toBe(1)
+  expect(sources(await ui.drawn())).toEqual(['/t/shot.png'])
+})
+
+for (const [form, text, file] of [
+  ['a relative path', 'shots/a.png', '/w/app/shots/a.png'],
+  ['a ~ path', '~/Desktop/a.png', '/h/Desktop/a.png'],
+  ['a file:// URL', 'file:///t/My%20Shot.png', '/t/My Shot.png'],
+  ['a quoted path', `'/t/My Shot.png'`, '/t/My Shot.png'],
+  ['a path with escaped spaces', '/t/My\\ Shot.png', '/t/My Shot.png'],
+] as const) {
+  test(`a pasted image path shows its preview: ${form}`, async ($, on) => {
+    const { clock } = world(on, { files: { [file]: HEAD }, clipboard: `${text}\n` })
+    editor(on)
+    await ready($)
+    const ui = await $.ui.mount(band())
+    await ($ as any).prompt.change(pathPasted('[Image #1]'))
+    await clock.advance(PATH_RECHECK_MS)
+    expect(sources(await ui.drawn())).toEqual([file])
+  })
+}
+
+test('two pasted paths are the two new marks, in order', async ($, on) => {
+  const { clipboard, clock } = world(on, { files: { '/t/a.png': HEAD, '/t/b.png': TALL }, clipboard: '/t/a.png /t/b.png' })
+  editor(on)
+  await ready($)
+  const ui = await $.ui.mount(band())
+  await ($ as any).prompt.change(pathPasted('[Image #1] [Image #2] '))
+  await clock.advance(PATH_RECHECK_MS)
+  const tree: any = await ui.drawn()
+  expect(alts(tree)).toEqual(['[Image #1]', '[Image #2]'])
+  expect(sources(tree)).toEqual(['/t/a.png', '/t/b.png'])
+  expect(clipboard.reads).toBe(1)
+})
+
+test('a pasted JPEG path shows as the PNG Typst makes of it', async ($, on) => {
+  const { clock, converts } = world(on, { typst: true, files: { '/t/photo.jpg': JPEG }, clipboard: '/t/photo.jpg' })
+  editor(on)
+  await ready($)
+  const ui = await $.ui.mount(band())
+  await ($ as any).prompt.change(pathPasted('[Image #1]'))
+  await clock.advance(PATH_RECHECK_MS)
+  await clock.settle()
+  expect(converts.map(argv => argv.find(a => a.startsWith('f=')))).toEqual(['f=/t/photo.jpg'])
+  expect(alts(await ui.drawn())).toEqual(['[Image #1]'])
+})
+
+for (const [what, clipboardText, files] of [
+  ['a text that is no path', 'hello [Image #1] world', {}],
+  ['a path to no file', '/t/gone.png', {}],
+  ['a file that is no image', '/t/notes.txt', { '/t/notes.txt': HEAD }],
+  ['an image file that is no PNG', '/t/fake.png', { '/t/fake.png': JPEG }],
+  ['more paths than new marks', '/t/a.png /t/b.png', { '/t/a.png': HEAD, '/t/b.png': HEAD }],
+  ['a read that fails', false, { '/t/a.png': HEAD }],
+] as const) {
+  test(`a pasted mark draws no preview, and nothing fails, for ${what}`, async ($, on) => {
+    const { clipboard, clock } = world(on, { files: { ...files }, clipboard: clipboardText })
+    editor(on)
+    await ready($)
+    const ui = await $.ui.mount(band())
+    await ($ as any).prompt.change(pathPasted('[Image #1]'))
+    await clock.advance(PATH_RECHECK_MS)
+    await clock.advance(PREVIEW_RETRY_MS * 10)
+    expect(clipboard.reads).toBe(1)
+    expect(await ui.drawn()).toMatchObject(ENGINE)
+  })
+}
+
+test('a pasted image (its file in the paste folder) reads no clipboard, nor one written just after the paste', async ($, on) => {
+  const { clipboard, clock, files } = world(on, { files: { [`${PASTED}/5.png`]: HEAD, '/t/shot.png': TALL }, dirs: [PASTED], clipboard: '/t/shot.png' })
+  editor(on)
+  await ready($)
+  const prompt = ($ as any).prompt
+  const ui = await $.ui.mount(band())
+  await prompt.edit(typed('', '[Image #5]'))
+  await prompt.change(pathPasted('[Image #5] [Image #6]'))
+  // #6 is written a moment after its change (after the first look for it).
+  await clock.settle()
+  files[`${PASTED}/6.png`] = HEAD
+  await clock.advance(PATH_RECHECK_MS)
+  await clock.advance(PREVIEW_RETRY_MS)
+  expect(clipboard.reads).toBe(0)
+  expect(sources(await ui.drawn())).toEqual([`${PASTED}/5.png`, `${PASTED}/6.png`])
+  // A path pasted then: the one read.
+  await prompt.change(pathPasted('[Image #5] [Image #6] [Image #7]'))
+  await clock.advance(PATH_RECHECK_MS)
+  expect(clipboard.reads).toBe(1)
+  expect(sources(await ui.drawn())).toEqual([`${PASTED}/5.png`, `${PASTED}/6.png`, '/t/shot.png'])
+})
+
+test('a recalled entry, a plugin\'s fill or an undo reads no clipboard; only a paste does', async ($, on) => {
+  const { clipboard, clock } = world(on, { files: { '/t/shot.png': HEAD }, clipboard: '/t/shot.png' })
+  editor(on)
+  await ready($)
+  const prompt = ($ as any).prompt
+  const ui = await $.ui.mount(band())
+  await prompt.change({ text: '[Image #1] old', cursor: 14, origin: { kind: 'history' } })
+  await prompt.change({ text: '[Image #2]', cursor: 10, origin: { kind: 'plugin', name: 'other' } })
+  await prompt.change({ text: '[Image #3]', cursor: 10, origin: { kind: 'undo' } })
+  await clock.advance(PATH_RECHECK_MS)
+  expect(clipboard.reads).toBe(0)
+  expect(await ui.drawn()).toMatchObject(ENGINE)
+  await prompt.change(pathPasted('[Image #3] [Image #4]'))
+  await clock.advance(PATH_RECHECK_MS)
+  expect(clipboard.reads).toBe(1)
+  expect(alts(await ui.drawn())).toEqual(['[Image #4]'])
+})
+
+test('a paste while a read waits: the older paste maps nothing, the newer one its own path', async ($, on) => {
+  const { clipboard, clock } = world(on, { files: { '/t/a.png': HEAD, '/t/b.png': TALL }, clipboard: '/t/a.png' })
+  editor(on)
+  await ready($)
+  const prompt = ($ as any).prompt
+  const ui = await $.ui.mount(band())
+  await prompt.change(pathPasted('[Image #1]'))
+  await clock.advance(PATH_RECHECK_MS / 2)
+  // B copied and pasted before the first read: the clipboard is B's now.
+  clipboard.text = '/t/b.png'
+  await prompt.change(pathPasted('[Image #1] [Image #2]'))
+  await clock.advance(PATH_RECHECK_MS)
+  expect(clipboard.reads).toBe(1)
+  const tree: any = await ui.drawn()
+  expect(alts(tree)).toEqual(['[Image #2]'])
+  expect(sources(tree)).toEqual(['/t/b.png'])
+})
+
+test('a mark deleted while its read runs maps nothing; a mark that leaves the draft drops its file', async ($, on) => {
+  const { clipboard, clock } = world(on, { files: { '/t/a.png': HEAD }, clipboard: '/t/a.png' })
+  editor(on)
+  await ready($)
+  const prompt = ($ as any).prompt
+  const ui = await $.ui.mount(band())
+  await prompt.change(pathPasted('[Image #1]'))
+  await prompt.edit(cut('[Image #1]', 0, 10))
+  await clock.advance(PATH_RECHECK_MS)
+  expect(clipboard.reads).toBe(1)
+  await prompt.change({ text: '[Image #1]', cursor: 10, origin: { kind: 'undo' } })
+  expect(await ui.drawn()).toMatchObject(ENGINE)
+  // Mapped, then deleted and put back by an undo: no file kept for it.
+  await prompt.change(pathPasted('[Image #1] [Image #2]'))
+  await clock.advance(PATH_RECHECK_MS)
+  expect(alts(await ui.drawn())).toEqual(['[Image #2]'])
+  await prompt.edit(cut('[Image #1] [Image #2]', 10, 21))
+  await prompt.change({ text: '[Image #1] [Image #2]', cursor: 21, origin: { kind: 'undo' } })
+  expect(await ui.drawn()).toMatchObject(ENGINE)
+  expect(clipboard.reads).toBe(2)
+})
+
+test('once the prompt is sent, the file Claude Code writes is the one drawn, with no read', async ($, on) => {
+  const { clipboard, clock, dirs, files } = world(on, { files: { '/t/shot.png': TALL }, clipboard: '/t/shot.png' })
+  editor(on)
+  await ready($)
+  const box = ($ as any).prompt
+  const ui = await $.ui.mount(band())
+  await box.change(pathPasted('look [Image #1]'))
+  await clock.advance(PATH_RECHECK_MS)
+  expect(sources(await ui.drawn())).toEqual(['/t/shot.png'])
+  // Claude Code writes images/1.png at the send: it wins.
+  dirs.add(PASTED)
+  files[`${PASTED}/1.png`] = HEAD
+  await ui.redraw()
+  expect(sources(await ui.drawn())).toEqual([`${PASTED}/1.png`])
+  // Sent: the box clears.
+  await box.change({ text: '', cursor: 0, origin: { kind: 'clear' } })
+  const row = await $.ui.mount(prompt('look [Image #1]'))
+  expect(sources(await row.drawn())).toEqual([`${PASTED}/1.png`])
+  // Recalled: the written file, not the path.
+  await box.change({ text: 'look [Image #1]', cursor: 15, origin: { kind: 'history' } })
+  await clock.advance(PATH_RECHECK_MS)
+  expect(sources(await ui.drawn())).toEqual([`${PASTED}/1.png`])
+  expect(clipboard.reads).toBe(1)
+})
+
+test('a pasted path\'s file is not kept for a new session (/clear numbers from #1 again)', async ($, on) => {
+  const { clipboard, clock } = world(on, { files: { '/t/shot.png': HEAD }, clipboard: '/t/shot.png' })
+  editor(on)
+  await ready($)
+  const prompt = ($ as any).prompt
+  const ui = await $.ui.mount(band())
+  await prompt.change(pathPasted('[Image #1]'))
+  await clock.advance(PATH_RECHECK_MS)
+  expect(sources(await ui.drawn())).toEqual(['/t/shot.png'])
+  // A new session with #1 in its draft (no change of the numbers): no file for it.
+  clipboard.sid = 'sid-2'
+  await prompt.change({ text: '[Image #1] new', cursor: 14, origin: { kind: 'history' } })
+  await ui.redraw()
+  expect(await ui.drawn()).toMatchObject(ENGINE)
+  expect(clipboard.reads).toBe(1)
 })
 
 // ---- The height setting -------------------------------------------------------
