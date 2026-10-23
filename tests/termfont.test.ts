@@ -36,9 +36,10 @@ function world(on: any, o: {
   copied?: string
   measure?: string
   run?: (argv: string[]) => ReturnType<typeof ok> | undefined
+  stored?: Record<string, unknown>
 }): World {
   S.fontPaths = ''
-  mock.store(on)
+  mock.store(on, o.stored)
   const clock = mock.clock(on)
   mock.env(on, { HOME: '/h', ...o.env })
   const ran: string[][] = []
@@ -337,6 +338,63 @@ fontTest('herdr: the check each second runs no full scan; a new client (Ghostty 
   expect(later).toContain('terminal font Fira Code.')
   expect(later).toContain('(in kitty, the client you used last)')
   expect(w.fontPaths.length).toBeGreaterThan(measured)
+})
+
+// The herdr checks run since `from` (ran index): light checks and full scans.
+const checksSince = (w: World, from: number) => w.ran.slice(from).filter(argv => argv[2] === HERDR_TICK_SH || argv[2] === HERDR_CLIENT_SH).length
+// A test that leaves the poll state as it found it.
+const pollTest = (name: string, fn: ($: any, on: any) => Promise<void>) =>
+  fontTest(name, async ($, on) => {
+    try {
+      await fn($, on)
+    } finally {
+      S.isOff = false
+      S.hostEnded = false
+    }
+  })
+
+pollTest('herdr: no check each second while the mod is off; /iui on starts it again', async ($, on) => {
+  const w = world(on, { isMac: true, env: HERDR_SERVER_ENV, families: ['Iosevka'], run: argv => clientIs(() => ghosttyClient)(argv) ?? tickIs(() => null)(argv) ?? shows('font-family = Iosevka\n')(argv) })
+  await details($)
+  let from = w.ran.length
+  await w.clock.advance(3000)
+  expect(checksSince(w, from)).toBe(3)
+  await $.command.run({ command: 'iui', args: 'off' } as any)
+  from = w.ran.length
+  await w.clock.advance(5000)
+  expect(checksSince(w, from)).toBe(0)
+  await $.command.run({ command: 'iui', args: 'on' } as any)
+  from = w.ran.length
+  await w.clock.advance(2000)
+  expect(checksSince(w, from)).toBe(2)
+})
+
+pollTest('herdr: the mod off when it starts (the stored setting): no check each second', async ($, on) => {
+  const w = world(on, { isMac: true, env: HERDR_SERVER_ENV, families: ['Iosevka'], stored: { enabled: false }, run: argv => clientIs(() => ghosttyClient)(argv) ?? tickIs(() => null)(argv) ?? shows('font-family = Iosevka\n')(argv) })
+  await details($)
+  const from = w.ran.length
+  await w.clock.advance(5000)
+  expect(checksSince(w, from)).toBe(0)
+})
+
+pollTest("herdr with pictures off (no CLAUDE_CODE_FORCE_TERMINAL_IMAGES): no check each second", async ($, on) => {
+  const { CLAUDE_CODE_FORCE_TERMINAL_IMAGES: _, ...env } = HERDR_SERVER_ENV
+  const w = world(on, { isMac: true, env, families: ['Iosevka'], run: argv => clientIs(() => ghosttyClient)(argv) ?? tickIs(() => null)(argv) ?? shows('font-family = Iosevka\n')(argv) })
+  on('tool.call', { tool: 'AskUserQuestion' }, async () => ({ deny: 'dismissed' }))
+  await details($)
+  const from = w.ran.length
+  await w.clock.advance(5000)
+  expect(checksSince(w, from)).toBe(0)
+})
+
+pollTest('herdr: the end of the session stops the check each second', async ($, on) => {
+  const w = world(on, { isMac: true, env: HERDR_SERVER_ENV, families: ['Iosevka'], run: argv => clientIs(() => ghosttyClient)(argv) ?? tickIs(() => null)(argv) ?? shows('font-family = Iosevka\n')(argv) })
+  on('session.end', async ($: any, e: any) => ({ sessionId: e.sessionId }))
+  await details($)
+  await ($ as any).session.end({ reason: 'prompt_input_exit', sessionId: 's1' })
+  const from = w.ran.length
+  await w.clock.advance(5000)
+  expect(checksSince(w, from)).toBe(0)
 })
 
 fontTest('herdr: a terminal in front with no known client makes a full scan at the next second, and only once while it stays in front', async ($, on) => {

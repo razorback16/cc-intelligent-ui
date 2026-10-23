@@ -98,6 +98,7 @@ export function setUp($: EngineInterface): Promise<Env> {
     S.userFontPaths = (await getenv($, 'TYPST_FONT_PATHS')) ?? ''
     if (S.setting === 'auto') S.host = (await readHostMode($).catch(() => null)) ?? S.host
     S.theme = resolveMode(S.setting, S.host)
+    S.herdrDraws = S.isHerdr && canDraw
     watchHost($)
     // The stored settings, but not one an /iui command set meanwhile (settingsSet).
     const kept = Number(await load($, 'size').catch(() => undefined))
@@ -118,7 +119,11 @@ export function setUp($: EngineInterface): Promise<Env> {
     // An engine with no version call is older than picture select.
     S.engine = await Promise.resolve().then(() => ver($)).then(v => v.base ?? v.version, () => '')
     const enabled = await load($, 'enabled').catch(() => undefined)
-    if (enabled === false && !settingsSet.has('enabled')) await update($, isOn, () => false).catch(() => undefined)
+    if (enabled === false && !settingsSet.has('enabled')) {
+      S.isOff = true
+      watchHost($)
+      await update($, isOn, () => false).catch(() => undefined)
+    }
     const isMac = os.trim() === 'Darwin'
     // Linux, on this computer: the clipboard tools, for the copy.
     if (S.hostOs === 'Linux' && !ssh) void findClipWay($).catch(() => undefined)

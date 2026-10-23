@@ -31,7 +31,7 @@ import { escapeControls, luminanceOf, modeLine, modeOfLuminance, parseOsc11, set
 import { applyTheme, themeListing, userThemesOf } from './lib/themes'
 import { commandSuggestions, parseCommand, registerCommand } from './lib/command'
 import { runSetup } from './lib/setup'
-import { pollHost, PROBE_RUNS, probeOsc11, showMode, USE_OSC11, watchHost } from './lib/host'
+import { pollHost, PROBE_RUNS, probeOsc11, showMode, stopHost, USE_OSC11, watchHost } from './lib/host'
 import { measureFonts } from './lib/typst'
 import { drawPages, linkRowsOf, linksFor, takesSelect, type ShownLink } from './lib/draw'
 import {
@@ -799,7 +799,10 @@ export const register: Register = on => {
   // child starts.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear' || e.reason === 'resume') stopClipboard($)
-    else stopWatch()
+    else {
+      stopWatch()
+      stopHost()
+    }
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -892,6 +895,9 @@ export const register: Register = on => {
     if (asked.kind === 'dump') return { text: await dump($, await read($, isOn)) }
     if (asked.kind === 'on' || asked.kind === 'off') {
       settingsSet.add('enabled')
+      S.isOff = asked.kind === 'off'
+      // Under herdr, its client is checked only while on.
+      watchHost($)
       await update($, isOn, () => asked.kind === 'on')
       // On: the clipboard part starts with the next picture drawn.
       if (asked.kind === 'off') {

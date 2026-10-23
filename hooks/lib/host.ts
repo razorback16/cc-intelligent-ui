@@ -760,14 +760,15 @@ async function readLinuxScheme($: EngineInterface): Promise<LinuxScheme | null> 
 // each HOST_POLL_MS (every third poll), at once for another terminal, and
 // with `modeNow`.
 export async function pollHost($: EngineInterface, modeNow = false) {
-  if (S.checking || (S.setting !== 'auto' && !S.isHerdr)) return
+  const herdr = herdrPolled()
+  if (S.checking || (S.setting !== 'auto' && !herdr)) return
   S.checking = true
   let refonted = false
   const flipWas = isFlipHere()
   try {
-    const moved = S.isHerdr && (await checkHerdrClient($).catch(() => false))
+    const moved = herdr && (await checkHerdrClient($).catch(() => false))
     if (moved) await setOuter($)
-    const due = !S.isHerdr || modeNow || moved || ++S.hostTicks >= HOST_POLL_MS / HERDR_POLL_MS
+    const due = !herdr || modeNow || moved || ++S.hostTicks >= HOST_POLL_MS / HERDR_POLL_MS
     if (due) S.hostTicks = 0
     if (S.setting === 'auto' && due) S.host = (await readHostMode($).catch(() => null)) ?? S.host
     if (moved) refonted = await refont($).catch(() => false)
@@ -788,11 +789,15 @@ export function showMode($: EngineInterface) {
   beginEpoch($)
 }
 
-// Polls while the setting is auto or under herdr (its client can change), and
-// only then: each HOST_POLL_MS, under herdr each HERDR_POLL_MS.
+// herdr's client is checked: under herdr, with pictures drawn and the mod on.
+const herdrPolled = () => S.isHerdr && S.herdrDraws && !S.isOff
+
+// Polls while the setting is auto or herdr's client is checked (it can
+// change), and only then, until the session ends: each HOST_POLL_MS, while
+// herdr's client is checked each HERDR_POLL_MS.
 export function watchHost($: EngineInterface) {
-  const wanted = S.setting === 'auto' || S.isHerdr
-  const ms = S.isHerdr ? HERDR_POLL_MS : HOST_POLL_MS
+  const wanted = !S.hostEnded && (S.setting === 'auto' || herdrPolled())
+  const ms = herdrPolled() ? HERDR_POLL_MS : HOST_POLL_MS
   // Started before setUp knew of herdr: started again with its period.
   if (S.watch && (!wanted || S.watchMs !== ms)) {
     S.watch.cancel()
@@ -806,4 +811,11 @@ export function watchHost($: EngineInterface) {
       S.watch = null
     }
   }
+}
+
+// The session ends (not a /clear): no more polls.
+export function stopHost() {
+  S.hostEnded = true
+  S.watch?.cancel()
+  S.watch = null
 }

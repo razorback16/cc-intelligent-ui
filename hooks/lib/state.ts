@@ -216,6 +216,12 @@ export const S = {
   watch: null as { cancel: () => void } | null,
   // The poll timer's period (watchHost).
   watchMs: 0,
+  // herdr's client check is of use: herdr, with pictures drawn (setUp), and
+  // the mod not turned off (/iui off, or off when it starts). The poll ends
+  // with the session (stopHost).
+  herdrDraws: false,
+  isOff: false,
+  hostEnded: false,
   checking: false,
   // Linux: the tool that reads the desktop portal's colour scheme (host.ts;
   // null: not tried yet, '': none works, so GNOME's gsettings is read).
