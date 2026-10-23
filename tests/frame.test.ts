@@ -519,6 +519,29 @@ test('a clip child that ends on its own starts again after WATCH_RESTART_MS, WAT
   expect(watchState()).toEqual({ clip: true, ended: true })
 })
 
+test('a child that ended is not killed at its stop: its PID can be another process now', async () => {
+  // The clipboard part off: a child with no argument.
+  watchFrame($, null)
+  const child = children.at(-1)!
+  expect(child.argv).toEqual(['perl', '-e', WATCH_PL])
+  child.say('pid 201')
+  await flush()
+  child.end(0)
+  await flush()
+  expect(watchState()).toEqual({ clip: false, ended: true })
+  // The clipboard part on: the ended child is stopped, with no kill.
+  watchFrame($, () => {})
+  await flush()
+  expect(kills).not.toContain('201')
+  // A child that runs is killed as before.
+  const next = children.at(-1)!
+  next.say('pid 202')
+  await flush()
+  watchFrame($, null)
+  await flush()
+  expect(kills).toContain('202')
+})
+
 test('Ghostty is told by TERM_PROGRAM or TERM, and cmux (its engine) counts too', () => {
   const was = { program: S.termProgram, name: S.termName, cmux: S.isCmux }
   try {

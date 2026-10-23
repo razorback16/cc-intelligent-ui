@@ -237,12 +237,13 @@ export function watchFrame($: EngineInterface, clip?: ((count: number | null, fi
   }
   if (!watcher && clip !== undefined && !isClip) return false
   watcher?.stop()
-  // The stop: a kill once its PID is known (its first line).
+  // The stop: a kill once its PID is known (its first line), and not after
+  // the child ended (its PID can be another process's by then).
   let pid = ''
   let stopped = false
   let counted = false
   const kill = () => {
-    if (stopped && pid) void Promise.resolve(processRun($, ['kill', pid], { timeoutMs: 5000 })).catch(() => undefined)
+    if (stopped && pid && !me.ended) void Promise.resolve(processRun($, ['kill', pid], { timeoutMs: 5000 })).catch(() => undefined)
   }
   const stop = () => {
     if (stopped) return
