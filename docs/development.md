@@ -14,6 +14,8 @@ sh tests/cache-sh-test.sh      # the cache folder sweep (CACHE_SH) in sh, dash a
 sh tests/fonts-sh-test.sh      # the copy of a font out of a terminal's program (PROGRAM_FONTS_SH and _PL) with perl
 sh tests/bold-sh-test.sh       # the fake bold of md.typ (term-bold=0) with the real Typst and Monaco (skips with no Monaco)
 sh tests/code-sh-test.sh       # code blocks of md.typ (width, header, copy button mark, row grid) with the real Typst (skips with no typst)
+sh tests/root-sh-test.sh       # the Typst root of a compile (STAGE_SH): answer code reads no other file, with the real Typst (its compiles skip with no typst)
+sh tests/check-sh-test.sh      # the skill's check.sh: a private cache folder, and a block reads no other file (skips with no Typst 0.15)
 claude plugin validate .
 ```
 
