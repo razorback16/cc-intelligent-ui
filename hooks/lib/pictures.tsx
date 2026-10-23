@@ -24,7 +24,7 @@ import { flipFile } from './flip'
 import { pagesOf, type Drawing } from './answer'
 import { HEADERS_SH, perlFor } from './host'
 import { frameFor, pictureColumns, shownFor, type Frame } from './frame'
-import { delay, exists, ls, cat, stat, write, exec, sid, root, hide, redraw, show, uiResolve } from './api'
+import { delay, exists, ls, cat, stat, write, exec, sid, root, hide, redraw, show, uiResolve, nowMs } from './api'
 
 export type Picture = { file: string; stamp: string; bytes: number; width: number; height: number }
 export type Shown = { source: ImageSource; columns: number; rows: number; alt: string }
@@ -141,20 +141,35 @@ export async function sourceOf($: EngineInterface, ready: Env, p: Picture, rows?
 // Flip mode: a PNG stored for herdr in iTerm2 drawn `rows` rows tall
 // (flip.ts), in a key folder of the cache by the file, its stat stamp and
 // the rows; made once (one run per key), kept from an earlier load. Null
-// when it fails (not kept: a later draw tries again).
+// when it fails: not kept, but a key that failed runs again only after a
+// back-off (FLIP_RETRY_MS, doubled each failure up to FLIP_RETRY_MAX_MS).
 const flipped = new Map<string, Promise<string | null>>()
+const flipFailed = new Map<string, { at: number; wait: number }>()
+const FLIP_RETRY_MS = 5_000
+const FLIP_RETRY_MAX_MS = 60_000
 function flippedOf($: EngineInterface, ready: Env, p: Picture, rows: number): Promise<string | null> {
   const key = `${p.file}@${p.stamp}@${rows}`
   let got = flipped.get(key)
   if (!got) {
     const out = `${ready.cache}/${hashOf(['flip', p.file, p.stamp, rows])}/flip.png`
     got = (async (): Promise<string | null> => {
+      const failed = flipFailed.get(key)
+      const now = () => nowMs($).catch(() => Date.now())
+      if (failed && (await now()) < failed.at) {
+        if (flipped.get(key) === got) flipped.delete(key)
+        return null
+      }
       const made = await stat($, out).catch(() => null)
       if (made?.kind === 'file' && made.size) return out
       const ok = await flipFile($, { src: p.file, out, rows, isPage: false, perl: perlFor(ready.isMac) })
-      if (ok) return out
+      if (ok) {
+        flipFailed.delete(key)
+        return out
+      }
+      const wait = failed ? Math.min(FLIP_RETRY_MAX_MS, failed.wait * 2) : FLIP_RETRY_MS
+      keep(flipFailed, key, { at: (await now()) + wait, wait }, PICTURES_KEPT)
       if (flipped.get(key) === got) flipped.delete(key)
-      await logDebug($, ready.cache, `could not store ${p.file} for herdr in iTerm2`)
+      await logDebug($, ready.cache, `could not store ${p.file} for herdr in iTerm2 (next try in ${wait / 1000} s)`)
       return null
     })()
     keep(flipped, key, got, PICTURES_KEPT)
