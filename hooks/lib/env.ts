@@ -7,13 +7,13 @@ import {
   BASE_THEME, DEFAULT_HEIGHT, DEFAULT_SIZE, DESIGNS_KEPT_DAYS, DEFAULT_THEME, DEFAULT_WIDTH, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH, MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, noTypstOf,
 } from './settings'
 import { DEFAULT_METRICS, refresh, S, settingsSet, type Env } from './state'
-import { resolveMode, settingOf } from './mode'
+import { OSC11_TRIES, resolveMode, settingOf } from './mode'
 import { isItermIn } from './terminals'
 import { canDrawIn, isHerdrIn, isSet, needsSetup } from './terminal'
 import { claudeTmpOf } from './images'
 import { applyTheme } from './themes'
 import { registerCommand } from './command'
-import { readHerdrClient, readHostMode, setOuter, termFontOf, watchHost } from './host'
+import { osc11Due, readHerdrClient, readHostMode, setOuter, termFontOf, watchHost } from './host'
 import { readFrame, refontAfterStart, setFrame, watchFrame } from './frame'
 import { offerSetup } from './setup'
 import { findClipWay } from './clipboard'
@@ -71,11 +71,19 @@ export function setUp($: EngineInterface): Promise<Env> {
     S.termName = term
     S.isHerdr = isHerdrIn({ program, herdrEnv: await getenv($, 'HERDR_ENV') })
     S.herdrVersion = S.isHerdr ? ((await getenv($, 'TERM_PROGRAM_VERSION')) ?? '').trim() : ''
+    S.herdrDraws = S.isHerdr && canDraw
+    // Off when it starts (the stored setting), unless an /iui command set it meanwhile.
+    const enabled = await load($, 'enabled').catch(() => undefined)
+    const off = settingsSet.has('enabled') ? S.isOff : enabled === false
     // Under herdr the client in use gives the terminal (the one of before stays while the app in front has none); else (none found) the server's variables.
+    // The clients' processes are read only while the mod is on and draws pictures.
     const was = S.herdrClient
     S.herdrClient = null
     S.osc11Kept = null
-    if (S.isHerdr) await readHerdrClient($, was).catch(() => false)
+    S.herdrClients = []
+    S.herdrScanFront = null
+    S.herdrScanAt = null
+    if (S.herdrDraws && !off) await readHerdrClient($, was).catch(() => false)
     await setOuter($)
     S.isRemote = ssh
     S.debug = isSet(await getenv($, 'IUI_DEBUG'))
@@ -96,9 +104,10 @@ export function setUp($: EngineInterface): Promise<Env> {
     })
     if (S.setupNeeded) void offerSetup($).catch(() => undefined)
     S.userFontPaths = (await getenv($, 'TYPST_FONT_PATHS')) ?? ''
-    if (S.setting === 'auto') S.host = (await readHostMode($).catch(() => null)) ?? S.host
+    // Under herdr with auto, its OSC 11 answer is asked at the start (osc11Due).
+    S.osc11Tries = S.setting === 'auto' ? OSC11_TRIES : 0
+    if (S.setting === 'auto') S.host = (await readHostMode($, await osc11Due($, off)).catch(() => null)) ?? S.host
     S.theme = resolveMode(S.setting, S.host)
-    S.herdrDraws = S.isHerdr && canDraw
     watchHost($)
     // The stored settings, but not one an /iui command set meanwhile (settingsSet).
     const kept = Number(await load($, 'size').catch(() => undefined))
@@ -118,7 +127,6 @@ export function setUp($: EngineInterface): Promise<Env> {
     if (!settingsSet.has('select')) S.select = select
     // An engine with no version call is older than picture select.
     S.engine = await Promise.resolve().then(() => ver($)).then(v => v.base ?? v.version, () => '')
-    const enabled = await load($, 'enabled').catch(() => undefined)
     if (enabled === false && !settingsSet.has('enabled')) {
       S.isOff = true
       watchHost($)

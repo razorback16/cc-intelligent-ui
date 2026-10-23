@@ -63,9 +63,20 @@ test('under herdr a segment is cut so its page stays under 16 MiB of RGBA', () =
   // A wide page on a Retina screen: 41 rows fit, 30 with the room for the rough count.
   expect(herdrBudget(187, { width: 16, height: 34 })).toBe(30)
   expect(herdrBudget(187, { width: 16, height: 34 }) * 34 * 2992 * 4 / 0.75).toBeLessThanOrEqual(HERDR_MAX_PAGE_BYTES)
-  // A small page keeps the normal budget; a huge one at least 20 rows.
+  // A small page keeps the normal budget; a large one at least 20 rows, when 20 rows fit.
   expect(herdrBudget(80, { width: 8, height: 16 })).toBe(SEGMENT_ROWS)
-  expect(herdrBudget(255, { width: 40, height: 80 })).toBe(20)
+  expect(herdrBudget(255, { width: 20, height: 40 })).toBe(20)
+  // A huge cell: 20 rows would be 65 MiB (herdr sends none of it), so only the rows that fit.
+  expect(herdrBudget(255, { width: 40, height: 80 })).toBe(5)
+  expect(herdrBudget(255, { width: 400, height: 800 })).toBe(1)
+  // The budget never passes HERDR_MAX_PAGE_BYTES (a row of 16 MiB or more: 1 row).
+  for (const columns of [20, 80, 187, 255]) {
+    for (const width of [7, 16, 24, 32, 40, 60]) {
+      const px = { width, height: width * 2 }
+      const row = 4 * Math.round(columns * px.width) * px.height
+      if (row <= HERDR_MAX_PAGE_BYTES) expect(herdrBudget(columns, px) * row).toBeLessThanOrEqual(HERDR_MAX_PAGE_BYTES)
+    }
+  }
   // The cell width counts as sizing rounds it.
   expect(herdrBudget(100, { width: 15.5, height: 30 })).toBe(Math.floor((HERDR_MAX_PAGE_BYTES / (4 * 1550 * 30)) * 0.75))
 })

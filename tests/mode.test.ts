@@ -1,5 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+import { HERDR_CLIENT_SH, HERDR_TICK_SH } from '../hooks/register'
+import { S } from '../hooks/lib/state'
+
 // Claude Code's theme on auto, on a Mac in light mode: the OS read gives light.
 test('with the theme on auto, the mode comes from the OS appearance, read every 3 s', async ($, on) => {
   mock.store(on)
@@ -169,104 +172,170 @@ test('with the theme on auto, herdr in iTerm2 draws as the iTerm2 profile is', a
   expect(ran.text).toContain("terminal herdr (in iTerm2, from the server's start): ")
 })
 
-// herdr answers OSC 11 with the background of the terminal in front: it is
-// the first source of auto. A missed answer (Claude Code read it) keeps the
-// last one until 3 polls in a row miss; then the terminal's config counts.
-test('with the theme on auto, herdr takes the OSC 11 background first, and keeps it over 2 missed answers', async ($, on) => {
-  mock.store(on)
+// herdr in Ghostty (the server's variables), with pictures, the theme on
+// auto: `answers` are herdr's OSC 11 replies in turn ('' or none left: no
+// answer), `config` Ghostty's +show-config, `run` answers a command first.
+const herdrOk = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+function herdrWorld(on: any, o: {
+  answers?: string[]
+  config?: () => string
+  env?: Record<string, string>
+  stored?: Record<string, unknown>
+  setting?: string
+  run?: (argv: string[]) => ReturnType<typeof herdrOk> | undefined
+}) {
+  S.keyAt = Number.NEGATIVE_INFINITY
+  mock.store(on, o.stored)
   const clock = mock.clock(on)
-  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_RESOURCES_DIR: '/R', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
-  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
-  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-  const answers = ['\x1b]11;rgb:ffff/ffff/ffff\x1b\\', '', '', '', '\x1b]11;rgb:ffff/ffff/ffff\x07', '']
-  let probes = 0
+  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_RESOURCES_DIR: '/R', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1', ...o.env })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: o.setting ?? 'auto' }] as any }))
+  on('config.set', async ($: any, e: any) => ({ value: e.value }))
+  on('tool.call', { tool: 'AskUserQuestion' }, async () => ({ deny: 'dismissed' }))
+  on('prompt.edit', async ($: any, e: any) => ({ text: e.text + e.inputText, cursor: e.text.length + e.inputText.length }))
+  const w = { probes: 0, clock }
   on('process.run', async ($: any, e: any, next: any) => {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
-    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
-    if (argv[0] === 'perl' && cmd.includes('11;?')) return ok(answers[probes++] ?? '')
-    if (argv[0] === 'sh' && cmd.includes('+show-config')) return ok('background = #1d1f21\n')
-    if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
+    const own = o.run?.(argv)
+    if (own) return own
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return herdrOk('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'perl' && cmd.includes('11;?')) return herdrOk(o.answers?.[w.probes++] ?? '')
+    if (argv[0] === 'sh' && cmd.includes('+show-config')) return herdrOk(o.config?.() ?? 'background = #1d1f21\n')
+    if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return herdrOk('', 1)
     return next(e)
   })
-  const mode = async () => (await $.command.run({ command: 'iui', args: 'details' } as any)).text as string
-  const herdrLight = 'mode light (auto, from herdr: OSC 11 background of the terminal in front)'
-  expect(await mode()).toContain(herdrLight)
-  // Under herdr the poll runs each second, but the mode is read each 3 s.
-  await clock.advance(2000)
-  expect(probes).toBe(1)
-  // Two polls with no answer: the last answer stays.
-  await clock.advance(1000)
-  expect(await mode()).toContain(herdrLight)
-  await clock.advance(3000)
-  expect(await mode()).toContain(herdrLight)
-  // The third in a row: Ghostty's config (dark).
-  await clock.advance(3000)
-  expect(await mode()).toContain('mode dark (auto, from Ghostty: config background)')
-  await clock.advance(3000)
-  expect(await mode()).toContain(herdrLight)
-  expect(probes).toBe(5)
+  return w
+}
+const modeOf = async ($: any) => (await $.command.run({ command: 'iui', args: 'details' } as any)).text as string
+const typeKey = async ($: any) => ($ as any).prompt.edit({ origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'a' })
+const WHITE = '\x1b]11;rgb:ffff/ffff/ffff\x1b\\'
+const BLACK = '\x1b]11;rgb:0000/0000/0000\x07'
+const HERDR_LIGHT = 'mode light (auto, from herdr: OSC 11 background of the terminal in front)'
+
+// herdr answers OSC 11 with the background of the terminal in front: it is
+// the first source of auto. The probe reads the tty that Claude Code reads
+// (a key or a mouse report can go to it), so it runs at the start, not on
+// a timer: the answer stays while the terminal's config (or the OS) gives
+// the mode it gave then, and a change there wins.
+test('with the theme on auto, herdr asks OSC 11 at the start only, keeps the answer while the config stays, and follows a change of the config', async ($, on) => {
+  let config = 'background = #1d1f21\n'
+  const w = herdrWorld(on, { answers: [WHITE], config: () => config })
+  expect(await modeOf($)).toContain(HERDR_LIGHT)
+  expect(w.probes).toBe(1)
+  // No timed probe: 30 s of polls (each 1 s, the mode each 3 s) ask nothing.
+  await w.clock.advance(30000)
+  expect(w.probes).toBe(1)
+  expect(await modeOf($)).toContain(HERDR_LIGHT)
+  // Ghostty's config changes (a theme that follows the OS): it wins at the next mode read.
+  config = 'background = #fafafa\n'
+  await w.clock.advance(3000)
+  expect(await modeOf($)).toContain('mode light (auto, from Ghostty: config background)')
+  config = 'background = #1d1f21\n'
+  await w.clock.advance(3000)
+  expect(await modeOf($)).toContain('mode dark (auto, from Ghostty: config background)')
+  expect(w.probes).toBe(1)
 })
 
-// The OSC 11 probe reads the pane's tty, as Claude Code does: a key typed
-// then can go to the probe. A timed probe waits for 2 s with no key in the
-// prompt, and none runs while the mod is off.
-test('under herdr, no timed OSC 11 probe just after a key in the prompt, nor with the mod off', async ($, on) => {
-  mock.store(on)
-  const clock = mock.clock(on)
-  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_RESOURCES_DIR: '/R', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
-  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
-  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-  let probes = 0
-  on('process.run', async ($: any, e: any, next: any) => {
-    const argv: string[] = e.argv
-    const cmd = argv.join(' ')
-    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
-    if (argv[0] === 'perl' && cmd.includes('11;?')) return (probes++, ok('\x1b]11;rgb:ffff/ffff/ffff\x1b\\'))
-    if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
-    return next(e)
-  })
-  on('prompt.edit', async ($: any, e: any) => ({ text: e.text + e.inputText, cursor: e.text.length + e.inputText.length }))
-  await $.command.run({ command: 'iui', args: '' } as any)
-  expect(probes).toBe(1)
-  // A key each 500 ms for 6 s: no timed probe.
-  let text = ''
-  for (let i = 0; i < 12; i++) {
-    await ($ as any).prompt.edit({ origin: { kind: 'composer' }, text, cursor: text.length, start: text.length, end: text.length, inputText: 'a' })
-    text += 'a'
-    await clock.advance(500)
+// A missed answer (Claude Code read it): tried again at the next polls, 3 times at most.
+test('under herdr, a missed OSC 11 answer is asked at most 3 times, then the config counts', async ($, on) => {
+  const w = herdrWorld(on, { answers: [] })
+  expect(await modeOf($)).toContain('mode dark (auto, from Ghostty: config background)')
+  await w.clock.advance(10000)
+  expect(w.probes).toBe(3)
+  await w.clock.advance(20000)
+  expect(w.probes).toBe(3)
+  expect(await modeOf($)).toContain('mode dark (auto, from Ghostty: config background)')
+})
+
+// The start probe waits until 2 s pass with no key in the prompt box.
+test('under herdr, the start OSC 11 probe waits for 2 s with no key in the prompt', async ($, on) => {
+  try {
+    const w = herdrWorld(on, { answers: [WHITE] })
+    await typeKey($)
+    await w.clock.settle()
+    expect(await modeOf($)).toContain('mode dark (auto, from Ghostty: config background)')
+    expect(w.probes).toBe(0)
+    // A key each 500 ms for 6 s: no probe.
+    for (let i = 0; i < 12; i++) {
+      await typeKey($)
+      await w.clock.advance(500)
+    }
+    expect(w.probes).toBe(0)
+    // 2 s with no key: the next poll asks, once.
+    await w.clock.advance(3000)
+    expect(w.probes).toBe(1)
+    expect(await modeOf($)).toContain(HERDR_LIGHT)
+    await w.clock.advance(9000)
+    expect(w.probes).toBe(1)
+  } finally {
+    S.keyAt = Number.NEGATIVE_INFINITY
   }
-  expect(probes).toBe(1)
-  // 2 s with no key: the next poll asks.
-  await clock.advance(3000)
-  expect(probes).toBe(2)
-  // The mod off: none.
-  await $.command.run({ command: 'iui', args: 'off' } as any)
-  await clock.advance(9000)
-  expect(probes).toBe(2)
+})
+
+// Where the mod draws no herdr pictures, or is off, or the theme was not
+// auto at the start (/config is a dialog: a key there is not seen), no probe.
+for (const [why, o] of [
+  ['Claude Code draws no pictures (setup not done)', { env: { CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '' } }],
+  ['the mod is stored off', { stored: { enabled: false } }],
+] as const) {
+  test(`under herdr with the theme on auto, no OSC 11 probe when ${why}`, async ($, on) => {
+    try {
+      const w = herdrWorld(on, { answers: [WHITE], ...o })
+      await modeOf($)
+      await w.clock.advance(9000)
+      expect(w.probes).toBe(0)
+      expect(await modeOf($)).toContain('mode dark (auto, from Ghostty: config background)')
+    } finally {
+      S.isOff = false
+    }
+  })
+}
+
+test('under herdr, the theme set to auto later asks no OSC 11 (a dialog can be open), not even at the next polls', async ($, on) => {
+  const w = herdrWorld(on, { answers: [WHITE], setting: 'dark' })
+  await modeOf($)
+  await $.config.set({ key: 'theme', value: 'auto' } as any)
+  await w.clock.advance(9000)
+  expect(w.probes).toBe(0)
+  expect(await modeOf($)).toContain('mode dark (auto, from Ghostty: config background)')
+})
+
+// A new herdr client (another terminal in front) is asked again, once.
+test('under herdr, a new client in front is asked OSC 11 again, once', async ($, on) => {
+  const ghostty = 'pid 50390\natime 10\ntty ttys012\ncmd herdr\napp /Applications/Ghostty.app/Contents/MacOS/ghostty -e herdr\nenv\nherdr TERM=xterm-ghostty TERM_PROGRAM=ghostty GHOSTTY_BIN_DIR=/G\n'
+  const kitty = 'pid 54346\natime 20\ntty ttys021\ncmd herdr\napp /Applications/kitty.app/Contents/MacOS/kitty herdr\nenv\nherdr TERM=xterm-kitty KITTY_WINDOW_ID=1\n'
+  let front = 'com.mitchellh.ghostty'
+  const w = herdrWorld(on, {
+    answers: [BLACK, WHITE],
+    run: argv =>
+      argv[2] === HERDR_CLIENT_SH ? herdrOk(`front ${front}\n${ghostty}${kitty}`)
+      : argv[2] === HERDR_TICK_SH ? herdrOk(`front ${front}\n${argv.slice(5).map(tty => `atime ${tty} 10\n`).join('')}`)
+      : undefined,
+  })
+  expect(await modeOf($)).toContain('mode dark (auto, from herdr: OSC 11 background of the terminal in front)')
+  await w.clock.advance(5000)
+  expect(w.probes).toBe(1)
+  front = 'net.kovidgoyal.kitty'
+  await w.clock.advance(1000)
+  expect(w.probes).toBe(2)
+  expect(await modeOf($)).toContain(HERDR_LIGHT)
+  await w.clock.advance(9000)
+  expect(w.probes).toBe(2)
 })
 
 // herdr --remote: the pane is over ssh (the mod runs on the remote
-// computer), but herdr's OSC 11 answer is still the user's terminal.
-test('with the theme on auto, a remote herdr pane takes the OSC 11 background first, then COLORFGBG', async ($, on) => {
-  mock.store(on)
-  const clock = mock.clock(on)
-  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', SSH_CONNECTION: '1 2 3 4', COLORFGBG: '0;15', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
-  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
-  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-  const answers = ['\x1b]11;rgb:0000/0000/0000\x1b\\']
-  let probes = 0
-  on('process.run', async ($: any, e: any, next: any) => {
-    const argv: string[] = e.argv
-    const cmd = argv.join(' ')
-    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nLinux\n')
-    if (argv[0] === 'perl' && cmd.includes('11;?')) return ok(answers[probes++] ?? '')
-    return next(e)
+// computer), but herdr's OSC 11 answer is still the user's terminal; it
+// stays while COLORFGBG (the only other source there) does not change.
+test('with the theme on auto, a remote herdr pane takes the OSC 11 background at the start, before COLORFGBG', async ($, on) => {
+  const w = herdrWorld(on, {
+    answers: [BLACK],
+    env: { GHOSTTY_RESOURCES_DIR: '', SSH_CONNECTION: '1 2 3 4', COLORFGBG: '0;15' },
+    run: argv => (argv[0] === 'sh' && /cc-intelligent-ui-/.test(argv.join(' ')) ? herdrOk('/tmp/mdp\nLinux\n') : undefined),
   })
-  const mode = async () => (await $.command.run({ command: 'iui', args: 'details' } as any)).text as string
-  expect(await mode()).toContain('mode dark (auto, from herdr: OSC 11 background of the terminal in front)')
-  await clock.advance(9000)
-  expect(await mode()).toContain('mode light (auto, from COLORFGBG)')
+  expect(await modeOf($)).toContain('mode dark (auto, from herdr: OSC 11 background of the terminal in front)')
+  await w.clock.advance(9000)
+  expect(await modeOf($)).toContain('mode dark (auto, from herdr: OSC 11 background of the terminal in front)')
+  expect(w.probes).toBe(1)
 })
 
 // herdr with no hint of its terminal: as before, COLORFGBG, then the OS.

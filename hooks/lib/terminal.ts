@@ -231,8 +231,9 @@ export function herdrTickOf(stdout: string): HerdrTick {
 // tick's tty times, and the pick among them (null: no client). Null when a
 // full scan must run: none yet (`ageMs` null) or HERDR_SCAN_MS since the
 // last, the tick failed, a client's tty is gone, the app in front is a
-// terminal with no client (and not the one in front at the scan), or the
-// pick is another client than `was`.
+// terminal with no client (and not the one in front at the scan; with no
+// client at all, only the scan each HERDR_SCAN_MS), or the pick is another
+// client than `was`.
 export function herdrTickPick(o: { clients: readonly HerdrClient[]; tick: HerdrTick | null; was: HerdrClient | null; scanFront: string | null; ageMs: number | null }): { clients: HerdrClient[]; pick: HerdrPick | null } | null {
   const { tick } = o
   if (!tick || o.ageMs === null || o.ageMs >= HERDR_SCAN_MS) return null
@@ -243,8 +244,8 @@ export function herdrTickPick(o: { clients: readonly HerdrClient[]; tick: HerdrT
     clients.push({ ...c, atime })
   }
   const front = tick.front === null ? null : frontKindOf(tick.front)
-  if (front && tick.front !== o.scanFront && !clients.some(c => clientFrontKindOf(c) === front)) return null
   if (!clients.length) return { clients, pick: null }
+  if (front && tick.front !== o.scanFront && !clients.some(c => clientFrontKindOf(c) === front)) return null
   const pick = pickHerdrClient(clients, front, o.was)
   return pick && pick.client.pid === o.was?.pid ? { clients, pick } : null
 }
@@ -312,9 +313,12 @@ export const inlineBudget = (px: Cell) => Math.max(20, Math.min(SEGMENT_ROWS, Ma
 export const HERDR_MAX_PAGE_BYTES = 16 * 1024 * 1024
 // Under herdr, a segment's budget in rows so that its page (the columns'
 // width in device pixels, as sizing makes it) stays under HERDR_MAX_PAGE_BYTES
-// (with room for the rough row count).
-export const herdrBudget = (columns: number, px: Cell) =>
-  Math.max(20, Math.min(SEGMENT_ROWS, Math.floor((HERDR_MAX_PAGE_BYTES / (4 * Math.round(columns * px.width) * px.height)) * 0.75)))
+// (with room for the rough row count): at least 20 rows, but never more
+// rows than fit (1 at least).
+export const herdrBudget = (columns: number, px: Cell) => {
+  const fit = HERDR_MAX_PAGE_BYTES / (4 * Math.round(columns * px.width) * px.height)
+  return Math.max(1, Math.min(Math.floor(fit), Math.max(20, Math.min(SEGMENT_ROWS, Math.floor(fit * 0.75)))))
+}
 // A segment's budget in rows: the smaller of the ssh and herdr ones that apply.
 export const segmentBudget = (env: { inline: boolean; herdr?: boolean }, columns: number, px: Cell) =>
   Math.min(env.inline ? inlineBudget(px) : SEGMENT_ROWS, env.herdr ? herdrBudget(columns, px) : SEGMENT_ROWS)

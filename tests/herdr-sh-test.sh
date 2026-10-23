@@ -3,9 +3,10 @@
 # dash and bash with a fake ps, stat, uname, lsof and lsappinfo: it finds
 # this pane's server above the shell, keeps the clients of this user with a
 # tty, keeps with two servers only the clients of this one (by lsof),
-# prints on macOS the app in front (`front`, by lsappinfo), then each
-# client's lines (its tty's access time, with a fraction on macOS), its
-# terminal app and its variables; nothing when no client is found. Then
+# prints on macOS the app in front (`front`, by lsappinfo; also with no
+# client), then each client's lines (its tty's access time, with a fraction
+# on macOS), its terminal app and of its variables only the terminal's
+# (CLIENT_NAMES: no other variable leaves the shell). Then
 # the light check (HERDR_TICK_SH) with a fake stat and lsappinfo: the app
 # in front on macOS, and the access time of each tty asked that is there.
 # Usage: sh tests/herdr-sh-test.sh   (exit 0 when all pass)
@@ -86,8 +87,11 @@ cat > "$F/stat" <<EOF
 16/24 500 /dev/ttys024
 16/25 400 /dev/ttys025
 EOF
-echo '/Users/u/.local/bin/herdr TERM=xterm-kitty KITTY_WINDOW_ID=1' > "$F/env-4999201"
-echo 'herdr TERM=xterm-ghostty TERM_PROGRAM=ghostty' > "$F/env-4999102"
+# Other variables (a token, a value with spaces) are cut out in the shell.
+echo '/Users/u/.local/bin/herdr TERM=xterm-kitty API_TOKEN=s3cret KITTY_WINDOW_ID=1 HOME=/Users/u' > "$F/env-4999201"
+echo 'herdr SECRET=a b TERM=xterm-ghostty ITERM_PROFILE=My Profile TERM_PROGRAM=ghostty PATH=/bin:/usr/bin' > "$F/env-4999102"
+# A line that does not start with the command (as envOfText: the first word is cut).
+echo 'herdr-x --y TERM=xterm-256color TOKEN=z' > "$F/env-4999205"
 # The second server's socket peer is kitty's; this server's is Ghostty's.
 cat > "$F/lsof" <<EOF
 COMMAND   PID      USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
@@ -117,7 +121,9 @@ for s in $shells; do
   # Ghostty: its app is above login (which has a tty); its time keeps the fraction.
   [ "$(block "$out" 4999102 | grep '^app ')" = "app /Applications/Ghostty.app/Contents/MacOS/ghostty -e /Users/u/.local/bin/herdr" ] && ok || bad "$s: Ghostty's app ($out)"
   [ "$(block "$out" 4999102 | grep '^atime ')" = "atime 1000.25" ] && ok || bad "$s: Ghostty's time ($out)"
-  [ "$(block "$out" 4999102 | sed -n 7p)" = "herdr TERM=xterm-ghostty TERM_PROGRAM=ghostty" ] && ok || bad "$s: Ghostty's variables ($out)"
+  [ "$(block "$out" 4999102 | sed -n 7p)" = "herdr TERM=xterm-ghostty ITERM_PROFILE=My Profile TERM_PROGRAM=ghostty" ] && ok || bad "$s: Ghostty's variables ($out)"
+  [ "$(block "$out" 4999205 | sed -n 7p)" = "herdr --session work TERM=xterm-256color" ] && ok || bad "$s: the named session's variables ($out)"
+  case $out in *s3cret*|*SECRET*|*TOKEN*|*PATH=*|*HOME=*) bad "$s: other variables printed ($out)" ;; *) ok ;; esac
   # No app in front known: no front line.
   [ -z "$(echo "$out" | grep '^front')" ] && ok || bad "$s: a front line with no app in front ($out)"
   # The app in front: its bundle id first.
@@ -140,15 +146,18 @@ for s in $shells; do
   out=$(run)
   [ "$(pids "$out")" = "4999102 4999201 4999205 4999206 " ] && ok || bad "$s: two servers, no peers, not all clients ($out)"
   mv "$F/lsof.keep" "$F/lsof"
-  # Two servers and this pane's not found: nothing.
+  # Two servers and this pane's not found: no client, only the app in front.
   noself=1; front=com.mitchellh.ghostty; out=$(run); noself=; front=
-  [ -z "$out" ] && ok || bad "$s: two servers, none above the shell, but output ($out)"
+  [ "$out" = "front com.mitchellh.ghostty" ] && ok || bad "$s: two servers, none above the shell, but clients ($out)"
   sed '$d' "$F/table" > "$F/table2" && mv "$F/table2" "$F/table"
   rm -f "$bin/lsof"
-  # No client (the only one left has no tty): nothing, exit 0.
+  # No client (the only one left has no tty, a detached pane): the app in front only, exit 0.
   grep -v -e ' 16/2[1-5] ' -e ' 16/12 herdr' "$F/table" > "$F/table.none"
   out=$(cp "$F/table" "$F/table.keep" && cp "$F/table.none" "$F/table" && front=com.mitchellh.ghostty run; echo "exit $?"; cp "$F/table.keep" "$F/table")
-  [ "$out" = "exit 0" ] && ok || bad "$s: no client, but output ($out)"
+  [ "$out" = "front com.mitchellh.ghostty
+exit 0" ] && ok || bad "$s: no client, not the app in front only ($out)"
+  out=$(cp "$F/table" "$F/table.keep" && cp "$F/table.none" "$F/table" && run; echo "exit $?"; cp "$F/table.keep" "$F/table")
+  [ "$out" = "exit 0" ] && ok || bad "$s: no client and no app in front, but output ($out)"
   # Linux: tty names (pts/N), stat -c, no tty is ?, no front line (lsappinfo is not asked).
   sed -e 's/ 16\/\([0-9]*\) / pts\/\1 /' -e 's/ ?? / ? /' "$F/table" > "$tmp/linux-table"
   L=$tmp/linux; mkdir -p "$L"; cp "$tmp/linux-table" "$L/table"; cp "$F"/env-* "$L/"
@@ -157,6 +166,13 @@ for s in $shells; do
   [ "$(pids "$out")" = "4999102 4999201 4999205 4999206 " ] && ok || bad "$s: Linux, not the four clients ($out)"
   [ "$(block "$out" 4999201 | sed -n 1,3p | tr '\n' '|')" = "pid 4999201|atime 2000|tty pts/21|" ] && ok || bad "$s: Linux, kitty's lines ($out)"
   [ -z "$(echo "$out" | grep '^front')" ] && ok || bad "$s: Linux, a front line ($out)"
+  # Linux with /proc/<pid>/environ (here under $L): only the terminal's variables, NUL-separated.
+  mkdir -p "$L/proc/4999201"
+  printf 'TERM=xterm-kitty\0API_TOKEN=s3cret\0KITTY_WINDOW_ID=1\0TERM_X=1\0HOME=/home/u\0' > "$L/proc/4999201/environ"
+  sed "s|/proc/|$L/proc/|g" "$tmp/client.sh" > "$tmp/client-proc.sh"
+  out=$(PATH=$bin FAKE=$L FAKE_OS=Linux NOTTY=? NOSELF= $s "$tmp/client-proc.sh" | tr '\0' '|')
+  [ "$(block "$out" 4999201 | sed -n 7p)" = "TERM=xterm-kitty|KITTY_WINDOW_ID=1|" ] && ok || bad "$s: Linux, kitty's /proc variables ($out)"
+  case $out in *s3cret*|*HOME=*|*TERM_X*) bad "$s: Linux, other variables printed ($out)" ;; *) ok ;; esac
 done
 
 # The light check: its own stat, which prints the format for each path in

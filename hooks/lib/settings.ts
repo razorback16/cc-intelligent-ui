@@ -83,9 +83,9 @@ export const HOST_CHECK_MS = 2000
 // (the process list: new or gone clients).
 export const HERDR_POLL_MS = 1000
 export const HERDR_SCAN_MS = 10000
-// Under herdr the mode read asks the pane's tty (OSC 11), which Claude Code
-// reads too: a key typed then can go to the probe. So a poll does not ask
-// within this time of a key in the prompt box.
+// Under herdr the OSC 11 probe (at the start and for a new client) reads the
+// pane's tty, which Claude Code reads too: a key typed then can go to the
+// probe. So it does not run within this time of a key in the prompt box.
 export const OSC11_QUIET_MS = 2000
 // Copy: how often the watcher reads the clipboard's change count (macOS;
 // one call in the watcher, no process), and the word positions of how
