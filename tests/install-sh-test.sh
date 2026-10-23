@@ -7,11 +7,13 @@
 # is kept; a missing Typst is downloaded and installed only with the correct
 # SHA-256; the marketplace and the mod are added, or updated on a second run;
 # a marketplace from another source (fork, ref, folder) is added again from
-# GitHub, a disabled mod stays disabled, another user copy is uninstalled,
-# project copies are only shown, and a failed update is not called newest;
-# settings.json gets extraKnownMarketplaces.razorback16.autoUpdate = true with
-# all other bytes kept, a backup only when it changed, and no change when it
-# is not valid JSON or set already; with iTerm2 or herdr, the mod's setup block
+# GitHub (with remove --scope user only when the user settings declare it), a
+# disabled mod stays disabled, another user copy is uninstalled (not one with
+# no marketplace), project copies are only shown, and a failed update is not
+# called newest; settings.json gets extraKnownMarketplaces.razorback16.autoUpdate
+# = true with all other bytes kept, a backup only when it changed, and no change
+# when it is not valid JSON, set already, turned off by you, read-only or a hard
+# link; a perl locale warning is not a result; with iTerm2 or herdr, the mod's setup block
 # (the one of hooks/lib/setup.ts, or of IUI_SETUP_TS) in the start file of the
 # login shell, as the mod writes it; the IUI_NO_* options; a cut download runs
 # nothing; shellcheck when it is installed.
@@ -52,6 +54,9 @@ setp() {
 }
 # getp ID SCOPE FIELD
 getp() { awk -F"$T" -v i="$1" -v s="$2" -v f="$3" '$1 == i && $2 == s { print $f }' "$P"; }
+# The user settings declare razorback16.
+cfg=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json
+declared() { grep -q '"razorback16"' "$cfg" 2> /dev/null; }
 case "$*" in
   --version) echo "${FAKE_CLAUDE_VERSION:-2.1.307} (Claude Code)" ;;
   'plugin marketplace list --json')
@@ -59,8 +64,9 @@ case "$*" in
     if [ -f "$st/mkt" ]; then printf ',\n  %s' "$(cat "$st/mkt")"; fi
     printf '\n]\n' ;;
   'plugin marketplace add razorback16/cc-intelligent-ui')
-    if [ -f "$st/mkt" ] && [ "$(cat "$st/mkt")" != "$official" ]; then
-      echo 'Failed to add marketplace: Cannot add marketplace "razorback16": its source does not match' >&2
+    # Another source: refused when the user settings declare it, else changed (2.1.307).
+    if [ -f "$st/mkt" ] && [ "$(cat "$st/mkt")" != "$official" ] && declared; then
+      echo 'Failed to add marketplace: Cannot add marketplace "razorback16": its source does not match its extraKnownMarketplaces entry' >&2
       exit 1
     fi
     [ -z "${FAKE_ADD_FAIL:-}" ] || exit 1
@@ -71,10 +77,16 @@ case "$*" in
     echo 'Successfully updated marketplace: razorback16' ;;
   'plugin marketplace remove razorback16 --scope user')
     [ -z "${FAKE_REMOVE_FAIL:-}" ] || { echo 'Failed to remove marketplace' >&2; exit 1; }
-    rm -f "$st/mkt"
+    if ! declared; then
+      echo "Failed to remove marketplace: Marketplace 'razorback16' is not declared in user settings. Omit --scope to remove it from all scopes." >&2
+      exit 1
+    fi
+    # 2.1.307: the entry in the user settings goes; the marketplace stays known, the mod installed.
+    perl -0pi -e 's/,?\s*"razorback16"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}//' "$cfg"
     echo 'Successfully removed marketplace: razorback16 (from user settings)'
-    # Claude Code 2.1.307 uninstalls the plugins of the marketplace (in all scopes).
-    if [ -z "${FAKE_REMOVE_KEEPS:-}" ]; then
+    # It can also uninstall the plugins of the marketplace (in all scopes): VM runs saw both.
+    if [ -n "${FAKE_REMOVE_UNINSTALLS:-}" ]; then
+      rm -f "$st/mkt"
       grep -v "^[^$T]*@razorback16$T" "$P" > "$P.new"
       mv "$P.new" "$P"
       echo 'Also uninstalled 1 plugin from this marketplace:'
@@ -102,6 +114,9 @@ case "$*" in
     fi ;;
   "plugin disable $ours --scope user")
     setp "$ours" user "$(getp "$ours" user 3)" false ;;
+  'plugin uninstall '*'@skills-dir --scope user' | 'plugin uninstall '*'@inline --scope user')
+    echo "Failed to uninstall plugin \"$3\": it has no marketplace backing; it cannot be uninstalled." >&2
+    exit 1 ;;
   'plugin uninstall '*' --scope user')
     grep -v "^$3${T}user$T" "$P" > "$P.new"
     mv "$P.new" "$P" ;;
@@ -159,8 +174,10 @@ perl -pe 's#^TYPST_DIRS=.*#TYPST_DIRS='"'$dirs'"'#' "$script" > "$tmp/install-ba
 perl -pe "s/$real_sum/$fake_sum/" "$tmp/install-badsum.sh" > "$tmp/install.sh"
 grep -q "^TYPST_DIRS='$tmp/sys/a " "$tmp/install.sh" && ok || bad "the test could not set TYPST_DIRS"
 
+# A typst that the installer finds outside the sandbox (also in a login shell's PATH).
 typst_on_sys=
 PATH=$sys command -v typst > /dev/null 2>&1 && typst_on_sys=1
+env -i HOME="$tmp" PATH="$sys" sh -lc 'command -v typst' < /dev/null 2> /dev/null | grep -q '^/' && typst_on_sys=1
 
 # run NAME [VAR=value ...]: runs the installer with HOME $tmp/NAME/home; the
 # output in $tmp/NAME/out, the exit code in $rc. SCRIPT and BIN change the
@@ -235,6 +252,15 @@ mkdir -p "$tmp/cargo/home"
 mktypst "$tmp/cargo/home/.cargo/bin" 0.15.0
 run cargo
 [ "$rc" = 0 ] && out 'Typst 0.15.0 is installed: ~/.cargo/bin/typst' && no_downloads && ok || bad "Typst in ~/.cargo/bin: exit $rc, or a download"
+
+# A login shell's PATH comes first, as for the mod (macOS puts /usr/local/bin
+# first there): its Typst 0.15.2 is used, not the 0.13.1 of this PATH.
+mktypst "$tmp/login-new" 0.15.2
+mktypst "$tmp/login-old" 0.13.1
+mkdir -p "$tmp/login/home"
+printf 'PATH=%s:$PATH\nexport PATH\n' "$tmp/login-new" > "$tmp/login/home/.profile"
+XPATH=$tmp/login-old run login
+[ "$rc" = 0 ] && out "Typst 0.15.2 is installed: $tmp/login-new/typst" && no_downloads && ok || { bad "a Typst in the login shell's PATH: not used"; show; }
 
 if [ -n "$typst_on_sys" ] || [ -z "$can_xz" ]; then
   echo "install-sh-test: the Typst download skipped (a typst in $sys, or tar can not make .tar.xz)"
@@ -319,6 +345,14 @@ mkt_official='{"name": "razorback16", "source": "github", "repo": "razorback16/c
 plugin() { awk -F"$T" -v i="$1" -v s="$2" '$1 == i && $2 == s { print $3 " " $4 }' "$d/state/plugins"; }
 # Line numbers in the claude log: the order of the commands.
 at() { grep -nx -- "$1" "$d/state/claude.log" | head -n 1 | cut -d: -f1; }
+# old_entry NAME [AUTO]: the user settings declare razorback16 from another
+# source (as `claude plugin marketplace add` of it did); AUTO: its autoUpdate.
+old_entry() {
+  mkdir -p "$tmp/$1/home/.claude"
+  printf '{\n  "extraKnownMarketplaces": {\n    "razorback16": {\n      "source": {"source": "github", "repo": "someone/cc-intelligent-ui"}%s\n    }\n  }\n}\n' \
+    "${2:+,
+      \"autoUpdate\": $2}" > "$tmp/$1/home/.claude/settings.json"
+}
 
 seed disabled '' "$ours${T}project${T}0.1.0${T}true${T}/work/p"
 run disabled IUI_NO_TYPST=1 FAKE_ENABLED=false
@@ -343,13 +377,15 @@ for u in 'https://github.com/razorback16/cc-intelligent-ui.git' 'https://GitHub.
   grep -q 'marketplace remove' "$d/state/claude.log" && bad "git URL $u: the marketplace was removed" || ok
 done
 
-# Another source: removed, added from GitHub, the mod installed again.
+# Another source, declared in the user settings: its entry removed, added from
+# GitHub, the mod (kept by Claude Code) updated.
 # repointed NAME MKT UNDO-SOURCE DESCRIPTION
 repointed() {
   seed "$1" "$2" "$ours${T}user${T}0.3.0${T}true"
+  old_entry "$1"
   run "$1" IUI_NO_TYPST=1
   [ "$rc" = 0 ] && ok || { bad "$1: exit $rc"; show; }
-  log 'plugin marketplace remove razorback16 --scope user' && log 'plugin marketplace add razorback16/cc-intelligent-ui' && log "plugin install $ours --scope user" && ok || bad "$1: not removed, added and installed: $(tr '\n' ';' < "$d/state/claude.log")"
+  log 'plugin marketplace remove razorback16 --scope user' && log 'plugin marketplace add razorback16/cc-intelligent-ui' && log "plugin update $ours --scope user" && ok || bad "$1: not removed, added and updated: $(tr '\n' ';' < "$d/state/claude.log")"
   [ "$(at 'plugin marketplace remove razorback16 --scope user')" -lt "$(at 'plugin marketplace add razorback16/cc-intelligent-ui')" ] && ok || bad "$1: the order of remove and add"
   log 'plugin marketplace update razorback16' && bad "$1: an update from the old source" || ok
   [ "$(plugin "$ours" user)" = '0.3.3 true' ] && ok || bad "$1: the mod is $(plugin "$ours" user), not 0.3.3"
@@ -358,6 +394,8 @@ repointed() {
   out "before: 0.3.0 from $4" && ok || bad "$1: the summary does not say the old version and source"
   out 'the newest version was installed already' && bad "$1: the summary says newest" || ok
   out 'Kept: your /iui settings' && ok || bad "$1: no words on the settings kept"
+  out 'Claude Code can uninstall the mod with the old marketplace; if it does, the installer installs it again' && ok || bad "$1: no honest words on the uninstall"
+  grep -q '"repo": "razorback16/cc-intelligent-ui"' "$d/home/.claude/settings.json" && ! grep -q someone "$d/home/.claude/settings.json" && grep -q '"autoUpdate": true' "$d/home/.claude/settings.json" && ok || bad "$1: settings.json: $(cat "$d/home/.claude/settings.json")"
 }
 repointed fork '{"name": "razorback16", "source": "github", "repo": "someone/cc-intelligent-ui", "installLocation": "/fake/m"}' \
   'someone/cc-intelligent-ui' 'the GitHub repository someone/cc-intelligent-ui'
@@ -377,33 +415,60 @@ run folder-newer IUI_NO_TYPST=1
 [ "$rc" = 0 ] && out 'from the old source (0.4.0) is newer than the version on GitHub (0.3.3)' && out 'then claude plugin marketplace add /work/iui' && ok || { bad "a newer old source: no warning"; show; }
 out 'is newer than the version on GitHub' && [ "$(grep -c 'is newer than' "$tmp/fork/out")" = 0 ] && ok || bad "an older old source: a newer warning"
 
-# A disabled mod stays disabled after the new marketplace.
+# Not declared in the user settings (an older Claude Code, or `remove --scope
+# user` before): `remove --scope user` would fail, so add changes the source.
+seed undeclared '{"name": "razorback16", "source": "github", "repo": "razorback16/cc-intelligent-ui", "ref": "main", "installLocation": "/fake/m"}' "$ours${T}user${T}0.3.0${T}true"
+mkdir -p "$tmp/undeclared/home/.claude"
+printf '{\n  "enabledPlugins": {\n    "%s": true\n  }\n}\n' "$ours" > "$tmp/undeclared/home/.claude/settings.json"
+run undeclared IUI_NO_TYPST=1
+[ "$rc" = 0 ] && log 'plugin marketplace add razorback16/cc-intelligent-ui' && [ "$(plugin "$ours" user)" = '0.3.3 true' ] && ok || { bad "undeclared: exit $rc, $(plugin "$ours" user)"; show; }
+grep -q 'marketplace remove' "$d/state/claude.log" && bad "undeclared: remove --scope user was run" || ok
+out 'do not declare the razorback16 marketplace' && out 'before: 0.3.0 from the GitHub repository razorback16/cc-intelligent-ui (ref main)' && ok || { bad "undeclared: no words"; show; }
+seed undeclared-add-fails '{"name": "razorback16", "source": "directory", "path": "/work/iui"}' "$ours${T}user${T}0.3.0${T}true"
+run undeclared-add-fails IUI_NO_TYPST=1 FAKE_ADD_FAIL=1
+[ "$rc" = 1 ] && out 'The old marketplace was not changed' && ok || { bad "undeclared, add fails: exit $rc"; show; }
+
+# Auto-update that you turned off stays off for the new source.
+seed repoint-off '{"name": "razorback16", "source": "github", "repo": "someone/cc-intelligent-ui"}' "$ours${T}user${T}0.3.0${T}true"
+old_entry repoint-off false
+run repoint-off IUI_NO_TYPST=1
+[ "$rc" = 0 ] && log 'plugin marketplace remove razorback16 --scope user' && ok || { bad "re-point, auto-update off: exit $rc"; show; }
+grep -q '"repo": "razorback16/cc-intelligent-ui"' "$d/home/.claude/settings.json" && grep -q '"autoUpdate": false' "$d/home/.claude/settings.json" && ! grep -q '"autoUpdate": true' "$d/home/.claude/settings.json" && ok || bad "re-point, auto-update off: settings.json: $(cat "$d/home/.claude/settings.json")"
+out 'Auto-update stays off for the new source' && out 'off (your choice; kept for the new source)' && out 'select Enable auto-update' && ok || { bad "re-point, auto-update off: no words"; show; }
+out 'Disable auto-update' && bad "re-point, auto-update off: an undo line for auto-update" || ok
+
+# A disabled mod stays disabled after the new marketplace (Claude Code uninstalled it).
 seed repoint-disabled '{"name": "razorback16", "source": "github", "repo": "someone/cc-intelligent-ui"}' "$ours${T}user${T}0.3.0${T}false"
-run repoint-disabled IUI_NO_TYPST=1
+old_entry repoint-disabled
+run repoint-disabled IUI_NO_TYPST=1 FAKE_REMOVE_UNINSTALLS=1
 [ "$rc" = 0 ] && log "plugin disable $ours --scope user" && [ "$(plugin "$ours" user)" = '0.3.3 false' ] && ok || { bad "re-point, disabled: exit $rc, $(plugin "$ours" user)"; show; }
 [ "$(at "plugin install $ours --scope user")" -lt "$(at "plugin disable $ours --scope user")" ] && ok || bad "re-point, disabled: disabled before the install"
 out "claude plugin enable $ours" && ok || bad "re-point, disabled: no words"
 
-# remove does not uninstall the mod: it is updated, not installed again. A
+# remove does not uninstall the mod (2.1.307): it is updated, not installed again. A
 # copy of ours in a project that Claude Code removed with the marketplace, or not.
 seed remove-keeps '{"name": "razorback16", "source": "github", "repo": "someone/cc-intelligent-ui"}' "$ours${T}user${T}0.3.0${T}true" "$ours${T}project${T}0.3.0${T}true${T}/work/proj"
-run remove-keeps IUI_NO_TYPST=1 FAKE_REMOVE_KEEPS=1
+old_entry remove-keeps
+run remove-keeps IUI_NO_TYPST=1
 [ "$rc" = 0 ] && log "plugin update $ours --scope user" && [ "$(plugin "$ours" user)" = '0.3.3 true' ] && ok || { bad "remove keeps the mod: exit $rc, $(plugin "$ours" user)"; show; }
 log "plugin install $ours --scope user" && bad "remove keeps the mod: installed again" || ok
 out "before: 0.3.0 from" && ok || bad "remove keeps the mod: summary"
 out "project scope for /work/proj: $ours 0.3.0" && out "cd /work/proj && claude plugin uninstall $ours --scope project" && ok || { bad "remove keeps the mod: no project warning"; show; }
 seed remove-uninstalls '{"name": "razorback16", "source": "github", "repo": "someone/cc-intelligent-ui"}' "$ours${T}user${T}0.3.0${T}true" "$ours${T}project${T}0.3.0${T}true${T}/work/proj"
-run remove-uninstalls IUI_NO_TYPST=1
+old_entry remove-uninstalls
+run remove-uninstalls IUI_NO_TYPST=1 FAKE_REMOVE_UNINSTALLS=1
 [ "$rc" = 0 ] && log "plugin install $ours --scope user" && [ "$(plugin "$ours" user)" = '0.3.3 true' ] && ok || { bad "remove uninstalls: exit $rc"; show; }
 out "removed the copy of the mod in project scope for /work/proj" && out "cd /work/proj && claude plugin install $ours --scope project" && ok || { bad "remove uninstalls: no words on the project copy"; show; }
 
 # The remove fails: stop, nothing added.
 seed remove-fails '{"name": "razorback16", "source": "github", "repo": "someone/cc-intelligent-ui"}' "$ours${T}user${T}0.3.0${T}true"
+old_entry remove-fails
 run remove-fails IUI_NO_TYPST=1 FAKE_REMOVE_FAIL=1
 [ "$rc" = 1 ] && out 'could not remove the marketplace razorback16' && ok || bad "remove fails: exit $rc"
 grep -q 'marketplace add\|plugin install\|plugin update' "$d/state/claude.log" && bad "remove fails: more was run" || ok
 # The add fails after the remove: how to add the old one back.
 seed add-fails '{"name": "razorback16", "source": "github", "repo": "someone/cc-intelligent-ui"}' "$ours${T}user${T}0.3.0${T}true"
+old_entry add-fails
 run add-fails IUI_NO_TYPST=1 FAKE_ADD_FAIL=1
 [ "$rc" = 1 ] && out 'To add the old one back: claude plugin marketplace add someone/cc-intelligent-ui' && ok || { bad "add fails: exit $rc"; show; }
 
@@ -426,6 +491,25 @@ run project-copies IUI_NO_TYPST=1
 grep -q 'uninstall' "$d/state/claude.log" && bad "project copies: a copy was uninstalled" || ok
 [ "$(plugin "$ours" project)" = '0.1.0 true' ] && [ "$(plugin cc-intelligent-ui@other-mkt local)" = '0.2.0 true' ] && ok || bad "project copies: changed"
 out "cd /work/proj && claude plugin uninstall $ours --scope project" && out "cd '/work/my b' && claude plugin uninstall cc-intelligent-ui@other-mkt --scope local" && ok || { bad "project copies: no warnings"; show; }
+
+# A folder name with letters that are not ASCII shows as it is (also from a
+# \u escape); a control byte (ESC) does not.
+seed utf8-folder '{"name": "razorback16", "source": "directory", "path": "/work/caf\u00e9 \u001b[31m'"$(printf '\303\251t\303\251')"'"}' "$ours${T}user${T}0.3.0${T}true"
+run utf8-folder IUI_NO_TYPST=1
+[ "$rc" = 0 ] && grep -qF "$(printf 'comes from the local folder /work/caf\303\251 [31m\303\251t\303\251, not')" "$d/out" && grep -qF "$(printf "claude plugin marketplace add '/work/caf\303\251 [31m\303\251t\303\251'")" "$d/out" && ok || { bad "a folder name that is not ASCII: not shown as it is"; show; }
+grep -q "$(printf '\033')" "$d/out" && bad "a folder name: a control byte came through" || ok
+# Not in the ASCII check below.
+mv "$d/out" "$d/out-utf8"
+
+# A copy with no marketplace (a skills folder, --plugin-dir): Claude Code can
+# not uninstall it, so it is not tried; a warning with its folder.
+seed skills-dir "$mkt_official" "$ours${T}user${T}0.3.2${T}true" "cc-intelligent-ui@skills-dir${T}user${T}0.3.1${T}true" "cc-intelligent-ui@inline${T}session${T}0.3.1${T}true"
+run skills-dir IUI_NO_TYPST=1
+[ "$rc" = 0 ] && ok || { bad "a skills folder copy: exit $rc"; show; }
+grep -q 'uninstall' "$d/state/claude.log" && bad "a skills folder copy: uninstall was run" || ok
+out 'in a skills folder of Claude Code (/fake/cache/cc-intelligent-ui@skills-dir): cc-intelligent-ui@skills-dir 0.3.1' && out 'delete its folder' && ok || { bad "a skills folder copy: no warning with the folder"; show; }
+out 'loaded with --plugin-dir from /fake/cache/cc-intelligent-ui@inline' && ok || { bad "a --plugin-dir copy: no warning"; show; }
+out 'session scope' && bad "a --plugin-dir copy: shown as a project copy" || ok
 
 # A failed update: an honest summary and exit 1.
 seed update-fails "$mkt_official" "$ours${T}user${T}0.3.2${T}true"
@@ -479,8 +563,14 @@ setting other-marketplace \
   '{\n  "extraKnownMarketplaces": {\n    "other": {\n      "source": {\n        "source": "github",\n        "repo": "o/r"\n      }\n    }\n  }\n}\n' \
   '{\n  "extraKnownMarketplaces": {\n    "other": {\n      "source": {\n        "source": "github",\n        "repo": "o/r"\n      }\n    },\n    "razorback16": {\n      "source": {\n        "source": "github",\n        "repo": "razorback16/cc-intelligent-ui"\n      },\n      "autoUpdate": true\n    }\n  }\n}\n'
 
+# Turned off by you (Disable auto-update): kept, with how to turn it on.
 setting turned-off \
   '{\n  "extraKnownMarketplaces": {\n    "razorback16": {\n      "autoUpdate": false,\n      "source": {"source": "github", "repo": "razorback16/cc-intelligent-ui"}\n    }\n  }\n}\n' \
+  '{\n  "extraKnownMarketplaces": {\n    "razorback16": {\n      "autoUpdate": false,\n      "source": {"source": "github", "repo": "razorback16/cc-intelligent-ui"}\n    }\n  }\n}\n'
+out 'Auto-update is off: you turned it off' && out 'off (your choice; not changed)' && out 'select Enable auto-update' && ok || { bad "turned off: no words"; show; }
+out 'Disable auto-update' && bad "turned off: an undo line for auto-update" || ok
+setting not-bool \
+  '{\n  "extraKnownMarketplaces": {\n    "razorback16": {\n      "autoUpdate": "no",\n      "source": {"source": "github", "repo": "razorback16/cc-intelligent-ui"}\n    }\n  }\n}\n' \
   '{\n  "extraKnownMarketplaces": {\n    "razorback16": {\n      "autoUpdate": true,\n      "source": {"source": "github", "repo": "razorback16/cc-intelligent-ui"}\n    }\n  }\n}\n'
 
 setting already-set \
@@ -555,6 +645,37 @@ run link IUI_NO_TYPST=1
 case $(ls -l "$d/dotfiles/settings.json") in -rw-------*) ok ;; *) bad "a link: the mode changed: $(ls -l "$d/dotfiles/settings.json")" ;; esac
 case $(ls -l "$d/home/.claude/settings.json.bak-iui") in -rw-------*) ok ;; *) bad "the backup mode is not the file's" ;; esac
 
+# A file that a rename would harm: read-only, a hard link (two names, one
+# file), or a link into a folder that is not writable. Not changed, no backup.
+if [ "$(id -u)" != 0 ]; then
+  mkdir -p "$tmp/ro-file/home/.claude"
+  printf '{\n  "a": 1\n}\n' > "$tmp/ro-file/home/.claude/settings.json"
+  chmod 444 "$tmp/ro-file/home/.claude/settings.json"
+  run ro-file IUI_NO_TYPST=1
+  [ "$rc" = 1 ] && out 'settings.json is not writable' && out '"autoUpdate": true' && ok || { bad "a read-only settings.json: exit $rc, or no words"; show; }
+  [ "$(cat "$d/home/.claude/settings.json")" = "$(printf '{\n  "a": 1\n}')" ] && [ ! -e "$d/home/.claude/settings.json.bak-iui" ] && no_work_left && ok || bad "a read-only settings.json: changed, or a backup"
+  mkdir -p "$tmp/hard-link/home/.claude" "$tmp/hard-link/dotfiles"
+  printf '{\n  "a": 1\n}\n' > "$tmp/hard-link/dotfiles/settings.json"
+  ln "$tmp/hard-link/dotfiles/settings.json" "$tmp/hard-link/home/.claude/settings.json"
+  run hard-link IUI_NO_TYPST=1
+  [ "$rc" = 1 ] && out 'has 2 hard links' && ok || { bad "a hard link: exit $rc, or no words"; show; }
+  [ "$(ls -l "$d/dotfiles/settings.json" | awk '{ print $2 }')" = 2 ] && [ ! -e "$d/home/.claude/settings.json.bak-iui" ] && ! grep -q autoUpdate "$d/dotfiles/settings.json" && ok || bad "a hard link: broken, changed, or a backup"
+  mkdir -p "$tmp/ro-dir/home/.claude" "$tmp/ro-dir/ro"
+  printf '{\n  "a": 1\n}\n' > "$tmp/ro-dir/ro/settings.json"
+  ln -s "$tmp/ro-dir/ro/settings.json" "$tmp/ro-dir/home/.claude/settings.json"
+  chmod 555 "$tmp/ro-dir/ro"
+  run ro-dir IUI_NO_TYPST=1
+  chmod 755 "$d/ro"
+  [ "$rc" = 1 ] && out 'can not write' && [ ! -e "$d/home/.claude/settings.json.bak-iui" ] && no_work_left && ok || { bad "a link into a read-only folder: exit $rc, or a backup left"; show; }
+fi
+
+# A LANG that is not installed: perl's locale warning is not the result.
+mkdir -p "$tmp/locale/home/.claude" "$tmp/locale/root/Applications/iTerm.app"
+printf '{\n  "a": 1\n}\n' > "$tmp/locale/home/.claude/settings.json"
+run locale IUI_NO_TYPST=1 SHELL=/bin/zsh LANG=xx_YY.UTF-8
+[ "$rc" = 0 ] && grep -q '"autoUpdate": true' "$d/home/.claude/settings.json" && out 'Set extraKnownMarketplaces.razorback16.autoUpdate = true' && out 'Made ~/.zshrc' && ok || { bad "a LANG that is not installed: exit $rc, or a done change called not changed"; show; }
+out 'was not changed' && bad "a LANG that is not installed: 'was not changed'" || ok
+
 run no-auto-update IUI_NO_TYPST=1 IUI_NO_AUTO_UPDATE=1
 [ "$rc" = 0 ] && [ ! -e "$d/home/.claude" ] && out 'IUI_NO_AUTO_UPDATE is set' && ok || bad "IUI_NO_AUTO_UPDATE: exit $rc, or settings.json was made"
 log 'plugin install cc-intelligent-ui@razorback16 --scope user' && ok || bad "IUI_NO_AUTO_UPDATE: the mod was not installed"
@@ -609,6 +730,7 @@ run zsh-lines IUI_NO_TYPST=1 SHELL=/usr/local/bin/zsh
 [ "$rc" = 0 ] && is "$d/home/.zshrc" "export A=1
 
 $block_sh" && ok || { bad "zsh with lines: not as the mod's withSetup()"; show; }
+out 'Added the Intelligent UI block to ~/.zshrc.' && ! out 'older block' && ok || { bad "zsh with lines: the words of an update"; show; }
 printf 'export A=1\n\n\n' | cmp -s - "$d/home/.zshrc.bak-iui" && ok || bad "zsh with lines: the backup is not the old file"
 case $(ls -l "$d/home/.zshrc") in -rw-r-----*) ok ;; *) bad "zsh with lines: the mode changed: $(ls -l "$d/home/.zshrc")" ;; esac
 no_work_left && ok || bad "zsh with lines: a temp file left"
@@ -623,6 +745,7 @@ b
 
 $block_sh" && ok || { bad "an old block: not replaced as the mod does"; cat "$d/home/.zshrc"; }
 [ "$(grep -c 'cc-intelligent-ui: Claude Code pictures' "$d/home/.zshrc")" = 1 ] && ok || bad "an old block: two blocks"
+out 'Updated the Intelligent UI block in ~/.zshrc (an older block of the mod is replaced)' && out 'updated in ~/.zshrc' && ok || { bad "an old block: no words of an update"; show; }
 
 iterm zdotdir
 mkdir -p "$tmp/zdotdir/zdot"
@@ -632,6 +755,21 @@ run zdotdir IUI_NO_TYPST=1 SHELL=/bin/zsh ZDOTDIR="$tmp/zdotdir/zdot"
 iterm bash-mac
 run bash-mac IUI_NO_TYPST=1 SHELL=/bin/bash
 [ "$rc" = 0 ] && is "$d/home/.bash_profile" "$block_sh" && [ ! -e "$d/home/.bashrc" ] && ok || bad "bash on macOS: not ~/.bash_profile"
+# Login bash reads only the first of .bash_profile, .bash_login and .profile:
+# the block goes there, and no .bash_profile hides the others.
+iterm bash-profile
+mkdir -p "$tmp/bash-profile/home"
+printf 'export MY=1\n' > "$tmp/bash-profile/home/.profile"
+run bash-profile IUI_NO_TYPST=1 SHELL=/bin/bash
+[ "$rc" = 0 ] && is "$d/home/.profile" "export MY=1
+
+$block_sh" && [ ! -e "$d/home/.bash_profile" ] && ok || { bad "bash on macOS with ~/.profile: a new ~/.bash_profile"; show; }
+iterm bash-login
+mkdir -p "$tmp/bash-login/home"
+printf 'export MY=1\n' > "$tmp/bash-login/home/.bash_login"
+printf 'export MY=2\n' > "$tmp/bash-login/home/.profile"
+run bash-login IUI_NO_TYPST=1 SHELL=/bin/bash
+[ "$rc" = 0 ] && grep -q 'cc-intelligent-ui' "$d/home/.bash_login" && [ "$(cat "$d/home/.profile")" = 'export MY=2' ] && [ ! -e "$d/home/.bash_profile" ] && ok || { bad "bash on macOS with ~/.bash_login: not that file"; show; }
 
 # herdr on Linux (in ~/.local/bin, as the script looks for Typst).
 mkdir -p "$tmp/bash-linux/home/.local/bin"
@@ -687,6 +825,15 @@ if [ "$(id -u)" != 0 ]; then
   chmod 600 "$d/home/.zshrc"
   rc_refused unreadable
   [ "$(cat "$d/home/.zshrc")" = secret ] && ok || bad "unreadable: changed"
+fi
+if [ "$(id -u)" != 0 ]; then
+  iterm rc-readonly
+  mkdir -p "$tmp/rc-readonly/home"
+  printf 'x=1\n' > "$tmp/rc-readonly/home/.zshrc"
+  chmod 444 "$tmp/rc-readonly/home/.zshrc"
+  run rc-readonly IUI_NO_TYPST=1 SHELL=/bin/zsh
+  rc_refused rc-readonly
+  out '.zshrc is not writable' && [ "$(cat "$d/home/.zshrc")" = 'x=1' ] && ok || bad "a read-only ~/.zshrc: changed, or no words"
 fi
 iterm rc-folder
 mkdir -p "$tmp/rc-folder/home/.zshrc"

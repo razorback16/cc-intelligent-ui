@@ -14,6 +14,7 @@
 #      copies in a project are not changed, only shown.
 #   4. Turns on auto-update for the razorback16 marketplace in your Claude Code
 #      settings.json (extraKnownMarketplaces), with a backup of the file before that change.
+#      An autoUpdate: false that you set is kept.
 # Run it again to update. It never uses sudo.
 #   5. When iTerm2 or herdr is there: adds the mod's own /iui setup block (it sets
 #      CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 in iTerm2 and herdr only) to the start file of
@@ -163,8 +164,19 @@ typst_version() {
   "$1" --version < /dev/null 2> /dev/null | awk 'NR == 1 && $1 == "typst" { print $2 }' || true
 }
 
-# The typst that the mod uses: the PATH first, then TYPST_DIRS in order.
-mod_typst() { find_tool typst; }
+# The typst that the mod uses (findTypst in hooks/lib/typst.ts): a login
+# shell's PATH (macOS puts /usr/local/bin first there), then the PATH, then
+# TYPST_DIRS in order.
+mod_typst() {
+  local p
+  p=$(perl -e 'alarm 5; exec @ARGV' sh -lc 'command -v typst' < /dev/null 2> /dev/null | head -n 1 || true)
+  case $p in /*)
+    printf '%s' "$p"
+    return 0
+    ;;
+  esac
+  find_tool typst
+}
 
 # The program $1: on the PATH, else in TYPST_DIRS in order.
 find_tool() {
@@ -278,13 +290,18 @@ install_typst() {
 #                        Exit 1: no such marketplace.
 #   plugin ID            stdin: the plugin list; prints the "version" and "enabled" of "id": ID, "scope": "user"
 #   copies NAME          stdin: the plugin list; prints "id TAB scope TAB version TAB enabled TAB projectPath"
-#                        for each copy of the plugin NAME (any marketplace, any scope)
-#   settings FILE BACKUP sets extraKnownMarketplaces.razorback16 (source and autoUpdate: true)
-#                        in FILE; prints created, changed or unchanged. Exit 2: not changed (the reason on stdout).
+#                        for each copy of the plugin NAME (any marketplace, any scope); a copy with no
+#                        marketplace (@skills-dir, @inline) has its folder (installPath) for projectPath
+#   entry FILE           prints declared, or off (autoUpdate: false), for extraKnownMarketplaces.razorback16
+#                        in FILE. Exit 1: not there. Exit 2: FILE can not be read.
+#   settings FILE BACKUP [OFF]
+#                        sets extraKnownMarketplaces.razorback16 (source and autoUpdate: true, or false with OFF)
+#                        in FILE; prints created, changed, unchanged or off (false already, kept).
+#                        Exit 2: not changed (the reason on stdout).
 # Exit 3: stdin is not a JSON array.
 json_pl() {
   cat << 'PERL'
-use strict; use warnings;
+use strict; use warnings; no warnings 'recursion';
 use Fcntl;
 my ($mode, @args) = @ARGV;
 my $s;
@@ -296,9 +313,12 @@ sub str {
   $s =~ /\G"((?:[^"\\\x00-\x1f]++|\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4}))*+)"/gc or err('a string');
   my $r = $1;
   my %e = (n => "\n", t => "\t", b => "\b", f => "\f", r => "\r");
-  $r =~ s{\\(?:u([0-9a-fA-F]{4})|(.))}{defined $1 ? chr(hex $1) : ($e{$2} // $2)}ge;
+  # \u escapes as UTF-8 bytes (a pair for a character past U+FFFF), as the file's own bytes.
+  $r =~ s{\\u([dD][89abAB][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})|\\u([0-9a-fA-F]{4})|\\(.)}
+    {defined $1 ? u8(0x10000 + ((hex($1) - 0xD800) << 10) + hex($2) - 0xDC00) : defined $3 ? u8(hex $3) : ($e{$4} // $4)}ge;
   return $r;
 }
+sub u8 { my $c = chr(shift); utf8::encode($c); return $c }
 sub val {
   ws();
   my $b = pos($s);
@@ -356,8 +376,8 @@ sub member { my ($o, $k) = @_; my $f; for (@{ $o->{m} }) { $f = $_ if $_->{k} eq
 
 # A string member, or undef.
 sub sv { my ($o, $k) = @_; my $m = member($o, $k); return ($m && $m->{v}{t} eq 's') ? $m->{v}{s} : undef }
-# Printable ASCII only (for the shell's messages).
-sub clean { my $x = shift // ''; $x =~ s/[^\x20-\x7e]//g; return $x }
+# No control bytes (for the shell's messages); other bytes, such as UTF-8 letters, are kept.
+sub clean { my $x = shift // ''; $x =~ s/[\x00-\x1f\x7f]|\xc2[\x80-\x9f]//g; return $x }
 # 1 when a source (an object with source, repo, url, ref, path) is the official
 # one: GitHub razorback16/cc-intelligent-ui, with no ref, path or sparse paths.
 sub official {
@@ -414,14 +434,31 @@ if ($mode eq 'marketplace' || $mode eq 'plugin' || $mode eq 'copies') {
     next unless $id->{v}{s} =~ /\A\Q$args[0]\E\@[A-Za-z0-9._-]+\z/;
     my $scope = clean(sv($x, 'scope'));
     $scope = '?' unless $scope =~ /\A[a-z]+\z/;
-    print join("\t", $id->{v}{s}, $scope, $vs eq '' ? '?' : $vs, $state, clean(sv($x, 'projectPath'))), "\n";
+    my $where = sv($x, $id->{v}{s} =~ /\@(?:skills-dir|inline)\z/ ? 'installPath' : 'projectPath');
+    print join("\t", $id->{v}{s}, $scope, $vs eq '' ? '?' : $vs, $state, clean($where)), "\n";
   }
   exit($mode eq 'copies' ? 0 : 1);
 }
+my $name = 'razorback16';
+if ($mode eq 'entry') {
+  my $f = $args[0];
+  exit 1 unless -e $f;
+  open(my $fh, '<:raw', $f) or exit 2;
+  local $/; my $t = <$fh> // ''; close $fh;
+  exit 1 if $t =~ /\A\s*\z/;
+  my $root = eval { parse($t) } or exit 2;
+  exit 2 unless $root->{t} eq 'o';
+  my $ekm = member($root, 'extraKnownMarketplaces');
+  exit 1 unless $ekm && $ekm->{v}{t} eq 'o';
+  my $rb = member($ekm->{v}, $name) or exit 1;
+  my $au = $rb->{v}{t} eq 'o' ? member($rb->{v}, 'autoUpdate') : undef;
+  print $au && $au->{v}{t} eq 'false' ? "off\n" : "declared\n";
+  exit 0;
+}
 exit 4 unless $mode eq 'settings';
 
-my ($file, $bak) = @args;
-my $name = 'razorback16';
+my ($file, $bak, $off) = @args;
+my $want = $off ? 'false' : 'true';
 my @source = ([source => '"github"'], [repo => '"razorback16/cc-intelligent-ui"']);
 sub refuse { print "$_[0]\n"; exit 2 }
 my $real = $file;
@@ -438,15 +475,22 @@ if (-e $real) {
 }
 # Writes: a new file in the same folder, then one rename.
 sub put {
-  my ($path, $data, $fmode) = @_;
+  my ($path, $data, $fmode, $then) = @_;
   my $tmp = "$path.iui-$$";
   unlink $tmp;
   sysopen(my $fh, $tmp, O_WRONLY | O_CREAT | O_EXCL, defined $fmode ? 0600 : 0666) or die "can not write $tmp: $!\n";
   binmode $fh;
-  print {$fh} $data or die "can not write $tmp: $!\n";
-  close $fh or die "can not write $tmp: $!\n";
+  unless ((print {$fh} $data) && close $fh) { my $e = $!; unlink $tmp; die "can not write $tmp: $e\n" }
   chmod($fmode, $tmp) if defined $fmode;
-  rename($tmp, $path) or do { unlink $tmp; die "can not write $path: $!\n" };
+  # The backup only when the new file is written.
+  if ($then) { eval { $then->(); 1 } or do { unlink $tmp; die $@ } }
+  rename($tmp, $path) or do { my $e = $!; unlink $tmp; die "can not write $path: $e\n" };
+}
+# A file that is not writable, or one with more names (hard links), is not replaced.
+sub writable {
+  my $nl = (stat $real)[3];
+  refuse("$file is not writable") unless -w $real;
+  refuse("$file has $nl hard links, and a new file would break them") if $nl > 1;
 }
 # The line end of the file (CRLF kept).
 our $NL = (defined $old && $old =~ /\r\n/) ? "\r\n" : "\n";
@@ -459,7 +503,7 @@ sub render {
 }
 my $out;
 if (!defined $old || $old =~ /\A\s*\z/) {
-  $text = render([[extraKnownMarketplaces => [[$name => [[source => \@source], [autoUpdate => 'true']]]]]], '', '  ', 1, ': ') . "\n";
+  $text = render([[extraKnownMarketplaces => [[$name => [[source => \@source], [autoUpdate => $want]]]]]], '', '  ', 1, ': ') . "\n";
   $out = defined $old ? 'changed' : 'created';
 } else {
   my $root = eval { parse($old) };
@@ -500,13 +544,13 @@ if (!defined $old || $old =~ /\A\s*\z/) {
   };
   my $ekm = member($root, 'extraKnownMarketplaces');
   if (!$ekm) {
-    $add->($root, [extraKnownMarketplaces => [[$name => [[source => \@source], [autoUpdate => 'true']]]]]);
+    $add->($root, [extraKnownMarketplaces => [[$name => [[source => \@source], [autoUpdate => $want]]]]]);
   } elsif ($ekm->{v}{t} ne 'o') {
     refuse("extraKnownMarketplaces in $file is not an object");
   } else {
     my $rb = member($ekm->{v}, $name);
     if (!$rb) {
-      $add->($ekm->{v}, [$name => [[source => \@source], [autoUpdate => 'true']]]);
+      $add->($ekm->{v}, [$name => [[source => \@source], [autoUpdate => $want]]]);
     } elsif ($rb->{v}{t} ne 'o') {
       refuse("extraKnownMarketplaces.$name in $file is not an object");
     } else {
@@ -515,10 +559,12 @@ if (!defined $old || $old =~ /\A\s*\z/) {
         if $src && !($src->{v}{t} eq 'o' && official($src->{v}));
       my $au = member($rb->{v}, 'autoUpdate');
       if ($au && $au->{v}{t} eq 'true') { print "unchanged\n"; exit 0 }
+      # Off by the person's choice (Disable auto-update): kept.
+      if ($au && $au->{v}{t} eq 'false') { print "off\n"; exit 0 }
       if ($au) {
-        push @edits, [$au->{v}{b}, $au->{v}{e}, 'true'];
+        push @edits, [$au->{v}{b}, $au->{v}{e}, $want];
       } else {
-        $add->($rb->{v}, (member($rb->{v}, 'source') ? () : [source => \@source]), [autoUpdate => 'true']);
+        $add->($rb->{v}, (member($rb->{v}, 'source') ? () : [source => \@source]), [autoUpdate => $want]);
       }
     }
   }
@@ -532,21 +578,22 @@ my $ok = $check && $check->{t} eq 'o';
 for my $k ('extraKnownMarketplaces', $name, 'autoUpdate') {
   last unless $ok;
   my $m = member($check, $k);
-  $ok = $m && ($k eq 'autoUpdate' ? $m->{v}{t} eq 'true' : $m->{v}{t} eq 'o');
+  $ok = $m && ($k eq 'autoUpdate' ? $m->{v}{t} eq $want : $m->{v}{t} eq 'o');
   $check = $m->{v} if $ok;
 }
 refuse("the change of $file did not read back (nothing was written)") unless $ok;
+writable() if defined $old;
 my $fmode = defined $old ? (stat $real)[2] & 07777 : undef;
 eval {
-  put($bak, $old, $fmode) if defined $old;
-  put($real, $text, $fmode);
+  put($real, $text, $fmode, defined $old ? sub { put($bak, $old, $fmode) } : undef);
   1;
-} or refuse("$@");
+} or do { chomp(my $why = $@); refuse($why) };
 print "$out\n";
 PERL
 }
 
-json() { perl -e "$(json_pl)" "$@"; }
+# LC_ALL=C: no perl locale warnings (a LANG that is not installed).
+json() { LC_ALL=C perl -e "$(json_pl)" "$@"; }
 
 # --- 3. The mod ----------------------------------------------------------------
 
@@ -610,18 +657,44 @@ INFO
   if ! "$CLAUDE" plugin marketplace list < /dev/null 2> /dev/null | grep -qw "$MARKETPLACE"; then MKT_KIND=none; fi
 }
 
+# The user settings file of Claude Code.
+settings_file() { printf '%s/settings.json' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; }
+
+# The razorback16 entry of the user settings: none, declared, off (autoUpdate
+# false) or unknown (the file can not be read).
+user_entry() {
+  local f out rc=0
+  f=$(settings_file)
+  case $f in /*) ;; *)
+    printf unknown
+    return 0
+    ;;
+  esac
+  out=$(json entry "$f" 2> /dev/null) || rc=$?
+  case $rc in
+    0) printf '%s' "$out" ;;
+    1) printf none ;;
+    *) printf unknown ;;
+  esac
+}
+
 # The marketplace has another source (a fork, a pinned ref, a local folder):
-# an update from it can not get the newest version. Remove it and add the
-# official one. Claude Code also uninstalls the mod with the marketplace.
+# an update from it can not get the newest version. Remove its entry in the
+# user settings, then add the official one. Claude Code can uninstall the mod
+# with the marketplace; if it does, the installer installs it again.
 OLD_STATE=
 REPOINTED=
+AUTO_OFF=
 repoint_marketplace() {
-  local id scope ver pp undo
+  local id scope ver pp undo entry
   warn "the $MARKETPLACE marketplace comes from $MKT_DESC, not from the GitHub repository $MARKETPLACE_REPO. An update from there can not get the newest version of the mod."
-  note "So the installer removes the $MARKETPLACE marketplace and adds it again from $MARKETPLACE_REPO."
-  note "Claude Code also uninstalls the mod with the marketplace; the installer then installs it again."
+  note "So the installer adds the $MARKETPLACE marketplace again from $MARKETPLACE_REPO."
+  note "Claude Code can uninstall the mod with the old marketplace; if it does, the installer installs it again."
   note "Kept: your /iui settings (Claude Code keeps them under the name $PLUGIN). The mod has no other saved options, secrets or data."
   OLD_STATE=$(plugin_state)
+  entry=$(user_entry)
+  # Auto-update that you turned off stays off for the new source.
+  if [ "$entry" = off ]; then AUTO_OFF=1; fi
   while IFS=$TAB read -r id scope ver _ pp; do
     if [ "$id" = "$PLUGIN" ] && [ "$scope" != user ]; then
       note "Claude Code can also remove the copy of the mod in $scope scope for ${pp:-a project}."
@@ -634,9 +707,18 @@ COPIES
   else
     undo="claude plugin marketplace remove $MARKETPLACE, then add $MKT_DESC again"
   fi
-  claude_run plugin marketplace remove "$MARKETPLACE" --scope user || die "Claude Code could not remove the marketplace $MARKETPLACE (from $MKT_DESC). The mod was not updated."
-  if ! claude_run plugin marketplace add "$MARKETPLACE_REPO"; then
-    die "Claude Code could not add the marketplace $MARKETPLACE_REPO. To add the old one back: claude plugin marketplace add $(shq "${MKT_SPEC:-?}")"
+  # `remove --scope user` fails when the user settings do not declare it (an
+  # older Claude Code, or another scope); then `add` changes its source by itself.
+  if [ "$entry" = none ]; then
+    note "Your user settings do not declare the $MARKETPLACE marketplace, so claude plugin marketplace add changes its source."
+    if ! claude_run plugin marketplace add "$MARKETPLACE_REPO"; then
+      die "Claude Code could not add the marketplace $MARKETPLACE_REPO. The old marketplace was not changed. The mod was not updated."
+    fi
+  else
+    claude_run plugin marketplace remove "$MARKETPLACE" --scope user || die "Claude Code could not remove the marketplace $MARKETPLACE (from $MKT_DESC). The mod was not updated."
+    if ! claude_run plugin marketplace add "$MARKETPLACE_REPO"; then
+      die "Claude Code could not add the marketplace $MARKETPLACE_REPO. To add the old one back: claude plugin marketplace add $(shq "${MKT_SPEC:-?}")"
+    fi
   fi
   note "The $MARKETPLACE marketplace comes from $MARKETPLACE_REPO now (before: $MKT_DESC)."
   REPOINTED=1
@@ -716,10 +798,19 @@ install_plugin() {
     *' disabled') warn "the mod is disabled in Claude Code. To turn it on: claude plugin enable $PLUGIN" ;;
   esac
   now=$(plugin_copies)
+  # A copy with no marketplace: Claude Code can not uninstall it.
+  while IFS=$TAB read -r id scope ver _ pp; do
+    case $id in
+      *@skills-dir) warn "a copy of the mod is in a skills folder of Claude Code ($(tilde "${pp:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills}")): $id $ver. It has no marketplace, so Claude Code can not uninstall it. The copy from $MARKETPLACE is used, not that one. To remove it, delete its folder (claude plugin list shows it)." ;;
+      *@inline) warn "a copy of the mod is loaded with --plugin-dir${pp:+ from $pp}: $id $ver. Claude Code can not uninstall it. To stop it, start Claude Code without that --plugin-dir." ;;
+    esac
+  done << NOW
+$now
+NOW
   # Another copy in user scope (from another marketplace) would run too.
   if [ -n "$after" ]; then
     while IFS=$TAB read -r id scope ver _ pp; do
-      case $id in '' | "$PLUGIN") continue ;; esac
+      case $id in '' | "$PLUGIN" | *@skills-dir | *@inline) continue ;; esac
       [ "$scope" = user ] || continue
       note "Another copy of the mod is installed for your user: $id $ver. Two copies would both run, so the installer uninstalls that one."
       if claude_run plugin uninstall "$id" --scope user; then
@@ -738,6 +829,7 @@ NOW
   # Copies in a project: not changed. In that folder, they can hide the user copy.
   while IFS=$TAB read -r id scope ver _ pp; do
     case $scope in '' | user) continue ;; esac
+    case $id in *@skills-dir | *@inline) continue ;; esac
     warn "a copy of the mod is installed in $scope scope for ${pp:-a project}: $id $ver. In that project it can be used instead of the version above. To remove it: cd $(shq "${pp:-.}") && claude plugin uninstall $id --scope $scope"
   done << NOW
 $now
@@ -777,6 +869,21 @@ manual_auto_update() {
 EOF
 }
 
+# Auto-update turned on: $1 is created or changed, $2 the file.
+auto_on() {
+  AUTO_ON=1
+  if [ "$1" = created ]; then
+    note "Made $(tilde "$2") with extraKnownMarketplaces.$MARKETPLACE.autoUpdate = true."
+    SUM_AUTO="on ($(tilde "$2"), new file)"
+    return 0
+  fi
+  note "Set extraKnownMarketplaces.$MARKETPLACE.autoUpdate = true in $(tilde "$2")."
+  note "All other settings are kept. The file before this auto-update change: $(tilde "$2").bak-iui"
+  note "(It has the changes of step 3 already: the backup undoes only the auto-update change.)"
+  SUM_AUTO="on ($(tilde "$2"))"
+  UNDO_AUTO="copy $(tilde "$2").bak-iui (the file before the auto-update change only) back to $(tilde "$2")"
+}
+
 auto_update() {
   local dir file result rc t
   step "4. Auto-update for the $MARKETPLACE marketplace"
@@ -786,7 +893,7 @@ auto_update() {
     return 0
   fi
   dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
-  file=$dir/settings.json
+  file=$(settings_file)
   case $dir in
     /*) ;;
     *)
@@ -806,7 +913,8 @@ auto_update() {
   fi
   if [ ! -e "$file" ] && [ ! -L "$file" ]; then mkdir -p "$dir"; fi
   rc=0
-  result=$(json settings "$file" "$file.bak-iui" 2>&1) || rc=$?
+  # Only stdout is the result; perl's stderr goes to the screen.
+  result=$(json settings "$file" "$file.bak-iui" ${AUTO_OFF:+off}) || rc=$?
   t="~"
   result=${result//"$HOME"/$t}
   case $rc:$result in
@@ -815,18 +923,18 @@ auto_update() {
       SUM_AUTO="on (it was on already)"
       AUTO_ON=1
       ;;
-    0:created)
-      note "Made $(tilde "$file") with extraKnownMarketplaces.$MARKETPLACE.autoUpdate = true."
-      SUM_AUTO="on ($(tilde "$file"), new file)"
-      AUTO_ON=1
+    0:off)
+      note "Auto-update is off: you turned it off (extraKnownMarketplaces.$MARKETPLACE.autoUpdate = false in $(tilde "$file")). Not changed."
+      SUM_AUTO="off (your choice; not changed)"
       ;;
-    0:changed)
-      note "Set extraKnownMarketplaces.$MARKETPLACE.autoUpdate = true in $(tilde "$file")."
-      note "All other settings are kept. The file before this auto-update change: $(tilde "$file").bak-iui"
-      note "(It has the changes of step 3 already: the backup undoes only the auto-update change.)"
-      SUM_AUTO="on ($(tilde "$file"))"
-      AUTO_ON=1
-      UNDO_AUTO="copy $(tilde "$file").bak-iui (the file before the auto-update change only) back to $(tilde "$file")"
+    0:created | 0:changed)
+      if [ -z "$AUTO_OFF" ]; then
+        auto_on "$result" "$file"
+      else
+        note "Auto-update stays off for the new source, as you set it: extraKnownMarketplaces.$MARKETPLACE.autoUpdate = false in $(tilde "$file")."
+        if [ "$result" = changed ]; then note "The file before this change: $(tilde "$file").bak-iui"; fi
+        SUM_AUTO="off (your choice; kept for the new source)"
+      fi
       ;;
     *)
       warn "$(tilde "$file") was not changed: ${result:-an unknown error}"
@@ -853,8 +961,8 @@ SETUP_FISH='if test "$TERM_PROGRAM" = "iTerm.app" -o "$TERM_PROGRAM" = "herdr"; 
 # Puts the block in a start file as the mod's withSetup() does: an older block
 # of the mod is replaced, one blank line goes before the block, and the exact
 # block already there changes nothing. Args: FILE START LINE END BACKUP. A link
-# keeps its place and its file changes. Prints created, changed or unchanged.
-# Exit 2: not changed (the reason on stdout).
+# keeps its place and its file changes. Prints created, changed (block added),
+# updated (an older block replaced) or unchanged. Exit 2: not changed (the reason on stdout).
 setup_pl() {
   cat << 'PERL'
 use strict; use warnings;
@@ -881,6 +989,7 @@ if (index($text, $block) >= 0) { print "unchanged\n"; exit 0 }
 # withoutSetup(): each START ... END block goes, with one blank line before it.
 my @lines = split /\n/, $text, -1;
 my @out;
+my $replaced = 0;
 for (my $i = 0; $i < @lines; $i++) {
   if ($lines[$i] ne $start) { push @out, $lines[$i]; next }
   my $e = -1;
@@ -888,29 +997,36 @@ for (my $i = 0; $i < @lines; $i++) {
   if ($e < 0) { push @out, $lines[$i]; next }
   pop @out if @out && $out[-1] eq '';
   $i = $e;
+  $replaced++;
 }
 my $base = join("\n", @out);
 $base =~ s/\n*\z//;
 my $new = $base . ($base ne '' ? "\n\n" : '') . $block;
 # Writes: a new file in the same folder, then one rename.
 sub put {
-  my ($path, $data, $fmode) = @_;
+  my ($path, $data, $fmode, $then) = @_;
   my $tmp = "$path.iui-$$";
   unlink $tmp;
   sysopen(my $fh, $tmp, O_WRONLY | O_CREAT | O_EXCL, defined $fmode ? 0600 : 0666) or die "can not write $tmp: $!\n";
   binmode $fh;
-  print {$fh} $data or die "can not write $tmp: $!\n";
-  close $fh or die "can not write $tmp: $!\n";
+  unless ((print {$fh} $data) && close $fh) { my $e = $!; unlink $tmp; die "can not write $tmp: $e\n" }
   chmod($fmode, $tmp) if defined $fmode;
-  rename($tmp, $path) or do { unlink $tmp; die "can not write $path: $!\n" };
+  # The backup only when the new file is written.
+  if ($then) { eval { $then->(); 1 } or do { unlink $tmp; die $@ } }
+  rename($tmp, $path) or do { my $e = $!; unlink $tmp; die "can not write $path: $e\n" };
+}
+# A file that is not writable, or one with more names (hard links), is not replaced.
+if (defined $old) {
+  my $nl = (stat $real)[3];
+  refuse("$file is not writable") unless -w $real;
+  refuse("$file has $nl hard links, and a new file would break them") if $nl > 1;
 }
 my $fmode = defined $old ? (stat $real)[2] & 07777 : undef;
 eval {
-  put($bak, $old, $fmode) if defined $old;
-  put($real, $new, $fmode);
+  put($real, $new, $fmode, defined $old ? sub { put($bak, $old, $fmode) } : undef);
   1;
-} or refuse("$@");
-print defined $old ? "changed\n" : "created\n";
+} or do { chomp(my $why = $@); refuse($why) };
+print !defined $old ? "created\n" : $replaced ? "updated\n" : "changed\n";
 PERL
 }
 
@@ -930,7 +1046,7 @@ has_iterm() {
 SUM_SHELL=
 UNDO_SHELL=
 shell_setup() {
-  local apps='' name file kind line result rc t
+  local apps='' name file kind line result rc t f
   step "5. Pictures in iTerm2 and herdr"
   if on "${IUI_NO_SHELL_SETUP:-}"; then
     note "Skipped (IUI_NO_SHELL_SETUP is set)."
@@ -952,7 +1068,17 @@ shell_setup() {
     zsh) file=${ZDOTDIR:-$HOME}/.zshrc kind='sh' ;;
     bash)
       kind='sh'
-      if [ "$OS" = macos ]; then file=$HOME/.bash_profile; else file=$HOME/.bashrc; fi
+      file=$HOME/.bashrc
+      if [ "$OS" = macos ]; then
+        # Login bash reads only the first of these that exists: a new .bash_profile would hide the others.
+        file=$HOME/.bash_profile
+        for f in .bash_profile .bash_login .profile; do
+          if [ -e "$HOME/$f" ] || [ -L "$HOME/$f" ]; then
+            file=$HOME/$f
+            break
+          fi
+        done
+      fi
       ;;
     fish) file=${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/cc-intelligent-ui.fish kind='fish' ;;
     *)
@@ -969,7 +1095,8 @@ shell_setup() {
   else
     if [ "$kind" = fish ] && [ ! -e "$file" ] && [ ! -L "$file" ]; then mkdir -p "${file%/*}"; fi
     rc=0
-    result=$(perl -e "$(setup_pl)" "$file" "$SETUP_START" "$line" "$SETUP_END" "$file.bak-iui" 2>&1) || rc=$?
+    # Only stdout is the result (LC_ALL=C: no perl locale warnings).
+    result=$(LC_ALL=C perl -e "$(setup_pl)" "$file" "$SETUP_START" "$line" "$SETUP_END" "$file.bak-iui") || rc=$?
   fi
   t="~"
   result=${result//"$HOME"/$t}
@@ -983,9 +1110,14 @@ shell_setup() {
       SUM_SHELL="added to $(tilde "$file") (open a new tab or pane)"
       ;;
     0:changed)
-      note "Added the Intelligent UI block to $(tilde "$file") (an older block of the mod is replaced)."
+      note "Added the Intelligent UI block to $(tilde "$file")."
       note "The file before this change: $(tilde "$file").bak-iui"
       SUM_SHELL="added to $(tilde "$file") (open a new tab or pane)"
+      ;;
+    0:updated)
+      note "Updated the Intelligent UI block in $(tilde "$file") (an older block of the mod is replaced)."
+      note "The file before this change: $(tilde "$file").bak-iui"
+      SUM_SHELL="updated in $(tilde "$file") (open a new tab or pane)"
       ;;
     *)
       warn "$(tilde "$file") was not changed: ${result:-an unknown error}"
@@ -1023,6 +1155,12 @@ summary() {
     note "              (it also sets extraKnownMarketplaces.$MARKETPLACE.autoUpdate to false in settings.json)"
     if [ -n "$UNDO_AUTO" ]; then note "              or $UNDO_AUTO"; fi
   fi
+  case $SUM_AUTO in off*)
+    say ""
+    say "Auto-update is off, as you set it. To turn it on: in Claude Code, type /plugin, go to"
+    say "Marketplaces, select $MARKETPLACE, then select Enable auto-update."
+    ;;
+  esac
   if [ -n "$UNDO_SHELL" ]; then note "Shell setup:  $UNDO_SHELL"; fi
 }
 

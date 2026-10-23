@@ -11,6 +11,15 @@ test('the setup writes the start file of the login shell', () => {
   expect(shellRcOf({ shell: '/bin/tcsh', home: '/h', isMac: true })).toBe(null)
 })
 
+test('bash on macOS: the first of .bash_profile, .bash_login and .profile that is there; a new .bash_profile only when none is', () => {
+  const bash = (loginFiles: string[], isMac = true) => shellRcOf({ shell: '/bin/bash', home: '/h', isMac, loginFiles })!.path
+  expect(bash(['.profile'])).toBe('/h/.profile')
+  expect(bash(['.bash_login', '.profile'])).toBe('/h/.bash_login')
+  expect(bash(['.profile', '.bash_profile'])).toBe('/h/.bash_profile')
+  expect(bash([])).toBe('/h/.bash_profile')
+  expect(bash(['.profile'], false)).toBe('/h/.bashrc')
+})
+
 test('the start file: an empty ZDOTDIR or XDG_CONFIG_HOME is not used, a shell with no path works, no shell gives none', () => {
   expect(shellRcOf({ shell: 'zsh', home: '/h', zdotdir: '', isMac: false })!.path).toBe('/h/.zshrc')
   expect(shellRcOf({ shell: '/usr/bin/fish', home: '/h', xdgConfig: '/x', isMac: false })!.path).toBe('/x/fish/conf.d/cc-intelligent-ui.fish')
@@ -140,6 +149,22 @@ test('in iTerm2 with pictures off, the plugin asks once and adds the block on ye
   const removed = await $.command.run({ command: 'iui', args: 'setup remove' } as any)
   expect(removed.text).toContain('Removed the Intelligent UI block from /h/.zshrc')
   expect(files['/h/.zshrc']).toBe('export A=1\n')
+})
+
+test('bash on macOS: /iui setup writes ~/.profile when it is the login file, and makes no ~/.bash_profile', async ($, on) => {
+  const files: Record<string, string> = { '/h/.profile': 'export A=1\n' }
+  iterm(on, files, 'Not now', { stored: { setup: 'never' }, env: { SHELL: '/bin/bash' } })
+  const ran = await $.command.run({ command: 'iui', args: 'setup' } as any)
+  expect(ran.text).toContain('Added the Intelligent UI block to /h/.profile.')
+  expect(files['/h/.profile']).toBe(`export A=1\n\n${setupBlock('sh')}`)
+  expect(Object.keys(files)).toEqual(['/h/.profile'])
+})
+
+test('/iui setup in a session that shows pictures already says so, not to open a new tab', async ($, on) => {
+  const files: Record<string, string> = { '/h/.zshrc': withSetup('export A=1\n', 'sh') }
+  iterm(on, files, 'Not now', { stored: { setup: 'never' }, env: { CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' } })
+  const ran = await $.command.run({ command: 'iui', args: 'setup' } as any)
+  expect(ran.text).toBe('/h/.zshrc already has the Intelligent UI block. Pictures are on in this tab already.')
 })
 
 test('a dismissed question changes no file', async ($, on) => {

@@ -26,6 +26,14 @@ claude plugin validate .
 
 `.claude-plugin/types/` is not in git. `tsconfig.json` extends the `tsconfig.json` in it, so run Claude Code with the folder once before `tsc`.
 
+## Release
+
+Claude Code updates the mod only when the `version` in `.claude-plugin/plugin.json` changes. For a release, change the version and `CHANGELOG.md`, run the tests above, and tag the commit `v<version>`. Deploy the site together with the release: it serves `site/install.sh` at https://intelligentui.art/install.sh. After the deploy, check that the script is there:
+
+```
+curl -fsSL https://intelligentui.art/install.sh | head -1    # #!/usr/bin/env bash
+```
+
 ## Debug log
 
 Set `IUI_DEBUG=1` before you start Claude Code. The mod then writes trace lines to `debug.log` in the cache folder (`${TMPDIR}/cc-intelligent-ui-<uid>/`, `/tmp` when `TMPDIR` is not set).
