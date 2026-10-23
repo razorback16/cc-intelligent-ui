@@ -108,13 +108,9 @@ To undo:
    /plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui
    ```
 
-   Answer `y` to add the marketplace, then push Enter to install for your user. The mod starts at once, with no restart.
-
-From a shell:
-
-```
-claude plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui
-```
+   Answer `y` to add the marketplace, then push Enter to install for your user. The mod starts at once, with no restart. From a shell, use `claude plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui`.
+3. Turn on auto-update, so that you get each new version. Refer to [Turn on auto-update](#turn-on-auto-update).
+4. In iTerm2 or herdr, answer yes when the mod asks to add its line to your shell's start file, or run `/iui setup`. Refer to [Terminals](#terminals).
 
 ## Install Typst on Linux
 

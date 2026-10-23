@@ -22,39 +22,34 @@ curl -fsSL https://intelligentui.art/install.sh | bash
 
 Then restart Claude Code, or type `/reload-plugins` in a session. To update, run the command again. You can [read the script](site/install.sh) before you run it.
 
-What `install.sh` does:
+The script:
 
-1. It checks that the system is macOS or Linux (arm64 or x86_64) and that Claude Code is installed. If Claude Code is not installed, it stops and changes nothing.
-2. If it finds no Typst 0.15 or later, it downloads the official Typst 0.15.1 release from GitHub, checks its SHA-256 (written in the script), and puts `typst` in `~/.local/bin`. It never uses `sudo`.
-3. It adds the `razorback16` marketplace and installs the mod with the `claude plugin` commands. If they are installed, it updates them. If your `razorback16` marketplace comes from another source (a fork, a pinned ref or a local folder), an update can not get the newest version: the script adds it again from GitHub and updates the mod (if Claude Code uninstalled it with the old marketplace, the script installs it again; a disabled mod stays disabled). It uninstalls a second user copy of the mod from another marketplace, and only shows copies in a project. It tells you each change and how to undo it.
-4. It turns on auto-update for the `razorback16` marketplace: `"autoUpdate": true` for `razorback16` in `extraKnownMarketplaces` of `~/.claude/settings.json`. If you turned auto-update off (`"autoUpdate": false`), it stays off. It keeps all other settings and keeps the file before this change as `settings.json.bak-iui` (step 3 changed the file already; the backup undoes only the auto-update change). If the file is not valid JSON, the script does not change it and shows the lines to add.
-5. If iTerm2 or herdr is there, it adds the mod's own `/iui setup` block to the start file of your login shell (`~/.zshrc`; for bash, `~/.bashrc` on Linux, or on macOS the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` that exists; or a fish `conf.d` file), with a backup `<file>.bak-iui`. The block sets `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` in iTerm2 and herdr only. Undo: `/iui setup remove` in Claude Code.
+1. Checks for macOS or Linux (arm64 or x86_64) and Claude Code. If Claude Code is missing, it stops and changes nothing.
+2. Installs Typst 0.15.1 to `~/.local/bin` if you do not have Typst 0.15 or later. It downloads the official release from GitHub and checks its SHA-256. It never uses `sudo`.
+3. Installs or updates the mod from the `razorback16` marketplace, with the `claude plugin` commands.
+4. Turns on auto-update for the marketplace, so you always get new versions. If you turned it off before, it stays off.
+5. Adds the `/iui setup` line to your shell's start file, if iTerm2 or herdr is installed. These terminals need it to show pictures.
 
-`IUI_NO_TYPST=1` skips step 2, `IUI_NO_AUTO_UPDATE=1` skips step 4, and `IUI_NO_SHELL_SETUP=1` skips step 5, for example `curl -fsSL https://intelligentui.art/install.sh | IUI_NO_AUTO_UPDATE=1 bash`.
-
-To undo: `claude plugin uninstall cc-intelligent-ui@razorback16`, then `claude plugin marketplace remove razorback16` (this also removes its entry in `settings.json`). If the script installed Typst: `rm ~/.local/bin/typst`. Refer to [The install script](docs/install.md#the-install-script).
+It shows each change and how to undo it, and keeps a backup of each file that it edits. To skip a step, set `IUI_NO_TYPST=1`, `IUI_NO_AUTO_UPDATE=1` or `IUI_NO_SHELL_SETUP=1`, for example `curl -fsSL https://intelligentui.art/install.sh | IUI_NO_AUTO_UPDATE=1 bash`. For the details and how to uninstall, refer to [The install script](docs/install.md#the-install-script).
 
 ### Install by hand
 
-```
-brew install typst
-```
+1. Install Typst 0.15 or later: `brew install typst` on macOS. On Linux, refer to [Install Typst on Linux](docs/install.md#install-typst-on-linux).
+2. In Claude Code, type:
 
-On Linux, you can also use `cargo install --locked typst-cli`, a package of your distribution, or the release file from GitHub. Refer to [Install](docs/install.md#install-typst-on-linux).
+   ```
+   /plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui
+   ```
 
-Then, in Claude Code:
-
-```
-/plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui
-```
-
-It works at once, with no restart.
+   It works at once, with no restart.
+3. Turn on auto-update: type `/plugin`, go to **Marketplaces**, select `razorback16`, then select **Enable auto-update**.
+4. In iTerm2 or herdr, answer yes when the mod asks to add its line to your shell's start file (or run `/iui setup`).
 
 ### Fullscreen, updates and terminals
 
 Intelligent UI works best in fullscreen mode (recommended). To use it, run `/tui fullscreen` in Claude Code.
 
-To get new versions, turn on auto-update for the `razorback16` marketplace in `/plugin` (the install script does this for you), or update manually. Refer to [Update](docs/install.md#update). The mod also shows a notice when a new version is available (`/iui updates off` stops it).
+For other ways to update, refer to [Update](docs/install.md#update). The mod also shows a notice when a new version is available (`/iui updates off` stops it).
 
 You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15, and macOS or Linux (X11 or Wayland). The pictures show only in some terminals:
 
