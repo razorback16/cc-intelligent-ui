@@ -1155,13 +1155,13 @@ summary() {
     note "              (it also sets extraKnownMarketplaces.$MARKETPLACE.autoUpdate to false in settings.json)"
     if [ -n "$UNDO_AUTO" ]; then note "              or $UNDO_AUTO"; fi
   fi
+  if [ -n "$UNDO_SHELL" ]; then note "Shell setup:  $UNDO_SHELL"; fi
   case $SUM_AUTO in off*)
     say ""
     say "Auto-update is off, as you set it. To turn it on: in Claude Code, type /plugin, go to"
     say "Marketplaces, select $MARKETPLACE, then select Enable auto-update."
     ;;
   esac
-  if [ -n "$UNDO_SHELL" ]; then note "Shell setup:  $UNDO_SHELL"; fi
 }
 
 main() {
