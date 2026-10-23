@@ -2,6 +2,25 @@
 
 All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Code finds a new version by the `version` in `.claude-plugin/plugin.json`. To get it, refer to [Update](docs/install.md#update).
 
+## 0.3.3 (2026-10-22)
+
+### Fixed
+
+- **The newest copy wins.** A click, a picture selection's up, `/iui grab` and the `ui.copy` change of picture cells each read their text first. An older one that was still reading wrote the clipboard over a newer copy. Now it writes nothing when a newer copy came: a newer click or up, a `$.ui.copy` (another plugin's, or the command button of a link row), Claude Code's own copy of a selection, or a copy in another app. A `ui.copy` change that lost its turn is refused. `/iui grab` that copies nothing does not cancel another copy.
+- **A password manager's copy is never read.** On macOS the mod reads the clipboard with a short `perl` script (PerlObjCBridge) in place of `pbpaste`, and stops at a copy with a concealed or transient type. On Linux, `xclip`, `wl-paste` and GTK look for the `x-kde-passwordManagerHint` target before and after the read. On Wayland, a copy marked sensitive was skipped already.
+- **The code in an answer can read no other file.** Each compile of an answer or a plan had `/` as its Typst root, so a Typst block could read any file (`read`, `include`, `image`, `json`, `csv`), and `read("/dev/zero")` used all the memory. Now each compile runs in a root of its own, with only the template, the theme and the answer's images. The skill's `check.sh` does the same, and it stops with an error when its cache folder is a link or not yours. Pictures are the same as before.
+- `/iui setup`, `/iui setup remove` and the setup question never write a shell start file that they cannot read (no permission, or too large). Before, such a file was replaced with only the Intelligent UI block. Now the mod changes no file and shows the line to add.
+- **Plan mode:** when Claude Code runs two `ExitPlanMode` calls at once, the mod does not ask its question, so the answer for one plan can not go to the other (a rejected plan was allowed). Claude Code's own dialog asks.
+- `/iui theme` runs one at a time: an older `/iui theme` that was still loading no longer sets its theme over a newer one. A setting that you change with `/iui` while the mod starts is kept (before, the start set it back to the stored value).
+- A long session no longer keeps the last text of each answer in memory: the mod keeps the newest 1,024, as it does for the compile results.
+- The picture select highlight could stop on a page whose frames went out of the page cache while its build waited. That page is now built again.
+- The watcher no longer sends `kill` to the PID of a child that ended (the PID can be another process's).
+
+### Changed
+
+- On Linux, `xsel` no longer reads the clipboard: it cannot show the targets of a copy, so it cannot skip a password manager's copy. Install `xclip` (or GTK 3 for Python); `/iui details` tells you.
+- The README has a **Privacy and access** section: the network request, the clipboard reads and writes, the files, the processes and the Typst root.
+
 ## 0.3.2 (2026-10-21)
 
 ### New
