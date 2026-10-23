@@ -141,19 +141,21 @@ export async function sourceOf($: EngineInterface, ready: Env, p: Picture, rows?
 // Flip mode: a PNG stored for herdr in iTerm2 drawn `rows` rows tall
 // (flip.ts), in a key folder of the cache by the file, its stat stamp and
 // the rows; made once (one run per key), kept from an earlier load. Null
-// when it fails.
+// when it fails (not kept: a later draw tries again).
 const flipped = new Map<string, Promise<string | null>>()
 function flippedOf($: EngineInterface, ready: Env, p: Picture, rows: number): Promise<string | null> {
   const key = `${p.file}@${p.stamp}@${rows}`
   let got = flipped.get(key)
   if (!got) {
     const out = `${ready.cache}/${hashOf(['flip', p.file, p.stamp, rows])}/flip.png`
-    got = (async () => {
+    got = (async (): Promise<string | null> => {
       const made = await stat($, out).catch(() => null)
       if (made?.kind === 'file' && made.size) return out
       const ok = await flipFile($, { src: p.file, out, rows, isPage: false, perl: perlFor(ready.isMac) })
-      if (!ok) await logDebug($, ready.cache, `could not store ${p.file} for herdr in iTerm2`)
-      return ok ? out : null
+      if (ok) return out
+      if (flipped.get(key) === got) flipped.delete(key)
+      await logDebug($, ready.cache, `could not store ${p.file} for herdr in iTerm2`)
+      return null
     })()
     keep(flipped, key, got, PICTURES_KEPT)
   }

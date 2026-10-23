@@ -125,6 +125,16 @@ test('a seam is the block above a break and the block below it', () => {
   expect(seamsOf(['Text.\n\n[d]: https://e.com', 'More.\n\n[d]: https://e.com'])).toEqual([null, ['Text.', 'More.']])
 })
 
+test('two lists at a break: the seam is the first lines of the items that meet (one loose list in one flow)', () => {
+  const loose = ['1. **Install** the tool\n   - run the script\n   - check the path', '2. **Configure** it\n   - edit the file', '3. **Run** it']
+  expect(seamsOf(loose)).toEqual([null, ['1. **Install** the tool', '2. **Configure** it'], ['2. **Configure** it', '3. **Run** it']])
+  expect(seamsOf(['- a\n- b\n- c\n- d', '- e'])).toEqual([null, ['- d', '- e']])
+  // A list and a paragraph: the blocks as they are.
+  expect(seamsOf(['- a\n- b', 'After.'])).toEqual([null, ['- a\n- b', 'After.']])
+  // An item that starts a fence or math: the blocks as they are.
+  expect(seamsOf(['- a\n- ```sh\n  x\n  ```', '- b'])).toEqual([null, ['- a\n- ```sh\n  x\n  ```', '- b']])
+})
+
 test('the seams of a split answer are the blocks that meet at its breaks', () => {
   const md = Array.from({ length: 120 }, (_, i) => (i % 3 ? para(i) : `- item ${i}\n- more ${i}`)).join('\n\n')
   const segments = splitSegments(md, 80, 30)

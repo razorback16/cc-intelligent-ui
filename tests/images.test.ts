@@ -377,6 +377,8 @@ function world(on: any, o: {
   failFill?: boolean
   // The root of a fill (FILL_SH) can not be made.
   failStage?: boolean
+  // The first flip writes (WRITE_PL) that fail.
+  failWrites?: number
 } = {}) {
   // Intelligent UI's store in memory (as mock.store), and its writes by key;
   // `redrawsAt`: by key, the `done` writes (redraws) made when its write ended.
@@ -415,8 +417,9 @@ function world(on: any, o: {
   const fillRoots: string[][] = []
   const removed: string[] = []
   const moves: string[][] = []
-  // The PNGs perl writes (flip mode), by path.
+  // The PNGs perl writes (flip mode), by path, and the writes asked.
   const pngs = new Map<string, Uint8Array>()
+  let writes = 0
   const docs: any[] = []
   const logs: string[] = []
   const stats = new Map<string, number>()
@@ -447,7 +450,7 @@ function world(on: any, o: {
     const cmd = argv.join(' ')
     if (argv[0] === 'kill') return ok('')
     if (o.herdr && argv[0] === 'sh' && argv[2] === HERDR_CLIENT_SH) return ok(`pid 77\natime 5\ntty /dev/ttys003\ncmd herdr\napp ${o.herdr}\nenv\nherdr TERM=xterm-256color\n`)
-    if (argv[0] === '/usr/bin/perl' && argv[2] === WRITE_PL) return (pngs.set(argv[3]!, fromBase64(e.init.stdin)), ok(''))
+    if (argv[0] === '/usr/bin/perl' && argv[2] === WRITE_PL) return writes++ < (o.failWrites ?? 0) ? ok('', 1) : (pngs.set(argv[3]!, fromBase64(e.init.stdin)), ok(''))
     if (/cc-intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (argv[0] === 'id' && argv[1] === '-u') return ok('501\n')
     if (cmd.includes('command -v typst')) return o.typst ? ok('/usr/bin/typst\n') : ok('', 1)
@@ -524,7 +527,7 @@ function world(on: any, o: {
   })
   on('ui.toast', async () => ({ value: undefined }))
   on('ui.render', () => ENGINE as any)
-  return { clock, heads, reads, converts, moves, pngs, docs, logs, files, texts, mtimes, written, kept, redrawsAt, redraws: () => redraws, sets, stats, fills, fillRoots, removed }
+  return { clock, heads, reads, converts, moves, pngs, writes: () => writes, docs, logs, files, texts, mtimes, written, kept, redrawsAt, redraws: () => redraws, sets, stats, fills, fillRoots, removed }
 }
 
 const sent = (output: unknown, isErrored = false, id = 'tu-1') =>
@@ -584,6 +587,33 @@ test('in herdr in iTerm2, a PNG Claude sends is made by Typst at its box, then s
   expect(image.props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/flip\.png$/)
   expect([...decodePng(pngs.get(image.props.source.file)!).data]).toEqual([...flipRows(ROWS_IMG, 10).data])
   expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain("pages and pictures stored upside down by rows, for iTerm2's placement bug")
+})
+
+test('in herdr in iTerm2, a PNG whose flip takes longer than a slice of real time draws, with the clock not moved', async ($, on) => {
+  // 1200 x 1200: its decode alone takes more than a slice (8 ms); the mocked clock fires no clock.after(0) in ui.drawn().
+  const big: Rgba = { width: 1200, height: 1200, data: new Uint8Array(1200 * 1200 * 4).map((_, i) => (i * 7) & 255) }
+  const steps = encodeSteps(big)
+  let got = steps.next()
+  while (!got.done) got = steps.next()
+  const { pngs } = world(on, { typst: true, herdr: '/Applications/iTerm.app/Contents/MacOS/iTerm2', files: { '/t/icon.png': HEAD }, bytes: toBase64(got.value) })
+  await ready($)
+  const ui = await $.ui.mount(sent(attach('/t/icon.png')))
+  const [image] = images(await ui.drawn())
+  expect(image.props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/flip\.png$/)
+  expect(pngs.has(image.props.source.file)).toBe(true)
+})
+
+test('in herdr in iTerm2, a picture whose flipped copy could not be stored is tried again at the next draw', async ($, on) => {
+  // The first write fails (as when another session wrote the same file at that time).
+  const { pngs, writes } = world(on, { typst: true, herdr: '/Applications/iTerm.app/Contents/MacOS/iTerm2', files: { '/t/icon.png': HEAD }, bytes: ROWS_PNG, failWrites: 1 })
+  await ready($)
+  const ui = await $.ui.mount(sent(attach('/t/icon.png')))
+  expect(images(await ui.drawn())).toEqual([])
+  await ui.redraw(sent(attach('/t/icon.png')).props)
+  const [image] = images(await ui.drawn())
+  expect(writes()).toBe(2)
+  expect(image.props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/flip\.png$/)
+  expect([...decodePng(pngs.get(image.props.source.file)!).data]).toEqual([...flipRows(ROWS_IMG, 10).data])
 })
 
 test('in herdr in Ghostty, a PNG Claude sends draws as it is', async ($, on) => {

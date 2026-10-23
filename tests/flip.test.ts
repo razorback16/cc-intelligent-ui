@@ -1,10 +1,11 @@
 import { expect, test } from 'claude-code/testing'
 
-import { encodeSteps, flipPng, flipRows, herdrBand, itermRowOf, padRows, reverseBands, WRITE_PL } from '../hooks/lib/flip'
+import { encodeSteps, flipFile, flipPng, flipRows, herdrBand, itermRowOf, padRows, reverseBands, sliceClock, WRITE_PL } from '../hooks/lib/flip'
 import { frameOf, framesOf, framesSteps, rgbOf } from '../hooks/lib/frames'
 import { decodePng, fromBase64, toBase64, type Rgba } from '../hooks/lib/png'
 import { compile, forgetTouches } from '../hooks/lib/typst'
 import { DEFAULT_METRICS, type Env, type Job } from '../hooks/lib/state'
+import { MAX_IMAGE_ROWS } from '../hooks/lib/settings'
 import { flipOf, herdrText, renderKey, type HerdrClient } from '../hooks/register'
 
 // A picture whose pixel at (x, y) tells its row: R = y, G = y >> 8, B = x, A = 255 - (y & 15).
@@ -53,10 +54,12 @@ test('a picture stored with flipRows shows each row right in herdr in iTerm2, fo
   }
 })
 
-test('padRows makes a picture rows × B tall (B = round(H / R)): rows cut, or the last one repeated', () => {
-  const tall = padRows(imageOf(2, 37), 4)
+test('padRows makes a picture rows × B tall (B = round(H / R)): the last row repeated, or each row the band herdr shows for it', () => {
+  const img = imageOf(2, 37)
+  const tall = padRows(img, 4)
   expect(tall.height).toBe(36)
-  expect(rowOf(tall, 35)).toEqual(rowOf(imageOf(2, 37), 35))
+  // Band k is source rows floor(k·37/4) on (0, 9, 18, 27): herdr's bands, the rows it drops spread, the bottom kept.
+  for (let k = 0; k < 4; k++) for (let i = 0; i < 9; i++) expect(rowOf(tall, k * 9 + i)).toEqual(rowOf(img, herdrBand(k, 37, 4).y + i))
   const short = padRows(imageOf(2, 35), 4)
   expect(short.height).toBe(36)
   expect(rowOf(short, 35)).toEqual(rowOf(short, 34))
@@ -64,6 +67,14 @@ test('padRows makes a picture rows × B tall (B = round(H / R)): rows cut, or th
   const same = imageOf(2, 36)
   expect(padRows(same, 4)).toBe(same)
   expect(padRows(imageOf(2, 1), 3).height).toBe(3)
+})
+
+test('padRows never cuts the bottom of a page taller than rows × B: each row shows what herdr shows on a right terminal', () => {
+  for (const [height, rows] of [[258 * 10, MAX_IMAGE_ROWS], [34 * 12 + 1, 12], [41, 4], [37 * 3 + 1, 3]] as const) {
+    const img = imageOf(3, height)
+    const page = padRows(img, rows)
+    for (let k = 0; k < rows; k++) expect(rightRows(page, k, rows)).toEqual(rightRows(img, k, rows))
+  }
 })
 
 test('for a page rows × B tall, flipRows reverses the bands, and reverseBands is that move and its own inverse', () => {
@@ -81,7 +92,8 @@ test('for a page rows × B tall, flipRows reverses the bands, and reverseBands i
 test('flipPng: a page is padded then flipped; a picture keeps its height; both decode to the moved rows', () => {
   const img = imageOf(5, 41)
   const page = flipPng(encode(img), 4, true)
-  expect([page.width, page.height]).toEqual([5, 40])
+  // 40 rows stored; rows map to the 41 of the page (herdr's bands of it).
+  expect([page.width, page.height, page.tall]).toEqual([5, 40, 41])
   expect([...decodePng(page.png).data]).toEqual([...flipRows(padRows(img, 4), 4).data])
   const picture = flipPng(encode(img), 6, false)
   expect(picture.height).toBe(41)
@@ -183,7 +195,7 @@ test('a compile in flip mode stores each page rows × B tall with its bands reve
   const result = await compile(h.$, jobOf('kf', true))
   if (typeof result !== 'object') throw new Error(`compile: ${result}`)
   const page = result.pages[0]!
-  expect([page.file, page.width, page.height, page.rows, page.flip]).toEqual(['/c/kf/fa-1.png', 16, 40, 4, true])
+  expect([page.file, page.width, page.height, page.rows, page.flip]).toEqual(['/c/kf/fa-1.png', 16, 41, 4, true])
   expect([...decodePng(h.written.get('/c/kf/fa-1.png')!).data]).toEqual([...flipRows(padRows(img, 4), 4).data])
   // Typst's page is not written over: another compile of the key (another
   // session's) flips it again from the page as made, never a flip of a flip.
@@ -210,4 +222,51 @@ test('a compile in flip mode whose page can not be stored fails, so the text sho
   expect(await compile(g.$, jobOf('kb', true))).toBe('failed')
   expect(g.texts.has('/c/kb/pages.json')).toBe(false)
   forgetTouches()
+})
+
+test('a page taller than MAX_IMAGE_ROWS in flip mode keeps its last rows: its last row shows what a right terminal shows', async () => {
+  forgetTouches()
+  // 258 rows of 10 px: one block that can not be cut, so it is drawn at 255 rows.
+  const img = imageOf(16, 258 * 10)
+  const h = host(encode(img))
+  const result = await compile(h.$, jobOf('kt', true))
+  if (typeof result !== 'object') throw new Error(`compile: ${result}`)
+  const page = result.pages[0]!
+  expect([page.rows, page.height]).toEqual([MAX_IMAGE_ROWS, 2580])
+  const stored = decodePng(h.written.get(page.file)!)
+  const source = (r: number[]) => r[0]! + 256 * r[1]!
+  for (const k of [0, 127, MAX_IMAGE_ROWS - 1]) expect(shownRows(stored, k, MAX_IMAGE_ROWS).map(source)).toEqual(rightRows(img, k, MAX_IMAGE_ROWS).map(source))
+  forgetTouches()
+})
+
+test('two writers of one file at once each write a temporary file of their own', () => {
+  // One name for all ("$f.tmp"): the second one's rename finds no file, and its flip fails.
+  expect(WRITE_PL).toContain('my $t = "$f.$$.tmp"')
+  expect(WRITE_PL).not.toContain('"$f.tmp"')
+})
+
+test('a flip runs in slices with a yield between them, and stops when its signal does', async () => {
+  const was = sliceClock.now
+  let t = 0
+  // Each step ends its slice.
+  sliceClock.now = () => (t += 10)
+  try {
+    const img = imageOf(4, 40)
+    const h = host(encode(img))
+    let yields = 0
+    h.$.clock.after = (ms: number, fn: () => void) => (yields++, void Promise.resolve().then(fn), { cancel() {} })
+    const out = await flipFile(h.$, { src: '/c/a.png', out: '/c/fa.png', rows: 4, isPage: true, perl: '/usr/bin/perl' })
+    expect(out).toEqual({ width: 4, height: 40 })
+    expect([...decodePng(h.written.get('/c/fa.png')!).data]).toEqual([...flipRows(img, 4).data])
+    expect(yields).toBeGreaterThan(3)
+    const stop = new AbortController()
+    h.$.clock.after = (ms: number, fn: () => void) => (stop.abort(), void Promise.resolve().then(fn), { cancel() {} })
+    expect(await flipFile(h.$, { src: '/c/a.png', out: '/c/fb.png', rows: 4, isPage: true, perl: '/usr/bin/perl', signal: stop.signal })).toBe(null)
+    expect(h.written.has('/c/fb.png')).toBe(false)
+    // A clock that stands still (a test's) fires no clock.after(0): no yield then, and the flip ends.
+    h.$.clock = { now: async () => 1000, after: () => ({ cancel() {} }) }
+    expect(await flipFile(h.$, { src: '/c/a.png', out: '/c/fc.png', rows: 4, isPage: true, perl: '/usr/bin/perl' })).toEqual({ width: 4, height: 40 })
+  } finally {
+    sliceClock.now = was
+  }
 })

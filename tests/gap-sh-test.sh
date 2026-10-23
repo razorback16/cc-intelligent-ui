@@ -21,12 +21,17 @@ command -v typst >/dev/null 2>&1 || { echo "gap-sh-test: skipped (no typst)"; ex
 
 # Doc JSONs from the Markdown on stdin (blocks between blank lines, no
 # fence with a blank line): $tmp/<name>-one.json (one segment) and
-# $tmp/<name>-cut.json (one segment for each block, with its seams).
+# $tmp/<name>-cut.json (one segment for each block, with its seams; as
+# seamsOf, two lists send the first lines of the items at the break).
 docs() {
   perl -e 'local $/; my $m = <STDIN>; $m =~ s/\n+$//; my @b = split /\n\n+/, $m;
     my $q = sub { my $s = shift; $s =~ s/(["\\])/\\$1/g; $s =~ s/\n/\\n/g; "\"$s\"" };
+    my $item = qr/^( {0,3})(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)/;
+    my $line = sub { my @l = split /\n/, $_[0]; my ($i) = $l[0] =~ $item or return; my @s = grep { /$item/ && $1 eq $i } @l;
+      my $x = $_[1] ? $s[-1] : $s[0]; $x =~ /`{3}|~{3}|\$\$/ ? undef : $x };
+    my $seam = sub { my ($x, $y) = ($line->($_[0], 1), $line->($_[1], 0)); defined $x && defined $y ? ($x, $y) : @_ };
     open my $one, ">", "$ARGV[0]-one.json"; print $one "{\"base\": \"\", \"segments\": [" . $q->($m) . "]}";
-    my @seams = ("null", map { "[" . $q->($b[$_ - 1]) . ", " . $q->($b[$_]) . "]" } 1 .. $#b);
+    my @seams = ("null", map { "[" . join(", ", map { $q->($_) } $seam->($b[$_ - 1], $b[$_])) . "]" } 1 .. $#b);
     open my $cut, ">", "$ARGV[0]-cut.json"; print $cut "{\"base\": \"\", \"segments\": [" . join(", ", map { $q->($_) } @b) . "], \"seams\": [" . join(", ", @seams) . "]}"' "$tmp/$1"
 }
 # The inputs of doc $1 with row $2, grid $3 (1 on, 0 off).
@@ -75,6 +80,32 @@ for row in 13.2 11.6331 7; do
 done
 same list 13.2 0
 same mixed 13.2 0
+
+# The gap at each break of $1 (row $2, grid $3): from the last line above
+# it to the first line below, as in one page (on the grid to 0.15 pt; off
+# the grid at most a row more). Only there: a list cut at a blank line is
+# loose in one page, but each part alone is tight.
+breaks() {
+  lines "$tmp/$1-one" "$2" "$3" && lines "$tmp/$1-cut" "$2" "$3" || return
+  out=$(paste -d ' ' "$tmp/$1-one.lines" "$tmp/$1-cut.lines" | perl -ne 'my ($y1, $p1, $r1, $t1, $y2, $p2, $r2, $t2) = split;
+    print "$t1 / $t2\n" if $t1 ne $t2;
+    if (defined $p and $p2 != $p) { my ($g1, $g2) = ($y1 - $o, $y2 - $c); my $d = $g2 - $g1;
+      print "$t1: gap $g1 in one page, $g2 cut\n" if ('"$3"' ? abs($d) > 0.15 : ($d < -0.15 or $d > '"$2"' + 0.15)) }
+    ($p, $o, $c) = ($p2, $y1, $y2)')
+  [ "$(wc -l < "$tmp/$1-one.lines")" = "$(wc -l < "$tmp/$1-cut.lines")" ] || out="lines: $(wc -l < "$tmp/$1-one.lines") and $(wc -l < "$tmp/$1-cut.lines") $out"
+  [ -z "$out" ] && ok || bad "$1 at its breaks (row $2, grid $3): $out"
+}
+
+# Two lists at a break: one loose list in one page. Items with lists in
+# them (the gap is not the items' own loose gaps), and plain items.
+printf '1. **Install** the tool\n   - run the script\n   - check the path\n\n2. **Configure** it\n   - edit the file\n\n3. **Run** it\n' | docs loose
+printf -- '- a\n- b\n- c\n- d\n\n- e\n' | docs mixedlist
+for row in 13.2 11.6331 7; do
+  breaks loose "$row" 1
+  breaks mixedlist "$row" 1
+done
+breaks loose 13.2 0
+breaks mixedlist 13.2 0
 
 # The page under the break starts with the blank row (grid, one row a
 # line): the list's first line is a row down, not at the page's top.
