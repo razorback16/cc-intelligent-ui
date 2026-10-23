@@ -5,14 +5,14 @@ import { DEFAULT_CELL, DEFAULT_METRICS, DEFAULT_THEME, fontFit, hashOf, nextJob,
 // driven with this test's `$`: pagesOf and the queue and results it fills
 // are module state, which register.tsx does not export.
 import { epochOpen, lastKey, queue, results, running, S, type Env } from '../hooks/lib/state'
-import { finalized, inlined, INLINE_KEPT, live, pending, type Job } from '../hooks/lib/state'
+import { finalized, inlined, INLINE_KEPT, lastText, live, pending, type Job } from '../hooks/lib/state'
 import { enqueue, finalizeAll, forget, pump, waitBlank } from '../hooks/lib/stream'
 import { inlineOf } from '../hooks/lib/draw'
 import { pagesOf } from '../hooks/lib/answer'
 import { beginEpoch } from '../hooks/lib/epoch'
 import { forgetTouches } from '../hooks/lib/typst'
 import { INLINE_MAX_BYTES } from '../hooks/lib/terminal'
-import { COMMIT_MIN_MS, TOUCH_FLUSH_MS } from '../hooks/lib/settings'
+import { COMMIT_MIN_MS, RESULTS_KEPT, TOUCH_FLUSH_MS } from '../hooks/lib/settings'
 
 // The world beneath the mod for one compile: a cache folder, a typst whose
 // compile the test lets finish (or fail), and the PNG it "wrote".
@@ -661,6 +661,59 @@ test('a blocks still live is final at once by finalizeAll: queued, blank, and dr
   expect([...pending.keys()]).toEqual(['x', 'y'])
   expect(pending.get('x')).toMatchObject({ showText: false, textHash: hashOf(['Text of x.']) })
   expect(redraws()).toBe(2)
+})
+
+test('the text each block drew and the blocks made final go past RESULTS_KEPT, the oldest first', async () => {
+  const { $ } = idle()
+  S.resizing = true
+  lastText.clear()
+  const draw = (id: string) => pagesOf($, { id, text: `Text of ${id}.`, frame: FRAME, env: ENV, canStream: false })
+  for (let i = 0; i <= RESULTS_KEPT; i++) await draw(`t${i}`)
+  expect(lastText.size).toBe(RESULTS_KEPT)
+  expect(lastText.has('t0')).toBe(false)
+  expect(lastText.get(`t${RESULTS_KEPT}`)).toBe(`Text of t${RESULTS_KEPT}.`)
+  // A block drawn again is the newest: t2 stays, t1 goes.
+  await draw('t2')
+  await draw('t-new')
+  expect(lastText.has('t1')).toBe(false)
+  expect(lastText.has('t2')).toBe(true)
+  for (let i = 0; i <= RESULTS_KEPT; i++) live.set(`f${i}`, { job: jobOf(`f${i}`), still: { cancel: () => {} } })
+  finalizeAll($)
+  expect(finalized.size).toBe(RESULTS_KEPT)
+  expect(finalized.has('f0')).toBe(false)
+  expect(finalized.has(`f${RESULTS_KEPT}`)).toBe(true)
+  queue.length = 0
+})
+
+test('a block whose text was let go draws as one not seen yet: queued at once, or live during a request until it ends', async () => {
+  const { $ } = idle()
+  S.resizing = true
+  lastText.clear()
+  const text = 'Text of old.'
+  await pagesOf($, { id: 'old', text, frame: FRAME, env: ENV, canStream: true })
+  for (let i = 0; i < RESULTS_KEPT; i++) await pagesOf($, { id: `n${i}`, text: `Text of n${i}.`, frame: FRAME, env: ENV, canStream: false })
+  expect(lastText.has('old')).toBe(false)
+  // No request runs: final at once (queued), not held as live.
+  queue.length = 0
+  pending.clear()
+  expect((await pagesOf($, { id: 'old', text, frame: FRAME, env: ENV, canStream: true })).kind).toBe('blank')
+  expect(live.has('old')).toBe(false)
+  expect(queue.map(j => j.requestId)).toEqual(['old'])
+  // A request runs: live (blank) until the request moves on, then queued.
+  lastText.delete('old')
+  queue.length = 0
+  S.stepsLive = 1
+  try {
+    expect((await pagesOf($, { id: 'old', text, frame: FRAME, env: ENV, canStream: true })).kind).toBe('blank')
+    expect(live.has('old')).toBe(true)
+    finalizeAll($)
+    expect(live.has('old')).toBe(false)
+    expect(finalized.has('old')).toBe(true)
+    expect(queue.map(j => j.requestId)).toEqual(['old'])
+  } finally {
+    S.stepsLive = 0
+    queue.length = 0
+  }
 })
 
 test('forget stops the live and pending timers of a block', () => {

@@ -233,8 +233,10 @@ export const settingsSet = new Set<string>()
 // The compile results by key (an LRU: set with `keep` at RESULTS_KEPT).
 export const results = new Map<string, Result | 'failed'>()
 // Streaming: model requests of the main loop in flight (`S.stepsLive`), the
-// blocks drawn blank while their text streams (with the job to compile once
-// final), and the blocks a request made final (they stay final).
+// text each block last drew, the blocks drawn blank while their text streams
+// (with the job to compile once final), and the blocks a request made final
+// (they stay final). The texts and the final ones go past RESULTS_KEPT, as
+// `results` (an id gone draws as one not seen yet).
 export const lastText = new Map<string, string>()
 export const live = new Map<string, { job: Job; still: { cancel: () => void } }>()
 export const finalized = new Set<string>()
@@ -329,6 +331,16 @@ export function keep<T>(cache: Map<string, T>, key: string, value: T, max: numbe
   for (const old of cache.keys()) {
     if (cache.size <= max) break
     cache.delete(old)
+  }
+}
+
+// The same for a set: `key` as the newest; the oldest go past `max`.
+export function keepIn(set: Set<string>, key: string, max: number) {
+  set.delete(key)
+  set.add(key)
+  for (const old of set) {
+    if (set.size <= max) break
+    set.delete(old)
   }
 }
 
