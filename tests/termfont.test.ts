@@ -1,7 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { fcPatternOf, KITTY_MAC_FONT, PROGRAM_FONTS_PL, PROGRAM_FONTS_SH, RIO_DEFAULT_FONT, RIO_OLD_FONT } from '../hooks/register'
+import { fcPatternOf, HERDR_CLIENT_SH, HERDR_TICK_SH, KITTY_MAC_FONT, PROGRAM_FONTS_PL, PROGRAM_FONTS_SH, RIO_DEFAULT_FONT, RIO_OLD_FONT } from '../hooks/register'
 import { S } from '../hooks/lib/state'
+import { HERDR_SCAN_MS } from '../hooks/lib/settings'
 
 // The terminal font that the pictures use: the one the terminal draws. A
 // font that a terminal carries in its program is copied out for Typst; a
@@ -16,7 +17,7 @@ const loose = (s: string) => s.replace(/\\(.)/g, '$1').replace(/\s/g, '').toLowe
 // The argument after the one that holds `marker` (a script's first argument).
 const argAfter = (argv: string[], marker: string) => argv[argv.findIndex(a => a.includes(marker)) + 1] ?? ''
 
-type World = { ran: string[][]; fontPaths: string[]; copies: () => string[][] }
+type World = { ran: string[][]; envs: (Record<string, string> | undefined)[]; fontPaths: string[]; copies: () => string[][]; clock: ReturnType<typeof mock.clock> }
 // A Mac or Linux with Typst. `run` answers a command first (undefined: the
 // world's answer); `families` are the installed ones (CoreText or
 // fontconfig), `proportional` those of them with no fixed-pitch style,
@@ -38,9 +39,10 @@ function world(on: any, o: {
 }): World {
   S.fontPaths = ''
   mock.store(on)
-  mock.clock(on)
+  const clock = mock.clock(on)
   mock.env(on, { HOME: '/h', ...o.env })
   const ran: string[][] = []
+  const envs: (Record<string, string> | undefined)[] = []
   const fontPaths: string[] = []
   const families = o.families ?? []
   const nearest = o.nearest ?? 'DejaVu Sans Mono'
@@ -48,6 +50,7 @@ function world(on: any, o: {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
     ran.push(argv)
+    envs.push(e.init?.env)
     const own = o.run?.(argv)
     if (own) return own
     if (/cc-intelligent-ui-/.test(cmd)) return ok(`/c\n${o.isMac ? 'Darwin' : 'Linux'}\n/h/.cache/cc-intelligent-ui/designs\n`)
@@ -83,7 +86,7 @@ function world(on: any, o: {
   const files = o.files ?? {}
   on('fs.read', async ($: any, e: any, next: any) => (e.path in files ? { value: files[e.path] } : e.path.startsWith('/h/') || e.path.startsWith('/c/') ? { deny: 'ENOENT' } : next(e)))
   on('fs.exists', async ($: any, e: any, next: any) => (e.path.startsWith('/h/') ? { value: e.path in files } : e.path === '/usr/bin/typst' ? { value: true } : next(e)))
-  return { ran, fontPaths, copies: () => ran.filter(argv => argv.includes(PROGRAM_FONTS_SH)) }
+  return { ran, fontPaths, copies: () => ran.filter(argv => argv.includes(PROGRAM_FONTS_SH)), clock, envs }
 }
 const details = async ($: any) => (await $.command.run({ command: 'iui', args: 'details' } as any)).text as string
 // A test that leaves S.fontPaths empty after it (pure.test.ts expects it so).
@@ -213,6 +216,186 @@ fontTest("cmux: a font-family in cmux's own config counts", async ($, on) => {
     run: shows('font-size = 13\n'),
   })
   expect(await details($)).toContain('terminal font Fira Code.')
+})
+
+// ---- herdr ----------------------------------------------------------------------
+
+fontTest("herdr in Ghostty (GHOSTTY_RESOURCES_DIR kept): Ghostty's font-family; the details name herdr and Ghostty", async ($, on) => {
+  world(on, {
+    isMac: true,
+    env: { TERM_PROGRAM: 'herdr', TERM_PROGRAM_VERSION: '0.9.5', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_RESOURCES_DIR: '/R', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' },
+    families: ['Iosevka'],
+    run: shows('font-family = Iosevka\n'),
+  })
+  const text = await details($)
+  expect(text).toContain('terminal font Iosevka.')
+  expect(text).toContain("terminal herdr 0.9.5 (in Ghostty, from the server's start): this terminal draws pictures.")
+})
+
+fontTest("herdr in kitty (KITTY_INSTALLATION_DIR kept): kitty's font_family", async ($, on) => {
+  world(on, {
+    isMac: true,
+    env: { TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', KITTY_INSTALLATION_DIR: '/K', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' },
+    families: ['Iosevka'],
+    files: { '/h/.config/kitty/kitty.conf': 'font_family Iosevka\n' },
+  })
+  const text = await details($)
+  expect(text).toContain('terminal font Iosevka.')
+  expect(text).toContain("terminal herdr (in kitty, from the server's start): ")
+})
+
+fontTest('herdr in a terminal it does not know: no font, as before; the details say so', async ($, on) => {
+  const w = world(on, { isMac: true, env: { TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' }, run: shows('font-family = Iosevka\n') })
+  const text = await details($)
+  expect(text).toContain('terminal font not known (Menlo assumed)')
+  expect(text).toContain('terminal herdr (outer terminal not known): this terminal draws pictures.')
+  expect(w.ran.some(argv => argv.join(' ').includes('+show-config'))).toBe(false)
+})
+
+fontTest('herdr with pictures off: the details point to /iui setup', async ($, on) => {
+  world(on, { isMac: true, env: { TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_BIN_DIR: '/B' }, run: shows('font-family = Iosevka\n') })
+  // The setup question (pictures are off in herdr) is dismissed.
+  on('tool.call', { tool: 'AskUserQuestion' }, async () => ({ deny: 'dismissed' }))
+  const text = await details($)
+  expect(text).toContain("terminal herdr (in Ghostty, from the server's start): Claude Code draws no pictures in herdr until CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 is set when it starts (run /iui setup)")
+})
+
+// The herdr client the user typed in last (HERDR_CLIENT_SH's output): the
+// server was started from Ghostty (its variables are in the pane), the
+// client is kitty or Ghostty.
+const HERDR_SERVER_ENV = { TERM_PROGRAM: 'herdr', TERM_PROGRAM_VERSION: '0.9.5', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_RESOURCES_DIR: '/R', GHOSTTY_BIN_DIR: '/B', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' }
+const kittyClient = 'pid 54346\natime 20\ntty ttys021\ncmd herdr\napp /Applications/kitty.app/Contents/MacOS/kitty herdr\nenv\nherdr TERM=xterm-kitty KITTY_WINDOW_ID=1 KITTY_CONFIG_DIRECTORY=/h/kc\n'
+const ghosttyClient = 'pid 50390\natime 10\ntty ttys012\ncmd herdr\napp /Applications/Ghostty.app/Contents/MacOS/ghostty -e herdr\nenv\nherdr TERM=xterm-ghostty TERM_PROGRAM=ghostty GHOSTTY_BIN_DIR=/G\n'
+const clientIs = (out: () => string) => (argv: string[]) => (argv[2] === HERDR_CLIENT_SH ? ok(out()) : undefined)
+// The light check (HERDR_TICK_SH): the app in front (null: none read) and a time for each tty asked.
+const tickIs = (front: () => string | null) => (argv: string[]) =>
+  argv[2] === HERDR_TICK_SH ? ok(`${front() ? `front ${front()}\n` : ''}${argv.slice(5).map(tty => `atime ${tty} 10\n`).join('')}`) : undefined
+const scansOf = (w: World) => w.ran.filter(argv => argv[2] === HERDR_CLIENT_SH).length
+
+fontTest("herdr: the client you typed in last (kitty) wins over the server's variables (Ghostty)", async ($, on) => {
+  const w = world(on, {
+    isMac: true,
+    env: HERDR_SERVER_ENV,
+    families: ['Iosevka', 'Fira Code'],
+    files: { '/h/kc/kitty.conf': 'font_family Fira Code\n' },
+    run: argv => clientIs(() => kittyClient)(argv) ?? shows('font-family = Iosevka\n')(argv),
+  })
+  const text = await details($)
+  expect(text).toContain('terminal font Fira Code.')
+  expect(text).toContain('terminal herdr 0.9.5 (in kitty, the client you used last): this terminal draws pictures.')
+  expect(w.ran.some(argv => argv.join(' ').includes('+show-config'))).toBe(false)
+})
+
+fontTest("herdr: no client found (the check fails): the server's variables, as before", async ($, on) => {
+  world(on, {
+    isMac: true,
+    env: HERDR_SERVER_ENV,
+    families: ['Iosevka'],
+    run: argv => (argv[2] === HERDR_CLIENT_SH ? ok('', 1) : shows('font-family = Iosevka\n')(argv)),
+  })
+  const text = await details($)
+  expect(text).toContain('terminal font Iosevka.')
+  expect(text).toContain("terminal herdr 0.9.5 (in Ghostty, from the server's start): ")
+})
+
+fontTest("herdr in Ghostty: Ghostty's +show-config runs with the client's GHOSTTY_BIN_DIR", async ($, on) => {
+  const w = world(on, { isMac: true, env: HERDR_SERVER_ENV, families: ['Iosevka'], run: argv => clientIs(() => ghosttyClient)(argv) ?? shows('font-family = Iosevka\n')(argv) })
+  expect(await details($)).toContain('terminal font Iosevka.')
+  const seen = w.ran.flatMap((argv, i) => (argv.join(' ').includes('+show-config') ? [w.envs[i]?.GHOSTTY_BIN_DIR] : []))
+  expect(seen.length).toBeGreaterThan(0)
+  expect(seen.every(dir => dir === '/G')).toBe(true)
+})
+
+fontTest('herdr: the check each second runs no full scan; a new client (Ghostty to kitty) is seen by the full scan each 10 s: the font is read and measured again', async ($, on) => {
+  let client = ghosttyClient
+  const w = world(on, {
+    isMac: true,
+    env: HERDR_SERVER_ENV,
+    families: ['Iosevka', 'Fira Code'],
+    files: { '/h/kc/kitty.conf': 'font_family Fira Code\n' },
+    run: argv => clientIs(() => client)(argv) ?? tickIs(() => null)(argv) ?? shows('font-family = Iosevka\n')(argv),
+  })
+  const first = await details($)
+  expect(first).toContain('terminal font Iosevka.')
+  expect(first).toContain('(in Ghostty, the client you used last)')
+  const measured = w.fontPaths.length
+  const scanned = scansOf(w)
+  // Each second the light check (the known client's tty), no full scan; nothing is read again.
+  await w.clock.advance(3000)
+  const ticks = w.ran.filter(argv => argv[2] === HERDR_TICK_SH)
+  expect(ticks.length).toBe(3)
+  expect(ticks[0]!.slice(4)).toEqual(['Darwin', '/dev/ttys012'])
+  expect(scansOf(w)).toBe(scanned)
+  expect(w.fontPaths.length).toBe(measured)
+  // kitty's client is new: the light check does not see it, the full scan at 10 s does.
+  client = kittyClient
+  await w.clock.advance(HERDR_SCAN_MS - 4000)
+  expect(scansOf(w)).toBe(scanned)
+  await w.clock.advance(1000)
+  expect(scansOf(w)).toBe(scanned + 1)
+  const later = await details($)
+  expect(later).toContain('terminal font Fira Code.')
+  expect(later).toContain('(in kitty, the client you used last)')
+  expect(w.fontPaths.length).toBeGreaterThan(measured)
+})
+
+fontTest('herdr: a terminal in front with no known client makes a full scan at the next second, and only once while it stays in front', async ($, on) => {
+  let client = ghosttyClient
+  let front: string | null = 'com.mitchellh.ghostty'
+  const w = world(on, {
+    isMac: true,
+    env: HERDR_SERVER_ENV,
+    families: ['Iosevka', 'Fira Code'],
+    files: { '/h/kc/kitty.conf': 'font_family Fira Code\n' },
+    run: argv => clientIs(() => `front ${front}\n${client}`)(argv) ?? tickIs(() => front)(argv) ?? shows('font-family = Iosevka\n')(argv),
+  })
+  expect(await details($)).toContain('(in Ghostty, the terminal in front)')
+  const scanned = scansOf(w)
+  // kitty comes in front with a new client: the next check scans and follows it.
+  client = kittyClient
+  front = 'net.kovidgoyal.kitty'
+  await w.clock.advance(1000)
+  expect(scansOf(w)).toBe(scanned + 1)
+  const later = await details($)
+  expect(later).toContain('terminal font Fira Code.')
+  expect(later).toContain('(in kitty, the terminal in front)')
+  // WezTerm in front, with no client: one scan; then the client of before stays, with no scan each second.
+  front = 'com.github.wez.wezterm'
+  await w.clock.advance(1000)
+  expect(scansOf(w)).toBe(scanned + 2)
+  await w.clock.advance(3000)
+  expect(scansOf(w)).toBe(scanned + 2)
+  expect(await details($)).toContain('(in kitty, the terminal in front)')
+})
+
+const itermClient = 'pid 50400\natime 30\ntty ttys013\ncmd herdr\napp /Applications/iTerm.app/Contents/MacOS/iTerm2\nenv\nherdr TERM=xterm-256color TERM_PROGRAM=iTerm.app\n'
+
+fontTest('herdr: a change of client to iTerm2 and back turns flip mode on and off, and redraws even with the same font', async ($, on) => {
+  let client = ghosttyClient
+  let front = 'com.mitchellh.ghostty'
+  let redraws = 0
+  on('state.set', async ($: any, e: any, next: any) => {
+    if (e.key === 'done') redraws++
+    return next(e)
+  })
+  const w = world(on, { isMac: true, env: HERDR_SERVER_ENV, families: ['Iosevka'], run: argv => clientIs(() => `front ${front}\n${client}`)(argv) ?? tickIs(() => front)(argv) ?? shows('font-family = Iosevka\n')(argv) })
+  expect(await details($)).not.toContain('upside down')
+  await w.clock.advance(3000)
+  const before = redraws
+  // iTerm2's font is not read here (no profile), so the font stays: only flip mode changes.
+  client = itermClient
+  front = 'com.googlecode.iterm2'
+  await w.clock.advance(1000)
+  const flipped = await details($)
+  expect(flipped).toContain("(in iTerm2, the terminal in front; pages and pictures stored upside down by rows, for iTerm2's placement bug)")
+  expect(flipped).toContain('terminal font Iosevka.')
+  expect(redraws).toBeGreaterThan(before)
+  const during = redraws
+  client = ghosttyClient
+  front = 'com.mitchellh.ghostty'
+  await w.clock.advance(1000)
+  expect(await details($)).not.toContain('upside down')
+  expect(redraws).toBeGreaterThan(during)
 })
 
 // ---- kitty ----------------------------------------------------------------------

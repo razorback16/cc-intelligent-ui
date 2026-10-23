@@ -13,6 +13,7 @@ import {
   firstLine, gridText, heightText, isTypstInfo, widthText,
 } from '../hooks/register'
 import { DRAWING_ROWS } from '../hooks/lib/settings'
+import { seamsOf } from '../hooks/lib/markdown'
 import { noNetworkEnv, wrapPid } from '../hooks/lib/typst'
 import { S, type Env, type Job } from '../hooks/lib/state'
 import { placeFirstLine } from '../hooks/lib/draw'
@@ -112,6 +113,31 @@ test('footnotes keep the answer in one segment; link definitions go to every seg
   const segments = splitSegments(`${long}\n\n[docs]: https://example.com`, 80)
   expect(segments.length).toBeGreaterThan(1)
   for (const s of segments) expect(s.includes('[docs]: https://example.com')).toBe(true)
+})
+
+test('a seam is the block above a break and the block below it', () => {
+  expect(seamsOf(['# T\n\nA paragraph.', '- a\n- b\n\nAfter.'])).toEqual([null, ['A paragraph.', '- a\n- b']])
+  expect(seamsOf(['One segment.'])).toEqual([null])
+  expect(seamsOf(['', 'Text.'])).toEqual([null, null])
+  // A fence is a short one of its kind, a typst fence has no code.
+  expect(seamsOf([fence('python', 50), '```typst\n#rect()\n```', 'End.'])).toEqual([null, ['```python\nx\n```', '```typst\n```'], ['```typst\n```', 'End.']])
+  // Link definitions are no block.
+  expect(seamsOf(['Text.\n\n[d]: https://e.com', 'More.\n\n[d]: https://e.com'])).toEqual([null, ['Text.', 'More.']])
+})
+
+test('the seams of a split answer are the blocks that meet at its breaks', () => {
+  const md = Array.from({ length: 120 }, (_, i) => (i % 3 ? para(i) : `- item ${i}\n- more ${i}`)).join('\n\n')
+  const segments = splitSegments(md, 80, 30)
+  const seams = seamsOf(segments)
+  expect(segments.length).toBeGreaterThan(2)
+  expect(seams[0]).toBeNull()
+  for (const [i, seam] of seams.entries()) {
+    if (!i) continue
+    expect(segments[i - 1]!.endsWith(seam![0])).toBe(true)
+    expect(segments[i]!.startsWith(seam![1])).toBe(true)
+    // In the text the two blocks meet as they are.
+    expect(md.includes(`${seam![0]}\n\n${seam![1]}`)).toBe(true)
+  }
 })
 
 test('the hash is stable and tells inputs apart', () => {

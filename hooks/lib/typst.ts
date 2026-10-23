@@ -2,16 +2,17 @@
 // answer's segments to PNG pages (with a retry in safe mode).
 import type { EngineInterface } from 'claude-code'
 
-import { COMPILE_TIMEOUT_MS, MAX_IMAGE_ROWS, NO_NETWORK, SEGMENT_ROWS, TOUCH_FLUSH_MS, TYPST_FALLBACKS } from './settings'
+import { COMPILE_TIMEOUT_MS, MAX_IMAGE_ROWS, NO_NETWORK, TOUCH_FLUSH_MS, TYPST_FALLBACKS } from './settings'
 import { DEFAULT_METRICS, fauxBoldOf, S, type Cell, type FontMetrics, type Job, type LeanFonts, type Metrics, type Page, type Result } from './state'
-import { firstLine, imagePathOf, localImages, plainOf, splitInTwo, splitSegments } from './markdown'
-import { inlineBudget } from './terminal'
+import { firstLine, imagePathOf, localImages, plainOf, seamsOf, splitInTwo, splitSegments } from './markdown'
+import { segmentBudget } from './terminal'
 import { fontFit, placeFirstLine, sizing } from './draw'
 import { DEFAULT_GRID, gridOf } from './grid'
-import { HEADERS_SH } from './host'
+import { HEADERS_SH, perlFor } from './host'
 import { logDebug } from './log'
 import { positionsOf, type Mark, type Positions } from './copy'
 import { hasBoldFace, leanFontsFor } from './fonts'
+import { flipFile } from './flip'
 import { delay, getenv, exists, ls, cat, write, exec, spawn } from './api'
 
 // The typst command and its environment. Network off (see NO_NETWORK) and a
@@ -109,8 +110,13 @@ export function rootPathOf(path: string): string | null {
 export const templateIn = (run: string, root: string) => `${run}${rootPathOf(root) ?? ''}/render/md.typ`
 
 // The doc JSON the template reads: the base folder, the segments and the
-// allow-list of images (path and full path of each, existingImages).
-export type Doc = { base: string; segments: readonly string[]; images: readonly string[] }
+// allow-list of images (path and full path of each, existingImages), and
+// the seams (the gaps at the breaks) when there is more than one segment.
+export type Doc = { base: string; segments: readonly string[]; images: readonly string[]; seams?: ([string, string] | null)[] }
+
+// The doc of a compile (and of its probe: the same seams).
+export const docOf = (base: string, segments: readonly string[], images: readonly string[]): Doc =>
+  ({ base, segments, images, ...(segments.length > 1 ? { seams: seamsOf(segments) } : {}) })
 
 // The full paths of a doc's allowed images (the odd entries), as in the root.
 export const imageFullsOf = (images: readonly string[]) =>
@@ -546,7 +552,7 @@ export async function probePage(
   if (!Array.isArray(segments) || segments.length !== o.pages || !job.env.typst) return null
   const typst = job.env.typst
   const images = Array.isArray(kept!.images) ? kept!.images.filter((p): p is string => typeof p === 'string') : []
-  const doc: Doc = { base: typeof kept!.base === 'string' ? kept!.base : '', segments, images }
+  const doc = docOf(typeof kept!.base === 'string' ? kept!.base : '', segments, images)
   const { inputs, ppi } = typstInputs(job, segments, dir, o.isSafe)
   const fonts = await leanFor($, job, segments)
   const ran = await inRoot($, job, dir, doc, run => runFonts($, job, fonts, fonts => {
@@ -601,14 +607,15 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
   // The room height of a drawing in rows (less the pt rounding); unknown
   // without a room (the default applies).
   const roomRows = job.room ? Math.ceil(job.room.heightPt / rowPt - 0.01) : undefined
-  let segments = splitSegments(job.text, job.columns, job.env.inline ? inlineBudget(job.cell) : SEGMENT_ROWS, job.size, roomRows)
+  let segments = splitSegments(job.text, job.columns, segmentBudget(job.env, job.columns, job.cell), job.size, roomRows)
   const base = job.base ?? job.env.cwd
   const images = await existingImages($, segments, base)
-  await write($, `${dir}/doc.json`, JSON.stringify({ base, segments, images }))
+  const doc = docOf(base, segments, images)
+  await write($, `${dir}/doc.json`, JSON.stringify(doc))
 
   let tag = 'a'
   let isSafe = false
-  let ran = await runTypst($, job, { base, segments, images }, dir, tag, false, signal)
+  let ran = await runTypst($, job, doc, dir, tag, false, signal)
   let note: string | undefined
   if (ran.isCancelled) return 'cancelled'
   if (ran.exitCode !== 0) {
@@ -618,7 +625,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     note = firstLine(ran.stderr.split('\n').find(l => /error:/i.test(l)) ?? ran.stderr).replace(/^.*error:\s*/i, '')
     tag = 'b'
     isSafe = true
-    ran = await runTypst($, job, { base, segments, images }, dir, tag, true, signal)
+    ran = await runTypst($, job, doc, dir, tag, true, signal)
     if (ran.isCancelled) return 'cancelled'
     if (ran.exitCode !== 0) {
       await logDebug($, job.env.cache, `compile ${job.key} with safe=1 failed:\n${ran.stderr}`)
@@ -635,8 +642,9 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     const cut = segments.flatMap((seg, i) => (pages![i]!.rows > MAX_IMAGE_ROWS ? splitInTwo(seg, job.columns, job.size, roomRows) : [seg]))
     if (cut.length > segments.length) {
       if (signal?.aborted) return 'cancelled'
-      await write($, `${dir}/doc.json`, JSON.stringify({ base, segments: cut, images }))
-      const again = await runTypst($, job, { base, segments: cut, images }, dir, isSafe ? 'd' : 'c', isSafe, signal)
+      const cutDoc = docOf(base, cut, images)
+      await write($, `${dir}/doc.json`, JSON.stringify(cutDoc))
+      const again = await runTypst($, job, cutDoc, dir, isSafe ? 'd' : 'c', isSafe, signal)
       if (again.isCancelled) return 'cancelled'
       const split = again.exitCode === 0 ? await pagesOfRun($, job, dir, isSafe ? 'd' : 'c', cut) : null
       if (split) {
@@ -646,8 +654,30 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     }
     pages = pages.map(p => ({ ...p, rows: Math.min(MAX_IMAGE_ROWS, p.rows) }))
   }
+  // Flip mode: each page stored for herdr in iTerm2, in place; a page that can not be stored fails the compile (the text shows).
+  if (job.flip) {
+    const flipped = await flipPages($, job, pages, signal)
+    if (typeof flipped === 'string') return flipped
+    pages = flipped
+  }
   const { bulletRow } = firstLinePlace(job, segments)
   const result: Result = { pages, bulletRow, ...(note ? { note } : {}) }
   await write($, `${dir}/pages.json`, JSON.stringify(result))
   return result
+}
+
+// The pages of a compile stored for flip mode (flip.ts: rows × B pixels
+// tall, the bands reversed), each in place, with its new height.
+async function flipPages($: EngineInterface, job: Job, pages: readonly Page[], signal?: AbortSignal): Promise<Page[] | 'failed' | 'cancelled'> {
+  const out: Page[] = []
+  for (const p of pages) {
+    const made = await flipFile($, { src: p.file, out: p.file, rows: p.rows, isPage: true, perl: perlFor(job.env.isMac), ...(signal ? { signal } : {}) })
+    if (signal?.aborted) return 'cancelled'
+    if (!made) {
+      await logDebug($, job.env.cache, `compile ${job.key}: could not store ${p.file} for herdr in iTerm2`)
+      return 'failed'
+    }
+    out.push({ ...p, height: made.height, flip: true })
+  }
+  return out
 }

@@ -4,6 +4,13 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 ## 0.3.3 (2026-10-22)
 
+### New
+
+- **herdr support** (the terminal multiplexer). In a herdr pane, Claude Code needs `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` to show pictures. The mod asks one time to add the shell line, as in iTerm2. `/iui setup` also adds it. Then close the pane and open a new herdr pane. herdr must run in a terminal that shows kitty pictures (kitty, Ghostty or iTerm2). Refer to [Terminals](docs/install.md#terminals).
+- **herdr in iTerm2.** iTerm2 shows each row of a herdr picture from the bottom of the image, so the rows of a page showed in the wrong order. When the herdr client in use is iTerm2, the mod stores the bands of rows of each page and picture in reverse order. Then iTerm2 shows them in the correct order. `/iui details` shows `pages and pictures stored upside down by rows` when this is on. It does not work with `herdr --remote` in iTerm2.
+- `/iui setup` works in herdr on Linux too.
+- `/iui details` names herdr, its version, the terminal that it runs in and how the mod found that terminal, for example `herdr 0.9.5 (in kitty, the terminal in front)`. If the mod uses the variables of the herdr server, it shows `(in Ghostty, from the server's start)`.
+
 ### Fixed
 
 - **The newest copy wins.** A click, a picture selection's up, `/iui grab` and the `ui.copy` change of picture cells each read their text first. An older one that was still reading wrote the clipboard over a newer copy. Now it writes nothing when a newer copy came: a newer click or up, a `$.ui.copy` (another plugin's, or the command button of a link row), Claude Code's own copy of a selection, or a copy in another app. A `ui.copy` change that lost its turn is refused. `/iui grab`, a click on no target and an up with no text copy nothing and cancel no other copy. An older copy (a click, an up, `/iui grab` or a `ui.copy` change) waits for a newer click or up that still reads its text, so it never writes first and is then overwritten. A copy in another app counts from the time the clipboard changed, not from the time the mod read it.
@@ -18,11 +25,18 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 - On Linux, the GTK clipboard read, watch and check run Python isolated (`-I`): a `gi.py` in the session's project folder no longer runs.
 - When `$.ui.selection()` fails, a `ui.copy` of picture cells and `/iui grab` copy again (before, they said that a newer copy came first).
 - A clipboard read that fails (an error or the 2 s timeout), or a late read of one of the mod's last 4 copies, no longer cancels a newer copy.
+- In herdr, the mod now uses the font and the background of the terminal that herdr runs in (Ghostty, kitty, iTerm2, cmux or Rio). Before, it used Menlo and the OS appearance, so the text could be dark on a dark background.
+  - With the `auto` theme, the background comes from herdr: herdr gives the background of the terminal in front (OSC 11). This also works with `herdr --remote`. If an answer does not come, the mod keeps the last background for up to 2 more checks.
+  - The font comes from the herdr client that you use. You can attach to one herdr server from more than one terminal, for example from Ghostty and from kitty. On macOS, the mod uses the client in the terminal app in front. When the app in front is not a terminal (for example a browser), it keeps the last client. On Linux, and between two clients in the same app, it uses the client where you typed last. When you change to a different terminal, the mod finds it at the next check (every 1 s), reads its font and draws the pictures again. If the mod cannot find the client, it uses the variables of the terminal that started the herdr server.
+- In herdr, a tall page of a long answer did not show (herdr does not send an image that is too large to the terminal). Refer to [Limitations](docs/limitations.md).
+- At a page break between two blocks (for example a paragraph and a list, or a table and a heading), the next page starts with the same gap as in one page. Before, the gap was lost. With the row grid off, the gap can be up to 1 row larger.
 
 ### Changed
 
 - On Linux, `xsel` no longer reads the clipboard: it cannot show the targets of a copy, so it cannot skip a password manager's copy. Install `xclip` (or GTK 3 for Python); `/iui details` tells you.
 - The README has a **Privacy and access** section: the network request, the clipboard reads and writes, the files, the processes and the Typst root.
+- The shell line of `/iui setup` sets the variable in iTerm2 and in herdr. `/iui setup` replaces the line of an older version. In herdr, the mod asks to update an older line. In iTerm2, the older line still works, and the mod does not ask.
+- In herdr, pages are shorter, so that each page is at most 16 MiB as pixels.
 
 ## 0.3.2 (2026-10-21)
 

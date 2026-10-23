@@ -5,13 +5,14 @@ import type { EngineInterface } from 'claude-code'
 
 import type { IuiTheme } from '../../types'
 import type { ThemeInfo } from './themes'
-import type { HostMode, ThemeSetting } from './mode'
+import type { HostMode, Osc11Kept, ThemeSetting } from './mode'
 import type { PlanVerdict } from './plan'
 import type { Drawn } from './copy'
 import type { GridMetrics } from './grid'
 import type { Checked } from './updates'
 import type { ClipWay } from './clipboard'
 import type { PdfFacts, PixelBox } from './images'
+import type { HerdrClient, HerdrHost } from './terminal'
 import { DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_WIDTH, type Height, type Width } from './settings'
 import { redraw } from './api'
 
@@ -57,6 +58,8 @@ export type Env = {
   canDraw: boolean
   // Over ssh: pictures go as `{ png }` bytes, not as a file name.
   inline: boolean
+  // Under herdr: pages are cut smaller (herdrBudget), so herdr sends them.
+  herdr?: boolean
   cache: string
   cwd: string
   root: string
@@ -72,8 +75,8 @@ export type Env = {
   designs: string
 }
 // `columns` and `rows`: the cell box the page was compiled for (it is drawn
-// at that box, never stretched).
-export type Page = { file: string; width: number; height: number; alt: string; columns: number; rows: number }
+// at that box, never stretched). `flip`: stored for flip mode (flip.ts).
+export type Page = { file: string; width: number; height: number; alt: string; columns: number; rows: number; flip?: boolean }
 export type Result = { pages: Page[]; bulletRow: number; note?: string }
 export type Job = {
   key: string
@@ -91,6 +94,8 @@ export type Job = {
   base?: string
   // The room for its drawings (a text with a live Typst block or a local image).
   room?: Room
+  // Flip mode (herdr in iTerm2): its pages are stored flipped (flip.ts).
+  flip?: boolean
   // The epoch (S.epoch) it was enqueued in: only the open epoch's jobs hold
   // its commit (set by enqueue).
   epoch: number
@@ -171,11 +176,29 @@ export const S = {
   termProgram: '',
   termName: '',
   itermProfile: undefined as string | undefined,
-  // kitty: TERM=xterm-kitty, or its KITTY_WINDOW_ID / KITTY_PID (set in setUp).
+  // kitty: TERM=xterm-kitty, or its KITTY_WINDOW_ID / KITTY_PID (set in setUp; setOuter).
   isKitty: false,
-  // iTerm2 (isItermIn) and cmux (Ghostty inside, with its CMUX_* variables), set in setUp.
+  // iTerm2 (isItermIn) and cmux (Ghostty inside, with its CMUX_* variables), set in setUp (cmux: setOuter).
   isIterm: false,
   isCmux: false,
+  // herdr (isHerdrIn), its version ('' not known), the client in use
+  // (pickHerdrClient: in the terminal app in front, or typed in last; null:
+  // none found, so the server's variables count) and how it was chosen, the
+  // terminal it runs in ('' outside herdr or not known; setOuter), all set
+  // in setUp and kept by the poll; and the last OSC 11 answer of its pane
+  // (keptOsc11).
+  isHerdr: false,
+  herdrVersion: '',
+  herdrClient: null as HerdrClient | null,
+  herdrBy: 'typed' as 'front' | 'typed',
+  herdrHost: '' as HerdrHost,
+  // The clients, the app in front and the time of the last full scan (null: none yet), for the light check.
+  herdrClients: [] as HerdrClient[],
+  herdrScanFront: null as string | null,
+  herdrScanAt: null as number | null,
+  // Polls under herdr since the last mode read (it runs every HOST_POLL_MS).
+  hostTicks: 0,
+  osc11Kept: null as Osc11Kept,
   // A font folder for Typst (TYPST_FONT_PATHS): the font a terminal carries
   // in its program (Ghostty's, Rio's), when it draws it. '' for none.
   fontPaths: '',
@@ -186,11 +209,13 @@ export const S = {
   isRemote: false,
   // IUI_DEBUG is set (setUp): trace lines go to the debug log.
   debug: false,
-  // iTerm2 with the engine's pictures off at start: /iui setup can help
+  // iTerm2 or herdr with the engine's pictures off at start: /iui setup can help
   // (`setupNeeded`); the question is asked once per load (`setupAsked`).
   setupNeeded: false,
   setupAsked: false,
   watch: null as { cancel: () => void } | null,
+  // The poll timer's period (watchHost).
+  watchMs: 0,
   checking: false,
   // Linux: the tool that reads the desktop portal's colour scheme (host.ts;
   // null: not tried yet, '': none works, so GNOME's gsettings is read).

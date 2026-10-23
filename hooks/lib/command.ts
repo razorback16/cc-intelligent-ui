@@ -77,7 +77,7 @@ const SUBCOMMANDS = [
   { name: 'select', description: 'select and copy picture text with the mouse, on or off' },
   { name: 'updates', description: 'look for a new version once a day, on or off' },
   { name: 'theme', description: 'list the themes, or switch to one' },
-  { name: 'setup', description: 'iTerm2: add the shell line that turns pictures on' },
+  { name: 'setup', description: 'iTerm2 and herdr: add the shell line that turns pictures on' },
   { name: 'details', description: 'the mode source, the terminal font, Typst and the terminal' },
   { name: 'grab', description: 'copy the text of the pictures you last selected (or copied, on the main screen)' },
   { name: 'dump', description: 'show what the clipboard held and how it was read' },

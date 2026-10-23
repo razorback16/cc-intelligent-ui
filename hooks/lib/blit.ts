@@ -22,6 +22,7 @@ import { forgetPages, holdPages, keyOf, needFrames } from './pagecache'
 import type { DrawnPage } from './copy'
 import type { SelRow } from './select'
 import { perlFor } from './host'
+import { WRITE_PL } from './flip'
 import { traceDebug } from './log'
 import { nowMs, exec, paint, log } from './api'
 
@@ -70,9 +71,8 @@ export const FRAME_MS = 16
 const FILES_KEPT = 4
 const FILE_KEEP_MS = 2000
 
-// Writes stdin's base64 to the file (its folder made, a temporary name,
-// then renamed), and deletes the older frames named after it.
-export const WRITE_PL = 'use MIME::Base64; local $/; my $b = <STDIN>; my ($f, @old) = @ARGV; my ($d) = $f =~ m{^(.*)/}; mkdir($d, 0700) unless -d $d; open(my $o, ">:raw", "$f.tmp") or die "$!\\n"; print $o decode_base64($b); close($o) or die "$!\\n"; rename("$f.tmp", $f) or die "$!\\n"; unlink(@old)'
+// The perl that writes a frame (flip.ts: it writes the PNGs of flip mode too).
+export { WRITE_PL } from './flip'
 
 // Each drawing's site (the requestId its Images are drawn under) and its
 // Images' key prefix, noted by drawPages; what each page shows now (sigOf,

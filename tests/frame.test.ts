@@ -562,3 +562,23 @@ test('Ghostty is told by TERM_PROGRAM or TERM, and cmux (its engine) counts too'
     S.isCmux = was.cmux
   }
 })
+
+test('herdr in Ghostty counts as Ghostty (its font and config); herdr elsewhere does not', () => {
+  const was = { program: S.termProgram, name: S.termName, cmux: S.isCmux, host: S.herdrHost }
+  try {
+    S.isCmux = false
+    S.termProgram = 'herdr'
+    S.termName = 'xterm-256color'
+    S.herdrHost = 'ghostty'
+    expect(isGhosttyHere()).toBe(true)
+    S.herdrHost = 'kitty'
+    expect(isGhosttyHere()).toBe(false)
+    S.herdrHost = ''
+    expect(isGhosttyHere()).toBe(false)
+  } finally {
+    S.termProgram = was.program
+    S.termName = was.name
+    S.isCmux = was.cmux
+    S.herdrHost = was.host
+  }
+})

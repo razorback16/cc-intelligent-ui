@@ -48,7 +48,7 @@ import { pagesOf, type Drawing } from './lib/answer'
 import { clipboardNow, clipboardRead, clipWatchArgs, clipWayReady, hintText } from './lib/clipboard'
 import { setUp } from './lib/env'
 import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/frame'
-import { roomColumns } from './lib/terminal'
+import { herdrText, isFlipHere, roomColumns } from './lib/terminal'
 import { onScreenOf, pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
 import { drawPageField, pasteDir, pdfPagesOf, rowsAfter, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
 import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
@@ -81,8 +81,8 @@ export {
   type ThemeInfo, type ThemeProblem, type ThemeSyntax,
 } from './lib/themes'
 export { commandSuggestions, parseCommand, type Command, type Suggestion } from './lib/command'
-export { hasSetup, SETUP_END, SETUP_NOT_MAC, SETUP_START, setupBlock, shellRcOf, withoutSetup, withSetup, type ShellRc } from './lib/setup'
-export { fcPatternOf, OSC11_PL, perlFor, PROGRAM_FONTS_PL, PROGRAM_FONTS_SH, WATCH_PL } from './lib/host'
+export { hasNewSetup, hasSetup, SETUP_END, SETUP_NOT_MAC, SETUP_START, setupBlock, setupWordsOf, shellRcOf, withoutSetup, withSetup, type ShellRc } from './lib/setup'
+export { fcPatternOf, HERDR_CLIENT_SH, HERDR_TICK_SH, OSC11_PL, perlFor, PROGRAM_FONTS_PL, PROGRAM_FONTS_SH, WATCH_PL } from './lib/host'
 export {
   convertCall, isSafePage, measureCall, noNetworkEnv, pageRowsOf, parseOd, pngSize, probeCall, resultOf, roomInputs, shouldRetrySafe, typstCall, typstInputs,
 } from './lib/typst'
@@ -974,19 +974,25 @@ export const register: Register = on => {
         ? `Intelligent UI draws no pictures: ${S.cacheProblem} (it never uses a shared folder instead)`
         : ready.canDraw
         ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
-        : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+ and Rio 0.5.27+ with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
+        : S.isHerdr && S.setupNeeded
+        ? 'Claude Code draws no pictures in herdr until CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 is set when it starts (run /iui setup), so answers stay text'
+        : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+, Rio 0.5.27+ and herdr with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
+      // In herdr: its version, the terminal it runs in and where that came from (and flip mode).
+      const herdr = S.isHerdr ? `terminal ${herdrText(S.herdrVersion, S.herdrHost, S.herdrClient ? (S.herdrBy === 'front' ? 'front' : 'client') : 'server', isFlipHere(ready))}: ` : ''
       await clipWayReady()
       const auto = `Picture select: ${selectState()}\n/iui grab hint: ${hintOf(state === 'on')}`
       const updates = `Update checks: ${updateLine(await updateState($))}`
-      return { text: `Intelligent UI is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, row grid ${S.grid ? 'on' : 'off'}, picture select ${S.select ? 'on' : 'off'}, ${font}. ${typst}; ${terminal}.\n${auto}\n${updates}` }
+      return { text: `Intelligent UI is ${state}, theme ${theme}, ${modeLine(S.theme, S.setting, S.settingRaw, S.host)}, text size ${S.size}%, width ${widthText(S.width)}, image and drawing height ${heightText(S.height)}, row grid ${S.grid ? 'on' : 'off'}, picture select ${S.select ? 'on' : 'off'}, ${font}. ${typst}; ${herdr}${terminal}.\n${auto}\n${updates}` }
     }
     // The short state: what is set, and only the problems that keep pictures away.
     const sized = (v: number | 'full' | 'half', unit: string) => (typeof v === 'number' ? `${v} ${unit}` : v)
     const lines = [`Intelligent UI is ${state}: theme ${theme}, ${S.theme}, text ${S.size}%, width ${sized(S.width, 'columns')}, height ${sized(S.height, 'rows')}, grid ${S.grid ? 'on' : 'off'}.`]
     if (S.cacheProblem) lines.push(`No pictures: ${S.cacheProblem}. See /iui details.`)
-    else if (S.setupNeeded) lines.push('In iTerm2, run /iui setup once to show pictures.')
+    else if (S.setupNeeded) lines.push(`In ${S.isHerdr ? 'herdr' : 'iTerm2'}, run /iui setup once to show pictures.`)
     else if (!ready.canDraw) {
-      const where = ready.isMac ? 'kitty, Ghostty and iTerm2 3.6+' : 'kitty and Ghostty, and in Rio with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1'
+      const where = ready.isMac
+        ? 'kitty, Ghostty and iTerm2 3.6+, and in herdr with /iui setup'
+        : 'kitty and Ghostty, in herdr with /iui setup, and in Rio with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1'
       lines.push(`This terminal shows no pictures, so answers stay text. Pictures show in ${where}.`)
     }
     if (!ready.typst) lines.push(`Typst is not installed, so answers stay text. Install it: ${typstHintOf(ready.isMac)}`)
@@ -1002,7 +1008,7 @@ export const register: Register = on => {
     S.settingRaw = typeof set.value === 'string' ? set.value : ''
     S.setting = settingOf(set.value)
     // Not awaited: the setting is saved at once; the OS read redraws later.
-    if (S.setting === 'auto') void pollHost($).catch(() => undefined)
+    if (S.setting === 'auto') void pollHost($, true).catch(() => undefined)
     else showMode($)
     watchHost($)
     return set

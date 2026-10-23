@@ -21,7 +21,7 @@ import type { ShownLink } from './draw'
 // rows above the pages in their message when the layout says (`top`), and
 // the rows drawn under them besides a Typst error line (`after`); see Place.
 export function noteDrawn(id: string, result: Result, room: number, at: { top?: number; after?: number } = {}) {
-  const pages: DrawnPage[] = result.pages.map(p => ({ file: p.file, width: p.width, height: p.height, ...fitBox(p, room) }))
+  const pages: DrawnPage[] = result.pages.map(p => ({ file: p.file, width: p.width, height: p.height, ...fitBox(p, room), ...(p.flip ? { flip: true } : {}) }))
   const dir = result.pages[0]?.file.replace(/\/[^/]*$/, '') ?? ''
   const was = drawnAnswers.get(id)
   const same = (p: DrawnPage, i: number) => {

@@ -127,6 +127,131 @@ test('with the theme on auto, Ghostty draws as its background is', async ($, on)
   expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain('mode dark (auto, from Ghostty: theme Night background)')
 })
 
+// herdr in Ghostty on a light Mac: herdr's TERM_PROGRAM hides Ghostty, but
+// its GHOSTTY_RESOURCES_DIR is kept, so Ghostty's dark config counts.
+test('with the theme on auto, herdr in Ghostty draws as the Ghostty background is', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_RESOURCES_DIR: '/R', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
+  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', async ($: any, e: any, next: any) => {
+    const argv: string[] = e.argv
+    const cmd = argv.join(' ')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && cmd.includes('+show-config')) return ok('background = #1d1f21\n')
+    if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
+    return next(e)
+  })
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(ran.text).toContain('mode dark (auto, from Ghostty: config background)')
+})
+
+// herdr in iTerm2 on a light Mac: ITERM_PROFILE is kept, so the profile counts.
+test('with the theme on auto, herdr in iTerm2 draws as the iTerm2 profile is', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', ITERM_PROFILE: 'Default', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
+  const dark = { 'Red Component': 0.11, 'Green Component': 0.15, 'Blue Component': 0.17 }
+  const marks = JSON.stringify([{ Name: 'Default', Guid: 'G1', 'Background Color': dark }])
+  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', async ($: any, e: any, next: any) => {
+    const argv: string[] = e.argv
+    const cmd = argv.join(' ')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'sh' && cmd.includes('TabStyleWithAutomaticOption')) return ok(`0\n@\nG1\n@\n${marks}\n`)
+    if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
+    return next(e)
+  })
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(ran.text).toContain('mode dark (auto, from iTerm2: profile Default background)')
+  expect(ran.text).toContain("terminal herdr (in iTerm2, from the server's start): ")
+})
+
+// herdr answers OSC 11 with the background of the terminal in front: it is
+// the first source of auto. A missed answer (Claude Code read it) keeps the
+// last one until 3 polls in a row miss; then the terminal's config counts.
+test('with the theme on auto, herdr takes the OSC 11 background first, and keeps it over 2 missed answers', async ($, on) => {
+  mock.store(on)
+  const clock = mock.clock(on)
+  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', GHOSTTY_RESOURCES_DIR: '/R', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
+  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const answers = ['\x1b]11;rgb:ffff/ffff/ffff\x1b\\', '', '', '', '\x1b]11;rgb:ffff/ffff/ffff\x07', '']
+  let probes = 0
+  on('process.run', async ($: any, e: any, next: any) => {
+    const argv: string[] = e.argv
+    const cmd = argv.join(' ')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'perl' && cmd.includes('11;?')) return ok(answers[probes++] ?? '')
+    if (argv[0] === 'sh' && cmd.includes('+show-config')) return ok('background = #1d1f21\n')
+    if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
+    return next(e)
+  })
+  const mode = async () => (await $.command.run({ command: 'iui', args: 'details' } as any)).text as string
+  const herdrLight = 'mode light (auto, from herdr: OSC 11 background of the terminal in front)'
+  expect(await mode()).toContain(herdrLight)
+  // Under herdr the poll runs each second, but the mode is read each 3 s.
+  await clock.advance(2000)
+  expect(probes).toBe(1)
+  // Two polls with no answer: the last answer stays.
+  await clock.advance(1000)
+  expect(await mode()).toContain(herdrLight)
+  await clock.advance(3000)
+  expect(await mode()).toContain(herdrLight)
+  // The third in a row: Ghostty's config (dark).
+  await clock.advance(3000)
+  expect(await mode()).toContain('mode dark (auto, from Ghostty: config background)')
+  await clock.advance(3000)
+  expect(await mode()).toContain(herdrLight)
+  expect(probes).toBe(5)
+})
+
+// herdr --remote: the pane is over ssh (the mod runs on the remote
+// computer), but herdr's OSC 11 answer is still the user's terminal.
+test('with the theme on auto, a remote herdr pane takes the OSC 11 background first, then COLORFGBG', async ($, on) => {
+  mock.store(on)
+  const clock = mock.clock(on)
+  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', SSH_CONNECTION: '1 2 3 4', COLORFGBG: '0;15', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
+  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const answers = ['\x1b]11;rgb:0000/0000/0000\x1b\\']
+  let probes = 0
+  on('process.run', async ($: any, e: any, next: any) => {
+    const argv: string[] = e.argv
+    const cmd = argv.join(' ')
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nLinux\n')
+    if (argv[0] === 'perl' && cmd.includes('11;?')) return ok(answers[probes++] ?? '')
+    return next(e)
+  })
+  const mode = async () => (await $.command.run({ command: 'iui', args: 'details' } as any)).text as string
+  expect(await mode()).toContain('mode dark (auto, from herdr: OSC 11 background of the terminal in front)')
+  await clock.advance(9000)
+  expect(await mode()).toContain('mode light (auto, from COLORFGBG)')
+})
+
+// herdr with no hint of its terminal: as before, COLORFGBG, then the OS.
+test('with the theme on auto, herdr in a terminal it does not know follows the OS', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  mock.env(on, { HOME: '/h', TERM_PROGRAM: 'herdr', HERDR_ENV: '1', TERM: 'xterm-256color', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
+  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const ran: string[] = []
+  on('process.run', async ($: any, e: any, next: any) => {
+    const argv: string[] = e.argv
+    const cmd = argv.join(' ')
+    ran.push(cmd)
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(cmd)) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'defaults' && argv.includes('AppleInterfaceStyle')) return ok('', 1)
+    return next(e)
+  })
+  const got = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(got.text).toContain('mode light (auto, from macOS)')
+  expect(ran.some(c => c.includes('+show-config') || c.includes('TabStyleWithAutomaticOption'))).toBe(false)
+})
+
 // kitty on a light Mac: kitty.conf's included theme is dark; once auto theme
 // files exist, the one for the OS scheme is used.
 test('with the theme on auto, kitty draws as its config or auto theme is', async ($, on) => {

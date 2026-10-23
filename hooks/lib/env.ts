@@ -9,11 +9,11 @@ import {
 import { DEFAULT_METRICS, refresh, S, settingsSet, type Env } from './state'
 import { resolveMode, settingOf } from './mode'
 import { isItermIn } from './terminals'
-import { canDrawIn, isSet } from './terminal'
+import { canDrawIn, isHerdrIn, isSet, needsSetup } from './terminal'
 import { claudeTmpOf } from './images'
 import { applyTheme } from './themes'
 import { registerCommand } from './command'
-import { readHostMode, termFontOf, watchHost } from './host'
+import { readHerdrClient, readHostMode, setOuter, termFontOf, watchHost } from './host'
 import { readFrame, setFrame, watchFrame } from './frame'
 import { offerSetup } from './setup'
 import { findClipWay } from './clipboard'
@@ -69,21 +69,32 @@ export function setUp($: EngineInterface): Promise<Env> {
     S.hostOs = os.trim()
     S.termProgram = program
     S.termName = term
-    S.itermProfile = (await getenv($, 'ITERM_PROFILE')) || undefined
-    S.isKitty = /kitty/i.test(term) || !!(await getenv($, 'KITTY_WINDOW_ID')) || !!(await getenv($, 'KITTY_PID'))
+    S.isHerdr = isHerdrIn({ program, herdrEnv: await getenv($, 'HERDR_ENV') })
+    S.herdrVersion = S.isHerdr ? ((await getenv($, 'TERM_PROGRAM_VERSION')) ?? '').trim() : ''
+    // Under herdr the client in use gives the terminal (the one of before stays while the app in front has none); else (none found) the server's variables.
+    const was = S.herdrClient
+    S.herdrClient = null
+    S.osc11Kept = null
+    if (S.isHerdr) await readHerdrClient($, was).catch(() => false)
+    await setOuter($)
     S.isRemote = ssh
     S.debug = isSet(await getenv($, 'IUI_DEBUG'))
     S.isIterm = isItermIn({
       program,
-      profile: S.itermProfile,
+      profile: (await getenv($, 'ITERM_PROFILE')) || undefined,
       session: (await getenv($, 'ITERM_SESSION_ID')) || undefined,
       lcTerminal: (await getenv($, 'LC_TERMINAL')) || undefined,
     })
-    S.setupNeeded = S.isIterm && !terminalDraws && !ssh && S.hostOs === 'Darwin' &&
-      !(await getenv($, 'TMUX')) && !(await getenv($, 'STY')) && (await getenv($, 'CLAUDE_CODE_SESSION_KIND')) !== 'bg'
+    S.setupNeeded = needsSetup({
+      iterm: S.isIterm,
+      herdr: S.isHerdr,
+      draws: terminalDraws,
+      ssh,
+      os: S.hostOs,
+      tmux: !!(await getenv($, 'TMUX')) || !!(await getenv($, 'STY')),
+      background: (await getenv($, 'CLAUDE_CODE_SESSION_KIND')) === 'bg',
+    })
     if (S.setupNeeded) void offerSetup($).catch(() => undefined)
-    S.isCmux = !!(await getenv($, 'CMUX_SURFACE_ID')) || !!(await getenv($, 'CMUX_WORKSPACE_ID')) || !!(await getenv($, 'CMUX_SOCKET_PATH'))
-    S.colorFgBg = (await getenv($, 'COLORFGBG')) ?? ''
     S.userFontPaths = (await getenv($, 'TYPST_FONT_PATHS')) ?? ''
     if (S.setting === 'auto') S.host = (await readHostMode($).catch(() => null)) ?? S.host
     S.theme = resolveMode(S.setting, S.host)
@@ -139,6 +150,7 @@ export function setUp($: EngineInterface): Promise<Env> {
       typst,
       canDraw,
       inline: ssh && canDraw,
+      herdr: S.isHerdr,
       cache,
       cwd: await cwd($).catch(() => '/'),
       root,

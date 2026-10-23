@@ -251,8 +251,9 @@ export function positionsOf(marks: readonly Mark[], ppi: number): Positions {
 
 // A page drawn this session: its PNG size and the box its Image takes as
 // drawn (fitBox: an old page in an open epoch draws smaller than it was
-// compiled for). The placeholders count the cells of that box.
-export type DrawnPage = { file: string; width: number; height: number; columns: number; rows: number }
+// compiled for). The placeholders count the cells of that box. `flip`: its
+// file is stored for flip mode (flip.ts).
+export type DrawnPage = { file: string; width: number; height: number; columns: number; rows: number; flip?: boolean }
 // The rows of a drawing's transcript message on screen at its last draw
 // (e.props.onScreen on the terminal): rows `first` to `last` of its `of`,
 // from the first row of the tree the hook drew.

@@ -121,6 +121,20 @@ test('the safe retry and the probe each run in a run folder of their own', async
   reset()
 })
 
+test('a doc of more than one segment keeps its seams in the run folder, for the compile and the probe', async () => {
+  reset()
+  const h = host()
+  const job = jobOf(Array.from({ length: 60 }, (_, i) => `Paragraph ${i} ${'word '.repeat(40)}`.trim()).join('\n\n'))
+  await compile(h.$, job)
+  const written = JSON.parse(h.files.get(`/c/${job.key}/doc.json`)!)
+  expect(written.segments.length).toBeGreaterThan(1)
+  expect(Array.isArray(written.seams)).toBe(true)
+  expect(JSON.parse(stages(h)[0]!.stdin!).seams).toEqual(written.seams)
+  await probePage(h.$, job, `/c/${job.key}`, { page: 0, pages: written.segments.length, isSafe: false })
+  expect(JSON.parse(stages(h).at(-1)!.stdin!).seams).toEqual(written.seams)
+  reset()
+})
+
 test('two compiles of the same key at once never share a run folder', async () => {
   reset()
   const h = host()

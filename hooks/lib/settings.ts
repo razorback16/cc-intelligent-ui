@@ -78,6 +78,11 @@ export const NO_NETWORK = 'http://127.0.0.1:9'
 // how long one read may take.
 export const HOST_POLL_MS = 3000
 export const HOST_CHECK_MS = 2000
+// Under herdr: how often the light client check runs (the app in front and
+// the known clients' tty times), and the most time between two full scans
+// (the process list: new or gone clients).
+export const HERDR_POLL_MS = 1000
+export const HERDR_SCAN_MS = 10000
 // Copy: how often the watcher reads the clipboard's change count (macOS;
 // one call in the watcher, no process), and the word positions of how
 // many pages are kept in memory (a copy probes only the pages it reads).
