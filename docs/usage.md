@@ -29,10 +29,22 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
   - Markdown files (`.md` or `.markdown`, 256 KiB or less). The mod draws the file as rendered pictures, the same as an answer. A relative image path in the file starts from the folder of the file.
 
   Other files stay as the normal row. JPEG images, WebP images, SVG images, PDF files and Markdown files need Typst.
-- Images that you paste into the prompt (`[Image #N]`). The mod draws each image under your prompt.
 
-  These pictures are not larger than the image. They are not wider than the transcript. The height setting (`/iui height`) sets the most rows that they can use (Typst drawings use it too): by default, half the screen and not more than 24 rows. The mod draws PNG, JPEG, WebP and SVG images only. Other image types (for example GIF) stay as the normal row. The size of an SVG image is its width and height in CSS px.
+  These images are not larger than the image file. They are not wider than the transcript. The height setting (`/iui height`) sets the most rows that they can use (Typst drawings use it too): by default, half the screen and not more than 24 rows. The mod draws PNG, JPEG, WebP and SVG images only. Other image types (for example GIF) stay as the normal row. The size of an SVG image is its width and height in CSS px.
+- Images that you paste into the prompt (`[Image #N]`). Before you send the prompt, a small preview of each image shows above the prompt box. After you send it, the mod draws the images under your prompt at the same size: side by side, approximately 5 rows tall, with no number (Claude Code shows the numbers there). The height setting does not apply to them. Claude Code's own `[Image #N]` rows stay under them: a mod cannot change these rows. Refer to [Preview of pasted images](#preview-of-pasted-images).
 - The plan in plan mode (the ExitPlanMode tool). The mod draws the plan as a picture in the transcript, the same as an answer. Then the mod asks you to approve the plan. Refer to [Plan approval](#plan-approval).
+
+## Preview of pasted images
+
+When you paste an image into the prompt box, the box shows `[Image #N]`. The mod then shows a small preview of the image above the prompt box, before you send the prompt. The number of the image (`#N`) shows in dim text at the left of its preview.
+
+- The preview fills its cells. Typst makes a copy of the image that has the size of the cells, one time for each image and size, in the cache folder. Until the copy is ready, the preview shows the image as it is. Without Typst, or if Typst cannot make the copy, the preview also shows the image as it is.
+- The previews show side by side. When they do not fit in one line, they go on to the next line.
+- A preview is approximately 5 rows tall, or less when the space above the prompt box is small. The image keeps its shape.
+- When you delete the `[Image #N]` text, the preview of that image goes away. When you send or clear the prompt, all the previews go away.
+- The mod shows PNG images only. If Claude Code wrote no PNG file for an image, that image has no preview.
+- A survey above the prompt box hides the previews until it closes.
+- With `/iui off`, or in a terminal that shows no pictures, there are no previews.
 
 ## The intelligent-ui skill
 
@@ -54,7 +66,7 @@ You can also start the skill yourself: type `/cc-intelligent-ui:intelligent-ui` 
 | `/iui width` | Shows the width: the most columns that a picture can use |
 | `/iui width <40–400>` | Sets the most columns that a picture can use (kept for later sessions) |
 | `/iui width full` | Pictures use the full width of the terminal, the same as the text of Claude Code (kept for later sessions). This is the default. A picture is never wider than 255 columns. |
-| `/iui height` | Shows the image height: the most rows that an image can use. This applies to images (sent or pasted) and to Typst drawings in answers. |
+| `/iui height` | Shows the image height: the most rows that an image can use. This applies to images that Claude sends and to Typst drawings in answers. Images that you paste always show small. |
 | `/iui height half` | An image uses half the terminal height, from 6 to 24 rows (kept for later sessions). This is the default. |
 | `/iui height full` | An image uses the terminal height less 16 rows (kept for later sessions). The 16 rows are for the row of the file, the text around it and the prompt. |
 | `/iui height <6–200>` | Sets the most rows that an image can use (kept for later sessions). An image is never taller than with `full`. |

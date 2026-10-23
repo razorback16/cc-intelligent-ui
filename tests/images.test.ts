@@ -4,10 +4,11 @@ import { onScreenOf } from '../hooks/lib/images'
 import { encodeSteps, flipRows, WRITE_PL } from '../hooks/lib/flip'
 import { decodePng, fromBase64, toBase64, type Rgba } from '../hooks/lib/png'
 import { HERDR_CLIENT_SH } from '../hooks/lib/host'
+import { FILL_SH } from '../hooks/lib/typst'
 import {
   claudeTmpOf, convertBox, convertCall, convertedPath, DEFAULT_CELL, factsAfter, folderOf, imageKindOf, isMarkdownPath, isNoPageError, isPdfPath, lastKnownPage,
   NO_FACTS, pageControls, pageCountOf, pageOf, parsePage, pasteDirOf, pastedImagePath, pastedNumbers, COMMIT_MIN_MS, DEFAULT_HEIGHT, RESIZE_QUIET_MS, PICTURE_MAX_ROWS, PICTURE_ROOM_ROWS, pictureCells,
-  pictureRowsFor, projectSlug, renderKey, rowsAfter, sentFiles, sentImages, shortError, type Under,
+  pictureRowsFor, projectSlug, renderKey, rowsAfter, sentFiles, sentImages, shortError, type Under, altOf, cellPixels, fillCall, filledPath, labelColumns, labelOf, linesOf, previewLayout, PREVIEW_RETRY_MS, sameNumbers,
 } from '../hooks/register'
 
 // ---- Pure helpers -----------------------------------------------------------
@@ -371,6 +372,11 @@ function world(on: any, o: {
   herdr?: string
   // The bytes (base64) a read of a PNG in the cache gives (else PNG).
   bytes?: string
+  // A fill compile (render/fill.typ) ends only when this settles; it fails with `failFill`.
+  holdFill?: Promise<void>
+  failFill?: boolean
+  // The root of a fill (FILL_SH) can not be made.
+  failStage?: boolean
 } = {}) {
   // Intelligent UI's store in memory (as mock.store), and its writes by key;
   // `redrawsAt`: by key, the `done` writes (redraws) made when its write ended.
@@ -378,8 +384,11 @@ function world(on: any, o: {
   const kept: Record<string, unknown> = {}
   const redrawsAt: Record<string, number> = {}
   let redraws = 0
+  // Every state write, by key.
+  const sets: string[] = []
   on('state.set', async ($: any, e: any, next: any) => {
     if (e.key === 'done') redraws++
+    sets.push(e.key)
     return next(e)
   })
   on('store.get', async ($: any, e: any) => ({ value: store.get(e.key) }))
@@ -401,6 +410,10 @@ function world(on: any, o: {
   const heads: string[] = []
   const reads: string[] = []
   const converts: string[][] = []
+  const fills: string[][] = []
+  // The roots of the fills made (FILL_SH's arguments), and the folders removed.
+  const fillRoots: string[][] = []
+  const removed: string[] = []
   const moves: string[][] = []
   // The PNGs perl writes (flip mode), by path.
   const pngs = new Map<string, Uint8Array>()
@@ -444,6 +457,15 @@ function world(on: any, o: {
       if (o.failMove || !(argv[2]! in files)) return ok('', 1)
       files[argv[3]!] = files[argv[2]!]!
       delete files[argv[2]!]
+      return ok('')
+    }
+    if (argv[0] === 'sh' && argv[2] === FILL_SH) return (fillRoots.push(argv.slice(4)), ok('', o.failStage ? 1 : 0))
+    if (argv[0] === 'rm' && argv[1] === '-rf') return (removed.push(argv[2]!), ok(''))
+    if (argv[0] === '/usr/bin/typst' && argv[1] === 'compile' && argv.at(-2)!.endsWith('/fill.typ')) {
+      fills.push(argv)
+      await o.holdFill
+      if (o.failFill) return ok('', 1)
+      files[argv.at(-1)!] = HEAD
       return ok('')
     }
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'compile' && argv.at(-2)!.endsWith('/render/convert.typ')) {
@@ -502,7 +524,7 @@ function world(on: any, o: {
   })
   on('ui.toast', async () => ({ value: undefined }))
   on('ui.render', () => ENGINE as any)
-  return { clock, heads, reads, converts, moves, pngs, docs, logs, files, texts, mtimes, written, kept, redrawsAt, redraws: () => redraws }
+  return { clock, heads, reads, converts, moves, pngs, docs, logs, files, texts, mtimes, written, kept, redrawsAt, redraws: () => redraws, sets, stats, fills, fillRoots, removed }
 }
 
 const sent = (output: unknown, isErrored = false, id = 'tu-1') =>
@@ -1226,15 +1248,62 @@ test('an errored SendUserFile call leaves the row as it is', async ($, on) => {
   expect(await ui.drawn()).toMatchObject(ENGINE)
 })
 
-test('an image the user pastes draws under the prompt', async ($, on) => {
-  world(on, { files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED] })
+// The previews as the row draws them: after the gutter, a line of pictures
+// PREVIEW_GAP apart. The band's have no gutter: each is after its number.
+const PREVIEWS = { type: 'Box', props: { flexDirection: 'column', marginLeft: 2 } }
+const BAND_PREVIEWS = { type: 'Box', props: { flexDirection: 'column', marginLeft: 0 } }
+const LINE = { type: 'Box', props: { flexDirection: 'row', columnGap: 2 } }
+// A band preview: its dim number in a column of the number and a space, then
+// the picture.
+const labelled = (n: number) => ({
+  type: 'Box',
+  props: { flexDirection: 'row' },
+  children: [
+    { type: 'Box', props: { width: `#${n}`.length + 1 }, children: [{ type: 'Text', props: { dimColor: true } }] },
+    { type: 'Image', props: { alt: `[Image #${n}]` } },
+  ],
+})
+
+test('an image the user pastes draws under the prompt, as its preview did: small, after the gutter', async ($, on) => {
+  world(on, { files: { [`${PASTED}/5.png`]: HEAD, [`${PASTED}/6.png`]: TALL }, dirs: [PASTED] })
   await ready($)
   const ui = await $.ui.mount(prompt('[Image #5] what is this'))
   const tree: any = await ui.drawn()
   expect(tree.children[0]).toMatchObject(ENGINE)
   const [image] = images(tree)
   expect(image.props.source).toMatchObject({ file: `${PASTED}/5.png`, format: 'png' })
-  expect(image.props).toMatchObject({ columns: 40, rows: 10 })
+  expect(image.props).toMatchObject({ columns: 20, rows: 5, alt: '[Image #5]' })
+  expect(tree.children[1]).toMatchObject(PREVIEWS)
+  expect(tree.children[1].children[0]).toMatchObject(LINE)
+  // The image alone: no number (Claude Code shows it in the row).
+  expect(tree.children[1].children[0].children[0]).toMatchObject({ type: 'Image', props: { alt: '[Image #5]' } })
+  // Two images: side by side, 2 columns apart.
+  const two: any = await (await $.ui.mount(prompt('[Image #5] and [Image #6]', undefined, 'u-2'))).drawn()
+  expect(two.children[1].children).toHaveLength(1)
+  expect(two.children[1].children[0]).toMatchObject(LINE)
+  expect(alts(two)).toEqual(['[Image #5]', '[Image #6]'])
+})
+
+test('under the prompt row: the plain image while Typst makes the filled copy, then the copy (that row alone draws again)', async ($, on) => {
+  let release = () => {}
+  const holdFill = new Promise<void>(r => (release = r))
+  const { clock, fills, sets } = world(on, { typst: true, files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED], holdFill })
+  await ready($)
+  const ui = await $.ui.mount(prompt('[Image #5] what is this'))
+  expect(images(await ui.drawn())[0].props.source.file).toBe(`${PASTED}/5.png`)
+  await clock.settle()
+  expect(fills.length).toBe(1)
+  const before = { filled: sets.filter(k => k === 'filled').length, done: sets.filter(k => k === 'done').length }
+  release()
+  await clock.settle()
+  const out = fills[0]!.at(-1)!.replace(/image\.part\.png$/, 'image.png')
+  expect(images(await ui.drawn())[0].props).toMatchObject({ source: { file: out }, columns: 20, rows: 5 })
+  expect(sets.filter(k => k === 'filled').length).toBe(before.filled + 1)
+  expect(sets.filter(k => k === 'done').length).toBe(before.done)
+  // Kept: a redraw makes no new copy.
+  await ui.redraw()
+  expect(images(await ui.drawn())[0].props.source.file).toBe(out)
+  expect(fills.length).toBe(1)
 })
 
 test('a pasted image is found when the folder name is not the plain slug', async ($, on) => {
@@ -1277,16 +1346,321 @@ test('in a terminal that draws no pictures, rows stay as they are', async ($, on
   expect(await (await $.ui.mount(prompt('[Image #5] hi'))).drawn()).toMatchObject(ENGINE)
 })
 
+// ---- The draft's previews -----------------------------------------------------
+
+test('previews go side by side, 2 columns apart, and wrap only where one does not fit', () => {
+  expect(linesOf([10, 10, 10], 34)).toEqual([[0, 1, 2]])
+  expect(linesOf([10, 10, 10], 33)).toEqual([[0, 1], [2]])
+  // A box wider than the line has one of its own.
+  expect(linesOf([40, 10], 30)).toEqual([[0], [1]])
+  expect(linesOf([], 30)).toEqual([])
+})
+
+test('a preview\'s alt is its mark in the draft', () => {
+  expect(altOf(12)).toBe('[Image #12]')
+  // The box a filled copy fills: the cells' pixels exactly.
+  expect(cellPixels({ columns: 17, rows: 5 }, { width: 8, height: 16 })).toEqual({ width: 136, height: 80 })
+})
+
+test('a preview is about 5 rows tall, keeps its aspect, and leaves a row of the band free', () => {
+  const wide = { width: 640, height: 320 }
+  // 640 x 320 px at 16 x 32 px cells: 20 x 5 cells at 5 rows.
+  expect(previewLayout([wide], DEFAULT_CELL, 95, 20)).toEqual({ boxes: [{ columns: 20, rows: 5 }], lines: [[0]] })
+  // A short band: the picture and a free row.
+  expect(previewLayout([wide], DEFAULT_CELL, 95, 5)?.boxes[0]).toMatchObject({ rows: 4 })
+  expect(previewLayout([wide], DEFAULT_CELL, 95, 2)?.boxes[0]).toMatchObject({ rows: 1 })
+  // Not one row, or no column, for a picture: nothing.
+  expect(previewLayout([wide], DEFAULT_CELL, 95, 1)).toBe(null)
+  expect(previewLayout([wide], DEFAULT_CELL, 0, 20)).toBe(null)
+  // A tiny picture keeps its size.
+  expect(previewLayout([{ width: 32, height: 32 }], DEFAULT_CELL, 95, 20)?.boxes[0]).toEqual({ columns: 2, rows: 1 })
+  // A wide picture is as wide as the line.
+  expect(previewLayout([{ width: 3136, height: 640 }], DEFAULT_CELL, 26, 20)?.boxes[0]).toEqual({ columns: 26, rows: 3 })
+  // 20 columns each, 2 apart: 42 do not fit in 41, so two lines; in a short
+  // band the rows go down until they fit (here at 4 rows, on one line).
+  expect(previewLayout([wide, wide], DEFAULT_CELL, 42, 20)!.lines).toEqual([[0, 1]])
+  expect(previewLayout([wide, wide], DEFAULT_CELL, 41, 20)!.lines).toEqual([[0], [1]])
+  const two = previewLayout([wide, wide], DEFAULT_CELL, 41, 8)!
+  expect(two.lines).toEqual([[0, 1]])
+  expect(two.boxes[0]!.rows).toBe(4)
+  // The band's labels take columns: 3 + 20, 2, 3 + 20 = 48 do not fit in 47.
+  expect(previewLayout([wide, wide], DEFAULT_CELL, 48, 20, [3, 3])!.lines).toEqual([[0, 1]])
+  expect(previewLayout([wide, wide], DEFAULT_CELL, 47, 20, [3, 3])!.lines).toEqual([[0], [1]])
+  // A wide picture is as wide as the line less its label; no column left: nothing.
+  expect(previewLayout([{ width: 3136, height: 640 }], DEFAULT_CELL, 26, 20, [3])?.boxes[0]).toMatchObject({ columns: 23 })
+  expect(previewLayout([wide], DEFAULT_CELL, 3, 20, [3])).toBe(null)
+})
+
+test('a band preview\'s number and its column', () => {
+  expect(labelOf(5)).toBe('#5')
+  expect(labelColumns(5)).toBe(3)
+  expect(labelColumns(12)).toBe(4)
+})
+
+test('the same numbers in the same order', () => {
+  expect(sameNumbers([1, 2], [1, 2])).toBe(true)
+  expect(sameNumbers([1, 2], [2, 1])).toBe(false)
+  expect(sameNumbers([], [])).toBe(true)
+  expect(sameNumbers([1], [])).toBe(false)
+})
+
+test('the filled copy: Typst covers the box with the image, in a root of its own (never /)', () => {
+  const { argv, env } = fillCall({ typst: '/usr/bin/typst', run: '/c/k/r-1', cache: '/c', box: { width: 320, height: 160 }, out: '/c/k/image.part.png' })
+  expect(argv).toEqual([
+    '/usr/bin/typst', 'compile', '--root', '/c/k/r-1', '--format', 'png', '--diagnostic-format', 'short', '--ppi', '72',
+    '--input', 'f=/image.png', '--input', 'maxw=320', '--input', 'maxh=160', '/c/k/r-1/fill.typ', '/c/k/image.part.png',
+  ])
+  expect(env.TYPST_PACKAGE_CACHE_PATH).toBe('/c/pkg-cache')
+})
+
+test('a filled copy is kept by the file, its stamp and the box', () => {
+  const p = { file: '/t/5.png', stamp: '1:1000', bytes: 1000, width: 640, height: 320 }
+  const box = { width: 320, height: 160 }
+  const one = filledPath('/c', p, box)
+  expect(one).toMatch(/^\/c\/[0-9a-f]{16}\/image\.png$/)
+  expect(filledPath('/c', { ...p }, { ...box })).toBe(one)
+  const others = [filledPath('/c', { ...p, stamp: '2:1000' }, box), filledPath('/c', { ...p, file: '/t/6.png' }, box), filledPath('/c', p, { width: 256, height: 128 })]
+  expect(new Set([one, ...others]).size).toBe(4)
+})
+
+// The band above the prompt box, and the editor beneath the mod: an edit is
+// its splice, a change the box as given.
+const band = (o: Record<string, unknown> = {}) =>
+  ({
+    plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'AbovePrompt', requestId: 'band',
+    props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 95, scroll: { offset: 0, bodyRows: 19 }, view: {}, ...o },
+    viewport: { columns: 100, rows: 40 },
+  }) as any
+function editor(on: any) {
+  on('prompt.edit', async ($: any, e: any) => ({ text: e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end), cursor: e.start + e.inputText.length }))
+  on('prompt.change', async ($: any, e: any) => ({ text: e.text }))
+}
+// A paste (or a key) at the end of `text`; a deletion of `[from, to)`.
+const typed = (text: string, inputText: string) => ({ origin: { kind: 'composer' }, text, cursor: text.length, start: text.length, end: text.length, inputText }) as any
+const cut = (text: string, from: number, to: number) => ({ origin: { kind: 'composer' }, text, cursor: to, start: from, end: to, inputText: '' }) as any
+// The alt texts of the previews drawn.
+const alts = (tree: any): string[] => images(tree).map(i => i.props.alt)
+
+test('a pasted image shows above the prompt box until the image text is deleted or the prompt is sent', async ($, on) => {
+  world(on, { files: { [`${PASTED}/5.png`]: HEAD, [`${PASTED}/6.png`]: TALL }, dirs: [PASTED] })
+  editor(on)
+  await ready($)
+  const prompt = ($ as any).prompt
+  const ui = await $.ui.mount(band())
+  expect(await ui.drawn()).toMatchObject(ENGINE)
+  // A paste: its preview after its number (no Typst here: the plain image),
+  // then the band beneath.
+  await prompt.edit(typed('look ', '[Image #5]'))
+  let tree: any = await ui.drawn()
+  expect(images(tree).map(i => i.props)).toEqual([expect.objectContaining({ source: expect.objectContaining({ file: `${PASTED}/5.png` }), columns: 20, rows: 5, alt: '[Image #5]' })])
+  expect(tree.children.at(-1)).toMatchObject(ENGINE)
+  expect(tree.children[0]).toMatchObject(BAND_PREVIEWS)
+  expect(tree.children[0].children[0].children[0]).toMatchObject(labelled(5))
+  // A second paste: side by side, each at most 5 rows, the aspect kept.
+  await prompt.edit(typed('look [Image #5] ', '[Image #6]'))
+  tree = await ui.drawn()
+  expect(images(tree).map(i => [i.props.columns, i.props.rows])).toEqual([[20, 5], [2, 5]])
+  expect(alts(tree)).toEqual(['[Image #5]', '[Image #6]'])
+  expect(tree.children[0].children[0]).toMatchObject(LINE)
+  expect(tree.children[0].children[0].children[1]).toMatchObject(labelled(6))
+  // The text of #5 deleted: #6 alone.
+  await prompt.edit(cut('look [Image #5] [Image #6]', 5, 16))
+  expect(alts(await ui.drawn())).toEqual(['[Image #6]'])
+  // A submit clears the box: no preview.
+  await prompt.change({ text: '', cursor: 0, origin: { kind: 'clear' } })
+  expect(await ui.drawn()).toMatchObject(ENGINE)
+  // A recalled entry with an image: it shows again.
+  await prompt.change({ text: '[Image #5] again', cursor: 16, origin: { kind: 'history' } })
+  expect(alts(await ui.drawn())).toEqual(['[Image #5]'])
+})
+
+test('the filled copy: the plain image while Typst makes it, then the copy (the band alone draws again), one per image and box', async ($, on) => {
+  let release = () => {}
+  const holdFill = new Promise<void>(r => (release = r))
+  const { clock, fills, sets } = world(on, { typst: true, files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED], holdFill })
+  editor(on)
+  await ready($)
+  const ui = await $.ui.mount(band())
+  await ($ as any).prompt.edit(typed('', '[Image #5]'))
+  expect(images(await ui.drawn())[0].props.source.file).toBe(`${PASTED}/5.png`)
+  await clock.settle()
+  // The box of 20 x 5 cells of 16 x 32 px.
+  expect(fills.length).toBe(1)
+  const argv = fills[0]!
+  expect(argv).toEqual(expect.arrayContaining(['f=/image.png', 'maxw=320', 'maxh=160']))
+  const drafts = sets.filter(k => k === 'draft').length
+  const redraws = sets.filter(k => k === 'done').length
+  release()
+  await clock.settle()
+  const out = argv.at(-1)!.replace(/image\.part\.png$/, 'image.png')
+  const [image] = images(await ui.drawn())
+  expect(image.props.source.file).toBe(out)
+  expect(image.props).toMatchObject({ columns: 20, rows: 5, alt: '[Image #5]' })
+  expect(sets.filter(k => k === 'draft').length).toBe(drafts + 1)
+  expect(sets.filter(k => k === 'done').length).toBe(redraws)
+  // A new draft with the same image: the copy at once, no compile.
+  await ($ as any).prompt.edit(typed('[Image #5]', ' [Image #7]'))
+  await ($ as any).prompt.edit(cut('[Image #5] [Image #7]', 10, 21))
+  await clock.settle()
+  expect(images(await ui.drawn())[0].props.source.file).toBe(out)
+  expect(fills.length).toBe(1)
+})
+
+test('a fill runs in a root of its own: only fill.typ and a link to the pasted file, never /, removed after', async ($, on) => {
+  const { clock, fills, fillRoots, removed } = world(on, { typst: true, files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED] })
+  editor(on)
+  await ready($)
+  const ui = await $.ui.mount(band())
+  await ($ as any).prompt.edit(typed('', '[Image #5]'))
+  await clock.settle()
+  expect(fills.length).toBe(1)
+  const argv = fills[0]!
+  const run = argv[argv.indexOf('--root') + 1]!
+  expect(run).not.toBe('/')
+  const key = argv.at(-1)!.replace(/\/image\.part\.png$/, '')
+  expect(run.startsWith(`${key}/r-`)).toBe(true)
+  expect(argv.at(-2)).toBe(`${run}/fill.typ`)
+  expect(argv).toContain('f=/image.png')
+  expect(argv.some(a => a.includes(PASTED))).toBe(false)
+  // The root is made first, with the pasted file, and goes after the run.
+  expect(fillRoots).toEqual([[run, expect.any(String), `${PASTED}/5.png`]])
+  expect(removed).toContain(run)
+  expect(images(await ui.drawn())[0].props.source.file).toBe(`${key}/image.png`)
+})
+
+test('a fill whose root can not be made runs no Typst; the plain image stays', async ($, on) => {
+  const { clock, fills, fillRoots } = world(on, { typst: true, files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED], failStage: true })
+  editor(on)
+  await ready($)
+  const ui = await $.ui.mount(band())
+  await ($ as any).prompt.edit(typed('', '[Image #5]'))
+  await clock.settle()
+  expect(fillRoots.length).toBe(1)
+  expect(fills.length).toBe(0)
+  await ui.redraw()
+  expect(images(await ui.drawn())[0].props.source.file).toBe(`${PASTED}/5.png`)
+})
+
+test('in herdr in iTerm2, a pasted preview shows only its filled copy, stored flipped by rows for its box', async ($, on) => {
+  let release = () => {}
+  const holdFill = new Promise<void>(r => (release = r))
+  const { clock, fills, pngs } = world(on, { typst: true, herdr: '/Applications/iTerm.app/Contents/MacOS/iTerm2', files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED], bytes: ROWS_PNG, holdFill })
+  editor(on)
+  await ready($)
+  const ui = await $.ui.mount(band())
+  await ($ as any).prompt.edit(typed('', '[Image #5]'))
+  // The plain image is not stored for flip mode: nothing while the copy is made.
+  expect(images(await ui.drawn())).toEqual([])
+  release()
+  await clock.settle()
+  expect(fills.length).toBe(1)
+  await ui.redraw()
+  const [image] = images(await ui.drawn())
+  expect(image.props).toMatchObject({ columns: 20, rows: 5, alt: '[Image #5]' })
+  expect(image.props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/flip\.png$/)
+  expect([...decodePng(pngs.get(image.props.source.file)!).data]).toEqual([...flipRows(ROWS_IMG, 5).data])
+})
+
+test('in herdr in iTerm2, a sent prompt draws its pasted images from their flipped filled copies', async ($, on) => {
+  let release = () => {}
+  const holdFill = new Promise<void>(r => (release = r))
+  const { clock, pngs } = world(on, { typst: true, herdr: '/Applications/iTerm.app/Contents/MacOS/iTerm2', files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED], bytes: ROWS_PNG, holdFill })
+  await ready($)
+  const ui = await $.ui.mount(prompt('look [Image #5]'))
+  expect(images(await ui.drawn())).toEqual([])
+  release()
+  await clock.settle()
+  await ui.redraw()
+  const [image] = images(await ui.drawn())
+  expect(image.props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/flip\.png$/)
+  expect(pngs.has(image.props.source.file)).toBe(true)
+})
+
+test('a fill compile that fails leaves the plain image, and is not tried again', async ($, on) => {
+  const { clock, fills } = world(on, { typst: true, files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED], failFill: true })
+  editor(on)
+  await ready($)
+  const ui = await $.ui.mount(band())
+  await ($ as any).prompt.edit(typed('', '[Image #5]'))
+  await clock.settle()
+  expect(fills.length).toBe(1)
+  await ui.redraw()
+  expect(images(await ui.drawn())[0].props.source.file).toBe(`${PASTED}/5.png`)
+  await clock.settle()
+  expect(fills.length).toBe(1)
+})
+
+test('a key that keeps the images reads no file and draws nothing new', async ($, on) => {
+  const { heads, sets, stats } = world(on, { files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED] })
+  editor(on)
+  await ready($)
+  const prompt = ($ as any).prompt
+  const ui = await $.ui.mount(band())
+  await prompt.edit(typed('', '[Image #5]'))
+  expect(alts(await ui.drawn())).toEqual(['[Image #5]'])
+  const read = heads.length
+  const statted = stats.get(`${PASTED}/5.png`)
+  expect(statted).toBeGreaterThan(0)
+  const drafts = sets.filter(k => k === 'draft').length
+  await prompt.edit(typed('[Image #5]', ' what'))
+  await prompt.edit(typed('[Image #5] what', ' is this'))
+  await ui.redraw()
+  expect(alts(await ui.drawn())).toEqual(['[Image #5]'])
+  expect(heads.length).toBe(read)
+  expect(stats.get(`${PASTED}/5.png`)).toBe(statted)
+  expect(sets.filter(k => k === 'draft').length).toBe(drafts)
+})
+
+test('an image file written after the paste shows a moment later', async ($, on) => {
+  const { clock, files, sets } = world(on, { dirs: [PASTED] })
+  editor(on)
+  await ready($)
+  const ui = await $.ui.mount(band())
+  await ($ as any).prompt.edit(typed('', '[Image #5]'))
+  expect(await ui.drawn()).toMatchObject(ENGINE)
+  const drafts = sets.filter(k => k === 'draft').length
+  const redraws = sets.filter(k => k === 'done').length
+  files[`${PASTED}/5.png`] = HEAD
+  await clock.advance(PREVIEW_RETRY_MS)
+  expect(alts(await ui.drawn())).toEqual(['[Image #5]'])
+  // The band alone draws again: the draft written once more, no refresh.
+  expect(sets.filter(k => k === 'draft').length).toBe(drafts + 1)
+  expect(sets.filter(k => k === 'done').length).toBe(redraws)
+})
+
+test('the band stays as it is with a survey, with no image, with Intelligent UI off, and for a file that is gone', async ($, on) => {
+  world(on, { files: { [`${PASTED}/5.png`]: HEAD }, dirs: [PASTED] })
+  editor(on)
+  await ready($)
+  const prompt = ($ as any).prompt
+  // No image in the draft.
+  await prompt.edit(typed('', 'hello'))
+  expect(await (await $.ui.mount(band())).drawn()).toMatchObject(ENGINE)
+  // A survey holds the band.
+  await prompt.edit(typed('hello ', '[Image #5]'))
+  expect(await (await $.ui.mount({ ...band({ hasSurvey: true }), requestId: 'band-2' })).drawn()).toMatchObject(ENGINE)
+  // A file that is gone is left out; none left: the band as it is.
+  await prompt.edit(typed('hello [Image #5] ', '[Image #9]'))
+  expect(alts(await (await $.ui.mount({ ...band(), requestId: 'band-3' })).drawn())).toEqual(['[Image #5]'])
+  await prompt.change({ text: '[Image #9]', cursor: 10, origin: { kind: 'undo' } })
+  expect(await (await $.ui.mount({ ...band(), requestId: 'band-4' })).drawn()).toMatchObject(ENGINE)
+  // Off.
+  await prompt.change({ text: '[Image #5]', cursor: 10, origin: { kind: 'undo' } })
+  await $.command.run({ command: 'iui', args: 'off' } as any)
+  expect(await (await $.ui.mount({ ...band(), requestId: 'band-5' })).drawn()).toMatchObject(ENGINE)
+})
+
 // ---- The height setting -------------------------------------------------------
 
-test('a kept height caps sent and pasted images; height full draws them taller at the commit', async ($, on) => {
+test('a kept height caps sent images (not pasted ones); height full draws them taller at the commit', async ($, on) => {
   const { clock, kept } = world(on, { stored: { height: 12 }, files: { '/t/tall.png': TALL, [`${PASTED}/5.png`]: TALL }, dirs: [PASTED] })
   const ran = await ready($)
   expect(ran.text).toContain('height 12 rows')
   const ui = await $.ui.mount(sent(attach('/t/tall.png')))
   expect(images(await ui.drawn())[0].props.rows).toBe(12)
+  // A pasted image does not follow the setting: its preview's size.
   const pasted = await $.ui.mount(prompt('[Image #5] tall'))
-  expect(images(await pasted.drawn())[0].props.rows).toBe(12)
+  expect(images(await pasted.drawn())[0].props.rows).toBe(5)
   const set = await $.command.run({ command: 'iui', args: 'height full' } as any)
   expect(set.text).toContain('full (the terminal height less 16 rows)')
   expect(kept.height).toBe('full')
@@ -1298,7 +1672,7 @@ test('a kept height caps sent and pasted images; height full draws them taller a
   await ui.redraw(sent(attach('/t/tall.png')).props)
   expect(images(await ui.drawn())[0].props.rows).toBe(24)
   await pasted.redraw(prompt('[Image #5] tall').props)
-  expect(images(await pasted.drawn())[0].props.rows).toBe(24)
+  expect(images(await pasted.drawn())[0].props.rows).toBe(5)
   // A number is never more than full.
   await $.command.run({ command: 'iui', args: 'height 36' } as any)
   expect(kept.height).toBe(36)
@@ -1410,7 +1784,7 @@ test('height with no value shows it; a bad value is refused; a bad kept value is
   const { kept } = world(on, { stored: { height: 3 } })
   const shown = await $.command.run({ command: 'iui', args: 'height' } as any)
   expect(shown.text).toContain('The most rows an image or a Typst drawing takes: half (half the terminal, 6 to 24 rows)')
-  expect(shown.text).toContain('This applies to images (sent or pasted) and to Typst drawings in answers.')
+  expect(shown.text).toContain('This applies to images that Claude sends and to Typst drawings in answers (images that you paste show small, as their preview above the prompt box).')
   const bad = await $.command.run({ command: 'iui', args: 'height 5' } as any)
   expect(bad.text).toContain('Not understood: "height 5"')
   expect(kept.height).toBe(undefined)

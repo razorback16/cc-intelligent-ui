@@ -250,6 +250,9 @@ export const S = {
   updatesLoading: null as Promise<void> | null,
   updateDone: false,
   updateBusy: false,
+  // The `[Image #N]` numbers last written to the `draft` atom (register.tsx;
+  // null: none written in this load).
+  draftImages: null as number[] | null,
 }
 // The settings an /iui command set in this load (`size`, `enabled`, ...): the
 // start (setUp) does not read them from the store, which may answer with the

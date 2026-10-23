@@ -6,6 +6,7 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 ### New
 
+- **A preview of pasted images above the prompt box.** When you paste an image (`[Image #N]`), a small preview of it shows above the prompt box before you send the prompt, with its number (`#N`) at its left. Typst makes a copy of the image that fills the cells of the preview. The previews show side by side, approximately 5 rows tall. When you delete the `[Image #N]` text, or send or clear the prompt, the preview goes away. Refer to [Preview of pasted images](docs/usage.md#preview-of-pasted-images).
 - **herdr support** (the terminal multiplexer). In a herdr pane, Claude Code needs `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` to show pictures. The mod asks one time to add the shell line, as in iTerm2. `/iui setup` also adds it. Then close the pane and open a new herdr pane. herdr must run in a terminal that shows kitty pictures (kitty, Ghostty or iTerm2). Refer to [Terminals](docs/install.md#terminals).
 - **herdr in iTerm2.** iTerm2 shows each row of a herdr picture from the bottom of the image, so the rows of a page showed in the wrong order. When the herdr client in use is iTerm2, the mod stores the bands of rows of each page and picture in reverse order. Then iTerm2 shows them in the correct order. `/iui details` shows `pages and pictures stored upside down by rows` when this is on. It does not work with `herdr --remote` in iTerm2.
 - `/iui setup` works in herdr on Linux too.
@@ -37,6 +38,7 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 - The README has a **Privacy and access** section: the network request, the clipboard reads and writes, the files, the processes and the Typst root.
 - The shell line of `/iui setup` sets the variable in iTerm2 and in herdr. `/iui setup` replaces the line of an older version. In herdr, the mod asks to update an older line. In iTerm2, the older line still works, and the mod does not ask.
 - In herdr, pages are shorter, so that each page is at most 16 MiB as pixels.
+- **Pasted images in the transcript look the same as their preview.** After you send the prompt, the images show under it side by side, approximately 5 rows tall, with no number. They do not use `/iui height` now (sent images and Typst drawings still do). Claude Code's own `[Image #N]` rows stay under them.
 
 ## 0.3.2 (2026-10-21)
 

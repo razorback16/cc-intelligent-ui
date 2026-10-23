@@ -55,7 +55,7 @@ In other terminals, the mod shows the normal text. Refer to [Install](docs/insta
 - **Rendered Markdown.** Headings, tables, task lists, block quotes and code with syntax colours, in your terminal's own font.
 - **LaTeX math.** Inline `$…$` and display `$$…$$` math, typeset.
 - **Live diagrams, charts and plots.** Claude writes Typst with CeTZ, cetz-plot and fletcher. The drawings use your theme's colours and work offline. For a complex drawing, Claude loads the bundled `intelligent-ui` skill, with the full API and a compile check.
-- **Images and files.** Images in an answer, images that Claude sends, Markdown files that Claude sends, and images that you paste show in the transcript.
+- **Images and files.** Images in an answer, images that Claude sends, Markdown files that Claude sends, and images that you paste show in the transcript. Images that you paste also show above the prompt box before you send. Refer to [Preview of pasted images](docs/usage.md#preview-of-pasted-images).
 - **Copy text from pictures.** In fullscreen mode, drag over a picture with the mouse, as you do over normal text. The mod highlights the selected text and copies it when you release the button. Refer to [Copy text from a picture](docs/usage.md#copy-text-from-a-picture).
 - **Links you can click.** The links, file paths and commands of an answer show in rows under its picture. A cmd+click on a link opens it. A click on a command copies it.
 - **Plans you can read.** In plan mode, the plan shows rendered, with an approve, edit or reject question under it.

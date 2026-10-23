@@ -99,7 +99,7 @@ export const MODES = ['dark', 'light'] as const
 // terminal's rows.
 export const PICTURE_MAX_ROWS = 24
 export const PICTURE_MIN_ROWS = 6
-// `/iui height`: the most rows an image (sent or pasted) or a Typst
+// `/iui height`: the most rows an image Claude sends or a Typst
 // drawing (the room of a live block or a local image in Markdown; not a
 // whole Markdown page) takes. `half`, the default: as above. `full`: the
 // terminal's rows less PICTURE_ROOM_ROWS. A number: that many rows, at most
@@ -123,6 +123,13 @@ export const gridText = (grid: boolean) => (grid ? 'on (each line of text on who
 export const SELECT_SINCE = '2.1.298'
 export const selectText = (on: boolean) => (on ? 'on (select and copy picture text with the mouse, fullscreen)' : 'off')
 export const PICTURES_KEPT = 64
+// The previews of pasted images (composer.tsx: the band and the rows): about
+// this many rows tall, this many columns apart, and a file not there yet
+// looked for again after PREVIEW_RETRY_MS, PREVIEW_TRIES times at most.
+export const PREVIEW_ROWS = 5
+export const PREVIEW_GAP = 2
+export const PREVIEW_RETRY_MS = 250
+export const PREVIEW_TRIES = 8
 // The file paths of the link rows under a picture: whether each one is a
 // file, kept for this many paths (the oldest go).
 export const LINK_FILES_KEPT = 512

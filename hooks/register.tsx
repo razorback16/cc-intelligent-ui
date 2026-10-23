@@ -13,11 +13,12 @@
 // The work is in ./lib, one topic per module: settings, state (the shared
 // mutable state `S`), markdown, terminal, terminals, mode, themes, command,
 // setup, host, typst, draw, stream, answer (one text through the pipeline),
-// env, images, pictures, plan (the plan approval flow), copy (the text under
+// env, images, pictures, composer (the previews of the images pasted in the
+// draft), plan (the plan approval flow), copy (the text under
 // a mouse copy of the pictures), probe (the drawn pages, and the words of a
 // page a copy reads) and updates (the daily check for a new version). This
 // file joins them to the hooks, and gives the tests the names they import.
-import { atom, read, update } from 'claude-code'
+import { atom, memberOf, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderSurface, RenderViewport, UiCopyArgs } from 'claude-code'
 
 import {
@@ -49,8 +50,9 @@ import { clipboardNow, clipboardRead, clipWatchArgs, clipWayReady, hintText } fr
 import { setUp } from './lib/env'
 import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/frame'
 import { herdrText, isFlipHere, roomColumns } from './lib/terminal'
-import { onScreenOf, pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
-import { drawPageField, pasteDir, pdfPagesOf, rowsAfter, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
+import { onScreenOf, pastedNumbers, sentFiles } from './lib/images'
+import { drawPageField, pdfPagesOf, rowsAfter, sentOf, underRow, type Under } from './lib/pictures'
+import { drawPreviews, previewRetry, previewsOf, previewsUnder, sameNumbers, type Preview } from './lib/composer'
 import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
 import { nowMs, write, surf, save, copy, uiSelection, toast } from './lib/api'
 import {
@@ -61,7 +63,7 @@ import {
 // The names this module exported before the split (the tests import them).
 export {
   BASE_THEME, DEFAULT_CELL, DEFAULT_HEIGHT, DEFAULT_SIZE, DEFAULT_THEME, DEFAULT_WIDTH, gridText, heightText, IMAGE_MAX_COLUMNS, MAX_HEIGHT, MAX_SIZE, MAX_WIDTH,
-  MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, PICTURE_ROOM_ROWS, SEGMENT_ROWS, TYPST_PROMPT, widthText, type Height, type Width,
+  MIN_HEIGHT, MIN_SIZE, MIN_WIDTH, PICTURE_MAX_ROWS, PICTURE_MIN_ROWS, PICTURE_ROOM_ROWS, PREVIEW_RETRY_MS, PREVIEW_ROWS, SEGMENT_ROWS, TYPST_PROMPT, widthText, type Height, type Width,
   COMMIT_MAX_MS, COMMIT_MIN_MS, DESIGNS_KEPT_DAYS, RESIZE_QUIET_MS, RESULTS_KEPT, TOUCH_FLUSH_MS,
 } from './lib/settings'
 export { DEFAULT_METRICS, keep, type Cell, type Design, type FontMetrics, type Frame, type Look, type Metrics, type Room } from './lib/state'
@@ -84,7 +86,7 @@ export { commandSuggestions, parseCommand, type Command, type Suggestion } from 
 export { hasNewSetup, hasSetup, SETUP_END, SETUP_NOT_MAC, SETUP_START, setupBlock, setupWordsOf, shellRcOf, withoutSetup, withSetup, type ShellRc } from './lib/setup'
 export { fcPatternOf, HERDR_CLIENT_SH, HERDR_TICK_SH, OSC11_PL, perlFor, PROGRAM_FONTS_PL, PROGRAM_FONTS_SH, WATCH_PL } from './lib/host'
 export {
-  convertCall, isSafePage, measureCall, noNetworkEnv, pageRowsOf, parseOd, pngSize, probeCall, resultOf, roomInputs, shouldRetrySafe, typstCall, typstInputs,
+  convertCall, fillCall, isSafePage, measureCall, noNetworkEnv, pageRowsOf, parseOd, pngSize, probeCall, resultOf, roomInputs, shouldRetrySafe, typstCall, typstInputs,
 } from './lib/typst'
 export {
   alignFirstLine, fileHref, firstLineOf, fontFit, hashOf, renderKey, resolveLinks, scaledBulletRow, sizing, type FirstLine, type ShownLink,
@@ -92,6 +94,7 @@ export {
 export { nextJob } from './lib/stream'
 export * from './lib/images'
 export { rowsAfter, type Under } from './lib/pictures'
+export { altOf, cellPixels, filledPath, labelColumns, labelOf, linesOf, previewLayout, sameNumbers } from './lib/composer'
 export * from './lib/copy'
 export { targetAt, targetsOf, type PageTarget, type Target } from './lib/targets'
 export {
@@ -111,6 +114,8 @@ export {
 // The atoms the hooks read and write (a copy of each in this file: see state.ts).
 const isOn = atom({ plugin: 'cc-intelligent-ui', key: 'isOn' } as const, true)
 const done = atom({ plugin: 'cc-intelligent-ui', key: 'done' } as const, 0)
+const draft = atom({ plugin: 'cc-intelligent-ui', key: 'draft' } as const, [])
+const filled = atom({ plugin: 'cc-intelligent-ui', key: 'filled' } as const, 0)
 
 // ---- Pictures under rows ----------------------------------------------------
 
@@ -148,6 +153,19 @@ async function answerEnv($: EngineInterface, e: { viewport?: RenderViewport }): 
   return ready?.env.typst ? ready : null
 }
 
+// The draft's `[Image #N]` numbers to the `draft` atom, only when they
+// changed (the band above the prompt draws again): a key that keeps them
+// writes nothing. Never throws.
+function noteDraft($: EngineInterface, text: string) {
+  try {
+    const now = pastedNumbers(text)
+    if (S.draftImages && sameNumbers(S.draftImages, now)) return
+    S.draftImages = now
+    // The newest numbers at the write, should two writes cross.
+    void update($, draft, () => S.draftImages ?? []).catch(() => undefined)
+  } catch {}
+}
+
 // ---- Rows drawn before ----------------------------------------------------------
 
 // What a drawn row depends on besides its own inputs: `done` (every result
@@ -175,7 +193,8 @@ type AnswerMemo = { tree: RenderElement; after: number }
 const answers = new Map<string, Memo<AnswerMemo>>()
 const plans = new Map<string, Memo<{ drawing: Drawing; links: ShownLink[] }>>()
 const unders = new Map<string, Memo<Under[]>>()
-const pasted = new Map<string, Memo<Shown[]>>()
+const pasted = new Map<string, Memo<Preview[][]>>()
+const drafts = new Map<string, Memo<Preview[][]>>()
 
 // The kept value when the inputs and the stamp are the same. A new onScreen
 // is given to the row's jobs that wait or run (their order and whether they
@@ -836,16 +855,22 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // Typing in the main prompt takes a picture selection down (a key that
-  // edits, not a bare cursor move); the edit passes on as it is.
+  // edits, not a bare cursor move); the edit passes on as it is. The box
+  // after it gives the draft's pasted images (noteDraft).
   on('prompt.edit', async ($, e, next) => {
-    if (picked.now && (e.inputText || e.end > e.start)) clearSelection($)
-    return next(e)
+    const isEdit = !!e.inputText || e.end > e.start
+    if (picked.now && isEdit) clearSelection($)
+    const box = await next(e)
+    if (isEdit && e.origin.kind === 'composer') noteDraft($, box.text)
+    return box
   }).catch(($, e, next) => next(e))
 
   // A change of the prompt box no edit carried (a recalled entry, an undo, a
-  // clear): the same, but not another plugin's fill. Observe only.
+  // clear): the same, but not another plugin's fill. Observe only. Any
+  // change gives the draft's pasted images (a submit clears them).
   on('prompt.change', async ($, e, next) => {
     if (picked.now && e.origin.kind !== 'plugin' && e.origin.kind !== 'app') clearSelection($)
+    noteDraft($, e.text)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -906,7 +931,7 @@ export const register: Register = on => {
         await $.store.set('height', S.height)
       }
       const head = asked.height === undefined ? 'The most rows an image or a Typst drawing takes' : 'Intelligent UI images and Typst drawings now take at most'
-      return { text: `${head}: ${heightText(S.height)}. This applies to images (sent or pasted) and to Typst drawings in answers. Use /iui height half (the default), /iui height full, or /iui height <${MIN_HEIGHT}-${MAX_HEIGHT}> (never more than full).` }
+      return { text: `${head}: ${heightText(S.height)}. This applies to images that Claude sends and to Typst drawings in answers (images that you paste show small, as their preview above the prompt box). Use /iui height half (the default), /iui height full, or /iui height <${MIN_HEIGHT}-${MAX_HEIGHT}> (never more than full).` }
     }
     if (asked.kind === 'grid') {
       if (asked.grid === undefined) await setUp($).catch(() => null)
@@ -1179,33 +1204,74 @@ export const register: Register = on => {
     return drawPageField($, e)
   })
 
-  // The images the user pasted (`[Image #N]`), under the prompt row. Only the
-  // user's own prompts: a notification's or another agent's row stays as is.
+  // The images the user pasted (`[Image #N]`), under the prompt row, as
+  // their preview above the prompt box was (composer.tsx). Only the user's
+  // own prompts: a notification's or another agent's row stays as is. The
+  // row reads its member of `filled`, which goes up when a filled copy is
+  // made: that row alone draws again.
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     if (e.surface !== 'terminal' || e.props.origin?.kind !== 'composer' || e.props.from || e.props.task) return next(e)
     const numbers = pastedNumbers(e.props.text)
     if (!numbers.length) return next(e)
-    let shown: Shown[] = []
+    let lines: Preview[][] = []
     try {
       const ready = await pictureEnv($, e)
+      const mine = memberOf(filled, e)
+      if (ready) await read($, mine)
       const k = { text: e.props.text, extra: '', stamp: ready ? stampOf(ready, e.viewport) : '', onScreen: undefined }
       const kept = ready ? memoOf(pasted, e.requestId, k, () => false) : undefined
-      if (kept) shown = kept
+      if (kept) lines = kept
       else if (ready) {
-        const dir = await pasteDir($, ready.env)
-        if (dir) shown = await shownOf($, e, ready.env, numbers.map(n => pastedImagePath(dir, n)), { done: ready.done, row: e.requestId })
-        if (shown.length) memoSet(pasted, e.requestId, k, shown)
+        const redraw = () => void update($, mine, n => n + 1).catch(() => undefined)
+        const made = await previewsOf($, e.viewport, ready.env, numbers, { columns: roomColumns(e.viewport), maxRows: Number.POSITIVE_INFINITY, labelled: false, redraw })
+        lines = made.lines
+        if (lines.length && made.isFinal) memoSet(pasted, e.requestId, k, lines)
         else pasted.delete(e.requestId)
       }
     } catch {
-      shown = []
+      lines = []
     }
     const row = await next(e)
-    if (!shown.length) return row
+    if (!lines.length) return row
     try {
-      return underRow($, e, row, shown)
+      return previewsUnder($, e, row, lines)
     } catch {
       return row
+    }
+  })
+
+  // The images pasted in the draft (`[Image #N]`), as small previews above
+  // the prompt box until it is sent, then the band beneath. A survey, no
+  // image, or no picture drawn: the band as it is.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.surface !== 'terminal' || e.props.hasSurvey) return next(e)
+    let lines: Preview[][] = []
+    try {
+      const numbers = await read($, draft)
+      const ready = numbers.length ? await pictureEnv($, e) : null
+      if (ready) {
+        const k = { text: numbers.join(','), extra: `${e.props.bodyColumns}x${e.props.maxRows}`, stamp: stampOf(ready, e.viewport), onScreen: undefined }
+        const kept = memoOf(drafts, 'draft', k, () => false)
+        if (kept) lines = kept
+        else {
+          // The same numbers written again: only the band reads them.
+          const redraw = () => void update($, draft, ns => [...ns]).catch(() => undefined)
+          const made = await previewsOf($, e.viewport, ready.env, numbers, { columns: e.props.bodyColumns, maxRows: e.props.maxRows, labelled: true, redraw })
+          lines = made.lines
+          if (made.isWhole && made.isFinal) memoSet(drafts, 'draft', k, lines)
+          else drafts.delete('draft')
+          if (!made.isWhole) previewRetry($, k.text, redraw)
+        }
+      }
+    } catch {
+      lines = []
+    }
+    const band = await next(e)
+    if (!lines.length) return band
+    try {
+      return drawPreviews($, e, lines, band)
+    } catch {
+      return band
     }
   })
 

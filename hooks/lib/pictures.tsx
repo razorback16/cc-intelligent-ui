@@ -1,8 +1,9 @@
-// Pictures under rows: the files Claude sends (SendUserFile) and the images
-// the user pastes are drawn under their row. An image is drawn at its own
-// size or smaller (a JPEG, WebP or SVG as the PNG Typst makes of it); a PDF
-// as one page, with a control line to turn the pages; a Markdown file as an
-// answer is. The pure parts are in images.ts.
+// Pictures under rows: the files Claude sends (SendUserFile) are drawn under
+// their row. An image is drawn at its own size or smaller (a JPEG, WebP or
+// SVG as the PNG Typst makes of it); a PDF as one page, with a control line
+// to turn the pages; a Markdown file as an answer is. The images the user
+// pastes are in composer.tsx (its folder, pasteDir, is here). The pure parts
+// are in images.ts.
 import type { EngineInterface, FsStat, ImageSource, RenderElement, RenderInput } from 'claude-code'
 
 import { COMPILE_TIMEOUT_MS, GUTTER, PICTURES_KEPT, SENT_TEXT_MAX_BYTES, type Height } from './settings'
@@ -105,20 +106,6 @@ export async function pictureBytes($: EngineInterface, p: Picture): Promise<stri
   return base64
 }
 
-// The Images for the files that are PNGs, sized to the Frame on screen.
-// `at`: as statOf. In flip mode each is first a PNG Typst makes at its box
-// (8-bit RGBA, no larger than drawn), which shownOne stores flipped.
-export async function shownOf($: EngineInterface, e: RowInput, ready: Env, files: readonly string[], at?: StatAt): Promise<Shown[]> {
-  const shown: Shown[] = []
-  const box = isFlipHere(ready) ? boxOf(shownFor(e.viewport), ready.inline, S.shownHeight) : null
-  for (const file of new Set(files)) {
-    const png = box ? ((await convertedOf($, ready, file, box, at)) ?? file) : file
-    const s = png ? await shownOne($, e, ready, png, nameOf(file), at) : null
-    if (s) shown.push(s)
-  }
-  return shown
-}
-
 // One PNG's Image, sized to the Frame and the height setting on screen
 // (shownFor, S.shownHeight: a new size shows when its epoch commits, with
 // every other picture), and at most as wide as the room now; null when it is not a PNG. `alt` is the file's name
@@ -130,17 +117,25 @@ export async function shownOne($: EngineInterface, e: RowInput, ready: Env, file
   if (!p) return null
   const frame = shownFor(e.viewport)
   const fit = fitBox(pictureCells(p, pictureColumns(frame, false), pictureRowsFor(frame.rows, S.shownHeight), frame.cell), roomColumns(e.viewport))
+  const source = await sourceOf($, ready, p, fit.rows)
+  return source ? { source, ...fit, alt } : null
+}
+
+// A PNG's Image source: its bytes over ssh (null when too large), else its
+// file name, with a generation by its stat. In flip mode the PNG stored for
+// `rows` (flippedOf); null with no rows or when that fails.
+export async function sourceOf($: EngineInterface, ready: Env, p: Picture, rows?: number): Promise<ImageSource | null> {
   if (ready.inline) {
     const png = await pictureBytes($, p)
-    return png ? { source: { png }, ...fit, alt } : null
+    return png ? { png } : null
   }
   if (isFlipHere(ready)) {
-    const flipped = await flippedOf($, ready, p, fit.rows)
-    if (!flipped) return null
-    return { source: { file: flipped, format: 'png', generation: Number.parseInt(hashOf([p.stamp, fit.rows]).slice(0, 8), 16) }, ...fit, alt }
+    // Flip mode: only the PNG stored for the rows it is drawn in.
+    if (rows === undefined) return null
+    const flipped = await flippedOf($, ready, p, rows)
+    return flipped ? { file: flipped, format: 'png', generation: Number.parseInt(hashOf([p.stamp, rows]).slice(0, 8), 16) } : null
   }
-  const generation = Number.parseInt(hashOf([p.stamp]).slice(0, 8), 16)
-  return { source: { file, format: 'png', generation }, ...fit, alt }
+  return { file: p.file, format: 'png', generation: Number.parseInt(hashOf([p.stamp]).slice(0, 8), 16) }
 }
 
 // Flip mode: a PNG stored for herdr in iTerm2 drawn `rows` rows tall
