@@ -564,8 +564,8 @@ export function probeCall(o: { typst: string; root: string; run: string; cache: 
 }
 
 // A drawn page's file says how it was compiled: `b` and `d` (the split
-// retry) are the safe mode's tags.
-export const isSafePage = (file: string) => /\/[bd]-\d+\.png$/.test(file)
+// retry) are the safe mode's tags (`f` before them: stored for flip mode).
+export const isSafePage = (file: string) => /\/f?[bd]-\d+\.png$/.test(file)
 
 // The word positions of page `page` (0-based) of a key folder: the probe
 // of that page only (page=<n>), with the inputs of the PNG compile, built
@@ -687,7 +687,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     }
     pages = pages.map(p => ({ ...p, rows: Math.min(MAX_IMAGE_ROWS, p.rows) }))
   }
-  // Flip mode: each page stored for herdr in iTerm2, in place; a page that can not be stored fails the compile (the text shows).
+  // Flip mode: each page stored for herdr in iTerm2 (fa-1.png from a-1.png); a page that can not be stored fails the compile (the text shows).
   if (job.flip) {
     const flipped = await flipPages($, job, pages, signal)
     if (typeof flipped === 'string') return flipped
@@ -700,17 +700,19 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
 }
 
 // The pages of a compile stored for flip mode (flip.ts: rows × B pixels
-// tall, the bands reversed), each in place, with its new height.
+// tall, the bands reversed), each as a file of its own (`f` before its
+// name: a flip of a flipped page would undo it), with its new height.
 async function flipPages($: EngineInterface, job: Job, pages: readonly Page[], signal?: AbortSignal): Promise<Page[] | 'failed' | 'cancelled'> {
-  const out: Page[] = []
+  const flipped: Page[] = []
   for (const p of pages) {
-    const made = await flipFile($, { src: p.file, out: p.file, rows: p.rows, isPage: true, perl: perlFor(job.env.isMac), ...(signal ? { signal } : {}) })
+    const out = p.file.replace(/\/([^/]*)$/, '/f$1')
+    const made = await flipFile($, { src: p.file, out, rows: p.rows, isPage: true, perl: perlFor(job.env.isMac), ...(signal ? { signal } : {}) })
     if (signal?.aborted) return 'cancelled'
     if (!made) {
       await logDebug($, job.env.cache, `compile ${job.key}: could not store ${p.file} for herdr in iTerm2`)
       return 'failed'
     }
-    out.push({ ...p, height: made.height, flip: true })
+    flipped.push({ ...p, file: out, height: made.height, flip: true })
   }
-  return out
+  return flipped
 }

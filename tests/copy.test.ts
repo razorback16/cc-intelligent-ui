@@ -874,6 +874,9 @@ test('a compile retried in safe mode gives the probe safe=1 (its page files say 
   expect(isSafePage('/c/k/d-12.png')).toBe(true)
   expect(isSafePage('/c/k/a-1.png')).toBe(false)
   expect(isSafePage('/c/k/c-3.png')).toBe(false)
+  // A page stored for flip mode (herdr in iTerm2) keeps its tag after the `f`.
+  expect(isSafePage('/c/k/fb-1.png')).toBe(true)
+  expect(isSafePage('/c/k/fa-1.png')).toBe(false)
 })
 
 test('a grab over two pages of a long answer probes those two pages only', async ($, on) => {

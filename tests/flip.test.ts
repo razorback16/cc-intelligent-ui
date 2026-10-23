@@ -176,15 +176,22 @@ const jobOf = (key: string, flip: boolean): Job => ({
   env: ENV, epoch: 0, ...(flip ? { flip } : {}),
 })
 
-test('a compile in flip mode stores each page rows × B tall with its bands reversed, in place, and notes it in pages.json', async () => {
+test('a compile in flip mode stores each page rows × B tall with its bands reversed, as a file of its own, and notes it in pages.json', async () => {
   forgetTouches()
   const img = imageOf(16, 41)
   const h = host(encode(img))
   const result = await compile(h.$, jobOf('kf', true))
   if (typeof result !== 'object') throw new Error(`compile: ${result}`)
   const page = result.pages[0]!
-  expect([page.file, page.width, page.height, page.rows, page.flip]).toEqual(['/c/kf/a-1.png', 16, 40, 4, true])
-  expect([...decodePng(h.written.get('/c/kf/a-1.png')!).data]).toEqual([...flipRows(padRows(img, 4), 4).data])
+  expect([page.file, page.width, page.height, page.rows, page.flip]).toEqual(['/c/kf/fa-1.png', 16, 40, 4, true])
+  expect([...decodePng(h.written.get('/c/kf/fa-1.png')!).data]).toEqual([...flipRows(padRows(img, 4), 4).data])
+  // Typst's page is not written over: another compile of the key (another
+  // session's) flips it again from the page as made, never a flip of a flip.
+  expect(h.written.has('/c/kf/a-1.png')).toBe(false)
+  h.texts.delete('/c/kf/pages.json')
+  const again = await compile(h.$, jobOf('kf', true))
+  if (typeof again !== 'object') throw new Error(`compile: ${again}`)
+  expect([...decodePng(h.written.get('/c/kf/fa-1.png')!).data]).toEqual([...flipRows(padRows(img, 4), 4).data])
   expect(JSON.parse(h.texts.get('/c/kf/pages.json')!).pages[0].flip).toBe(true)
   // Not in flip mode: the page as Typst made it.
   const plain = await compile(host(encode(img)).$, jobOf('kp', false))
