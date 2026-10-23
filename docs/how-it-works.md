@@ -20,6 +20,8 @@
 
    A picture cell holds its row and its column (kitty placeholder U+10EEEE plus two combining marks). The mod finds the drawn page that has these rows, at the size that it is drawn. Then it finds the position of each word on that page: it runs the probe (`typst query` on the same template, with the same inputs as the PNG compile, plus `probe=1` and `page=<n>`) only for the pages that a copy reads, and (for picture select) for the pages on the screen. The mod keeps the positions of the last 64 pages in memory. It writes nothing to disk for this, and the PNGs do not change. The mod takes the words in the selected cells.
 
+10. Pasted images: the `prompt.edit` and `prompt.change` hooks note the `[Image #N]` numbers of the draft. A `ui.render` hook on `AbovePrompt` draws a small preview of each one above the prompt box, from the PNG that Claude Code wrote at the paste, and a hook on `UserMessage` draws them the same size under a sent prompt. Typst makes a copy that fills the preview's cells (`render/fill.typ`), in a root folder of its own with only that template and a link to the pasted PNG.
+
 ## Picture select
 
 The selection of Claude Code copies picture cells as kitty placeholder characters, not as text (from Claude Code 2.1.305, it skips picture cells). Thus the mod selects pictures itself (`hooks/lib/select.ts`):

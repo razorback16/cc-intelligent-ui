@@ -19,6 +19,15 @@
   - Pages are shorter in herdr, so that herdr can send each one to the terminal. Refer to [Limitations](limitations.md).
   - In iTerm2, herdr sends each row of a picture as one part of the image, and iTerm2 counts the top of that part from the bottom of the image. Thus the rows would show in the opposite order. When the herdr client that the mod uses is iTerm2, the mod keeps the rows of each page and each picture in an order that iTerm2 shows correctly. Picture select also works. When you go to a different terminal (for example Ghostty), the mod draws the pictures again in the usual order. `/iui details` then shows `pages and pictures stored upside down by rows`. With `herdr --remote` in iTerm2, the mod cannot find the client, so the rows of the pictures show in the wrong order. Refer to [Limitations](limitations.md).
 - **Rio 0.5.27 or later (not tested):** set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` before you start Claude Code. Rio works on macOS and on Linux.
+- **The setup line.** `/iui setup` (and a yes to the question in iTerm2 or herdr) adds this block to your shell's start file. It sets the variable in iTerm2 and herdr only, not in tmux or screen:
+
+  ```sh
+  # >>> cc-intelligent-ui: Claude Code pictures in iTerm2 >>>
+  if { [ "$TERM_PROGRAM" = "iTerm.app" ] || [ "$TERM_PROGRAM" = "herdr" ]; } && [ -z "$TMUX" ] && [ -z "$STY" ]; then export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1; fi
+  # <<< cc-intelligent-ui <<<
+  ```
+
+  For fish, the line is `if test "$TERM_PROGRAM" = "iTerm.app" -o "$TERM_PROGRAM" = "herdr"; and not set -q TMUX; and not set -q STY; set -gx CLAUDE_CODE_FORCE_TERMINAL_IMAGES 1; end`. The markers stay as in older versions, whose line was for iTerm2 only. `/iui setup` replaces an older line, and `/iui setup remove` removes the block. If the mod cannot read the file, it changes nothing and shows the line to add.
 - Do not put the variable in the `env` of `~/.claude/settings.json`. It then applies in every terminal, also where pictures cannot show.
 - **Warp (not yet):** Warp does not draw kitty pictures with Unicode placeholders yet. The pull request [warpdotdev/warp#16312](https://github.com/warpdotdev/warp/pull/16312) adds them. The mod will support Warp when that pull request is merged.
 - **WezTerm (not yet):** WezTerm does not draw kitty pictures with Unicode placeholders yet, so it shows no pictures, also with the variable set. The pull request [wezterm/wezterm#7924](https://github.com/wezterm/wezterm/pull/7924) adds them. The mod will support WezTerm when that pull request is merged.

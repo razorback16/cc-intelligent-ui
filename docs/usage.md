@@ -38,7 +38,8 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
 
 When you paste an image into the prompt box, the box shows `[Image #N]`. The mod then shows a small preview of the image above the prompt box, before you send the prompt. The number of the image (`#N`) shows in dim text at the left of its preview.
 
-- The preview fills its cells. Typst makes a copy of the image that has the size of the cells, one time for each image and size, in the cache folder. Until the copy is ready, the preview shows the image as it is. Without Typst, or if Typst cannot make the copy, the preview also shows the image as it is.
+- The preview fills its cells. Typst makes a copy of the image that has the size of the cells, one time for each image and size, in the cache folder. Typst runs in a folder of its own with only the pasted image, so it reads no other file. Until the copy is ready, the preview shows the image as it is. Without Typst, or if Typst cannot make the copy, the preview also shows the image as it is.
+- In herdr in iTerm2, a preview shows only when its copy is ready (the mod stores the copy with its rows in the order that iTerm2 shows correctly).
 - The previews show side by side. When they do not fit in one line, they go on to the next line.
 - A preview is approximately 5 rows tall, or less when the space above the prompt box is small. The image keeps its shape.
 - When you delete the `[Image #N]` text, the preview of that image goes away. When you send or clear the prompt, all the previews go away.
