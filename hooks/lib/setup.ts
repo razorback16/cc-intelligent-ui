@@ -5,6 +5,7 @@ import type { EngineInterface } from 'claude-code'
 import { S } from './state'
 import { readText } from './host'
 import { getenv, exists, write, exec, load, save, ask, log, toast } from './api'
+import { isSet } from './terminal'
 
 // Claude Code turns pictures on by itself in kitty and Ghostty only; iTerm2
 // and herdr need CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 when Claude Code starts
@@ -15,13 +16,16 @@ import { getenv, exists, write, exec, load, save, ask, log, toast } from './api'
 export const SETUP_START = '# >>> cc-intelligent-ui: Claude Code pictures in iTerm2 >>>'
 export const SETUP_END = '# <<< cc-intelligent-ui <<<'
 export type ShellRc = { path: string; kind: 'sh' | 'fish' }
+// The start files of a login bash, in its order: it reads only the first that exists.
+export const BASH_LOGIN = ['.bash_profile', '.bash_login', '.profile']
 // The start file the setup writes for the login shell (`SHELL`); null for a
 // shell it does not know. iTerm2 (and herdr on macOS) starts login shells:
-// bash reads .bash_profile on macOS. fish gets a file of its own in conf.d.
-export function shellRcOf(o: { shell: string; home: string; zdotdir?: string; xdgConfig?: string; isMac: boolean }): ShellRc | null {
+// bash on macOS gets the first of BASH_LOGIN in `loginFiles` (those in HOME),
+// a new .bash_profile only when none is there. fish gets a file of its own in conf.d.
+export function shellRcOf(o: { shell: string; home: string; zdotdir?: string; xdgConfig?: string; isMac: boolean; loginFiles?: readonly string[] }): ShellRc | null {
   const name = o.shell.split('/').pop() ?? ''
   if (name === 'zsh') return { path: `${o.zdotdir || o.home}/.zshrc`, kind: 'sh' }
-  if (name === 'bash') return { path: `${o.home}/${o.isMac ? '.bash_profile' : '.bashrc'}`, kind: 'sh' }
+  if (name === 'bash') return { path: `${o.home}/${o.isMac ? (BASH_LOGIN.find(f => o.loginFiles?.includes(f)) ?? BASH_LOGIN[0]) : '.bashrc'}`, kind: 'sh' }
   if (name === 'fish') return { path: `${o.xdgConfig || `${o.home}/.config`}/fish/conf.d/cc-intelligent-ui.fish`, kind: 'fish' }
   return null
 }
@@ -61,12 +65,21 @@ export function withSetup(text: string, kind: ShellRc['kind']): string {
 
 // The shell start file for this user, or null when the shell is not known.
 async function shellRc($: EngineInterface): Promise<ShellRc | null> {
+  const shell = (await getenv($, 'SHELL')) ?? ''
+  const home = (await getenv($, 'HOME')) ?? ''
+  const isMac = S.hostOs === 'Darwin'
+  // Which login files of bash are there (macOS only).
+  const loginFiles: string[] = []
+  if (isMac && shell.split('/').pop() === 'bash') {
+    for (const f of BASH_LOGIN) if (await exists($, `${home}/${f}`).catch(() => false)) loginFiles.push(f)
+  }
   return shellRcOf({
-    shell: (await getenv($, 'SHELL')) ?? '',
-    home: (await getenv($, 'HOME')) ?? '',
+    shell,
+    home,
     zdotdir: (await getenv($, 'ZDOTDIR')) || undefined,
     xdgConfig: (await getenv($, 'XDG_CONFIG_HOME')) || undefined,
-    isMac: S.hostOs === 'Darwin',
+    isMac,
+    loginFiles,
   })
 }
 
@@ -96,7 +109,10 @@ export async function runSetup($: EngineInterface, remove: boolean): Promise<str
   if (!rc) return `Intelligent UI does not know your shell, so it changed no file. Add this to your shell's start file: ${manual}`
   const text = await readRc($, rc.path)
   if (text === null) return `Intelligent UI could not read ${rc.path}, so it changed no file. Add this to it yourself: ${manual}`
-  const restart = `Close this ${tab}, open a new ${app} ${tab}, and start Claude Code there to see pictures.`
+  // Pictures on in this session already: no new tab needed.
+  const restart = isSet(await getenv($, 'CLAUDE_CODE_FORCE_TERMINAL_IMAGES'))
+    ? `Pictures are on in this ${tab} already.`
+    : `Close this ${tab}, open a new ${app} ${tab}, and start Claude Code there to see pictures.`
   if (remove) {
     if (!hasSetup(text)) return `${rc.path} has no Intelligent UI block.`
     await write($, rc.path, withoutSetup(text))
