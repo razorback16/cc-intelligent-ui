@@ -51,7 +51,7 @@ import { setUp } from './lib/env'
 import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/frame'
 import { herdrText, isFlipHere, roomColumns } from './lib/terminal'
 import { onScreenOf, pastedNumbers, sentFiles } from './lib/images'
-import { drawPageField, pdfPagesOf, rowsAfter, sentOf, underRow, type Under } from './lib/pictures'
+import { drawPageField, pasteDir, pdfPagesOf, rowsAfter, sentOf, underRow, type Under } from './lib/pictures'
 import { drawPreviews, previewRetry, previewsOf, previewsUnder, sameNumbers, type Preview } from './lib/composer'
 import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
 import { nowMs, write, surf, save, copy, uiSelection, toast } from './lib/api'
@@ -155,7 +155,9 @@ async function answerEnv($: EngineInterface, e: { viewport?: RenderViewport }): 
 
 // The draft's `[Image #N]` numbers to the `draft` atom, only when they
 // changed (the band above the prompt draws again): a key that keeps them
-// writes nothing. Never throws.
+// writes nothing. Never throws. `draftSeq` counts the box changes seen: an
+// edit's box that comes after a newer change is not noted.
+let draftSeq = 0
 function noteDraft($: EngineInterface, text: string) {
   try {
     const now = pastedNumbers(text)
@@ -872,8 +874,9 @@ export const register: Register = on => {
     const isEdit = !!e.inputText || e.end > e.start
     if (picked.now && isEdit) clearSelection($)
     void Promise.resolve().then(() => nowMs($)).then(t => void (S.keyAt = t), () => undefined)
+    const seq = ++draftSeq
     const box = await next(e)
-    if (isEdit && e.origin.kind === 'composer') noteDraft($, box.text)
+    if (isEdit && e.origin.kind === 'composer' && seq === draftSeq) noteDraft($, box.text)
     return box
   }).catch(($, e, next) => next(e))
 
@@ -882,6 +885,7 @@ export const register: Register = on => {
   // change gives the draft's pasted images (a submit clears them).
   on('prompt.change', async ($, e, next) => {
     if (picked.now && e.origin.kind !== 'plugin' && e.origin.kind !== 'app') clearSelection($)
+    draftSeq++
     noteDraft($, e.text)
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -1263,9 +1267,12 @@ export const register: Register = on => {
     let lines: Preview[][] = []
     try {
       const numbers = await read($, draft)
+      if (!numbers.length) drafts.delete('draft')
       const ready = numbers.length ? await pictureEnv($, e) : null
       if (ready) {
-        const k = { text: numbers.join(','), extra: `${e.props.bodyColumns}x${e.props.maxRows}`, stamp: stampOf(ready, e.viewport), onScreen: undefined }
+        // The paste folder in the key: a new session (/clear) numbers from #1 again.
+        const dir = await pasteDir($, ready.env)
+        const k = { text: numbers.join(','), extra: `${e.props.bodyColumns}x${e.props.maxRows}|${dir}`, stamp: stampOf(ready, e.viewport), onScreen: undefined }
         const kept = memoOf(drafts, 'draft', k, () => false)
         if (kept) lines = kept
         else {
@@ -1275,7 +1282,7 @@ export const register: Register = on => {
           lines = made.lines
           if (made.isWhole && made.isFinal) memoSet(drafts, 'draft', k, lines)
           else drafts.delete('draft')
-          if (!made.isWhole) previewRetry($, k.text, redraw)
+          if (!made.isWhole) previewRetry($, `${dir}|${k.text}`, redraw)
         }
       }
     } catch {

@@ -213,7 +213,7 @@ export function convertCall(o: {
 // A pasted image's preview made to fill `box` pixels (the cells it is drawn
 // in) exactly (render/fill.typ), in the root `run` that FILL_SH made: the
 // pasted file is /image.png there, and Typst reads no other file.
-export function fillCall(o: { typst: string; run: string; cache: string; box: { width: number; height: number }; out: string }): {
+export function fillCall(o: { typst: string; run: string; cache: string; box: { width: number; height: number }; fit?: 'cover' | 'contain'; out: string }): {
   argv: string[]
   env: Record<string, string>
 } {
@@ -226,6 +226,7 @@ export function fillCall(o: { typst: string; run: string; cache: string; box: { 
     '--input', 'f=/image.png',
     '--input', `maxw=${o.box.width}`,
     '--input', `maxh=${o.box.height}`,
+    ...(o.fit === 'contain' ? ['--input', 'fit=contain'] : []),
     `${o.run}/fill.typ`,
     o.out,
   ]
@@ -234,13 +235,15 @@ export function fillCall(o: { typst: string; run: string; cache: string; box: { 
 
 // The root of a fill: a new private folder ($1) with fill.typ copied from
 // the plugin root ($2) (Typst wants its main file inside the root) and a
-// link image.png to the pasted file ($3), which must be a .png file, not a link.
+// link image.png to the pasted file ($3), which must be a .png file, not a
+// link. A copy or link that fails removes the new folder.
 export const FILL_SH = [
   'umask 077',
   'r=$1 p=$2 f=$3',
   'case $f in /*.png) ;; *) exit 1 ;; esac',
   '[ -f "$f" ] && [ ! -L "$f" ] || exit 1',
-  'mkdir "$r" && cp "$p/render/fill.typ" "$r/fill.typ" && ln -s "$f" "$r/image.png"',
+  'mkdir "$r" || exit 1',
+  'cp "$p/render/fill.typ" "$r/fill.typ" && ln -s "$f" "$r/image.png" || { rm -rf "$r"; exit 1; }',
 ].join('\n')
 
 export function noNetworkEnv(cache: string): Record<string, string> {
