@@ -50,6 +50,9 @@ for s in $shells; do
     $s -c "$fill_sh" sh "$k/r-no" "$here" "$no" 2>/dev/null && bad "$s: a root for $no" || ok
     [ ! -e "$k/r-no" ] && ok || { bad "$s: $k/r-no made for $no"; rm -rf "$k/r-no"; }
   done
+  # The copy fails (no render/fill.typ in the plugin root): the new folder goes.
+  $s -c "$fill_sh" sh "$k/r-nocp" "$tmp/no-root" "$paste/5.png" 2>/dev/null && bad "$s: a root with no fill.typ" || ok
+  [ ! -e "$k/r-nocp" ] && ok || bad "$s: $k/r-nocp left after the copy failed"
 done
 
 if ! command -v typst >/dev/null 2>&1; then
@@ -67,6 +70,29 @@ fill "$r" /image.png && ok || bad "the pasted image: $(head -n 3 "$tmp/err")"
 # The copy is the box in pixels: 40 x 30.
 size=$(perl -e 'open(F, "<", $ARGV[0]) or exit 1; binmode F; read(F, my $h, 24); my ($w, $h2) = unpack("NN", substr($h, 16, 8)); print "$w $h2"' "$tmp/out.png")
 [ "$size" = "40 30" ] && ok || bad "the copy is $size, not 40 30"
+# Whether row 0 of PNG $1 is clear (alpha 0 all along): a clear first row
+# is all zero bytes whatever its filter.
+clear_top() {
+  perl -MCompress::Zlib -e 'open(F, "<", $ARGV[0]) or exit 2; binmode F; local $/; my $d = <F>; my ($w) = unpack("N", substr($d, 16, 4));
+    my $z = ""; my $i = 8; while ($i < length $d) { my ($n, $t) = unpack("Na4", substr($d, $i, 8)); $z .= substr($d, $i + 8, $n) if $t eq "IDAT"; $i += 12 + $n }
+    my $raw = uncompress($z); exit(substr($raw, 1, $w * 4) =~ /^\0+$/ ? 0 : 1)' "$1"
+}
+# A one-line screenshot (3000 x 36) in a box of one row (1472 x 32):
+# contain shows all of it, centred, with clear rows above and below; cover
+# (no fit input) fills the box (and cuts its ends).
+printf '#set page(width: 3000pt, height: 36pt, margin: 0pt, fill: white)\n' | typst compile -f png --ppi 72 - "$paste/wide.png"
+r=$tmp/cache/k1/r-wide
+sh -c "$fill_sh" sh "$r" "$here" "$paste/wide.png" && ok || bad "FILL_SH failed for the wide image"
+wide() {
+  perl -e 'alarm 20; exec @ARGV' typst compile --root "$r" --format png --ppi 72 --input f=/image.png --input maxw=1472 --input maxh=32 "$@" "$r/fill.typ" "$tmp/wide.png" > "$tmp/err" 2>&1
+}
+size_of() { perl -e 'open(F, "<", $ARGV[0]) or exit 1; binmode F; read(F, my $h, 24); my ($w, $h2) = unpack("NN", substr($h, 16, 8)); print "$w $h2"' "$1"; }
+wide --input fit=contain && ok || bad "fit contain: $(head -n 3 "$tmp/err")"
+[ "$(size_of "$tmp/wide.png")" = "1472 32" ] && ok || bad "fit contain: the copy is $(size_of "$tmp/wide.png"), not 1472 32"
+clear_top "$tmp/wide.png" && ok || bad "fit contain: the top row is not clear (the image was not contained)"
+wide && ok || bad "no fit: $(head -n 3 "$tmp/err")"
+clear_top "$tmp/wide.png" && bad "no fit (cover): the top row is clear" || ok
+
 # Any other file: not found, or out of the root.
 for f in /etc/hosts "$secret" "$paste/5.png" ../../../../../../../../etc/hosts /fill.typ; do
   if fill "$r" "$f"; then bad "f=$f: compiled"

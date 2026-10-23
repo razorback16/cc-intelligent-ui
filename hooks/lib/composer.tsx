@@ -3,8 +3,8 @@
 // before it is sent, each after its dim `#N`; a sent prompt's under its row
 // (UserMessage), the same size, after the gutter (Claude Code shows the
 // numbers there). The picture is a copy that Typst makes to fill
-// its cells exactly (render/fill.typ: no empty cell area under it); the plain
-// image shows until it is made. The draft's numbers are in the `draft` atom
+// its cells exactly (render/fill.typ: no empty cell area under it, unless
+// that cuts more than half a cell: fillFitOf); the plain image shows until it is made. The draft's numbers are in the `draft` atom
 // (register.tsx, which writes it at each edit that changes them); the
 // pictures are the files Claude Code wrote at the paste (pasteDir).
 import type { EngineInterface, ImageSource, RenderElement, RenderInput, RenderViewport } from 'claude-code'
@@ -43,10 +43,20 @@ export const cellPixels = (cells: Slot, cell: Cell): PixelBox => ({
   height: Math.max(1, Math.round(cells.rows * cell.height)),
 })
 
+// How a filled copy fits its box: `cover` (the aspect kept, the rest cut)
+// only when it cuts at most half a cell, else `contain` (all of the image,
+// an empty strip beside it): a wide one-line screenshot is not cut in half.
+export function fillFitOf(size: Size, box: PixelBox, cell: Cell): 'cover' | 'contain' {
+  const scale = Math.max(box.width / size.width, box.height / size.height)
+  const cut = (n: number, side: number, c: number) => n * scale - side <= c / 2 + 1
+  return cut(size.width, box.width, cell.width) && cut(size.height, box.height, cell.height) ? 'cover' : 'contain'
+}
+
 // Where the filled copy of a picture is kept: a key folder of the cache (as
-// a convert's, dropped after 2 days), by the file, its stat stamp and the
-// box in pixels (one copy, whatever its number).
-export const filledPath = (cache: string, p: Picture, box: PixelBox) => `${cache}/${hashOf(['fill', p.file, p.stamp, box.width, box.height])}/image.png`
+// a convert's, dropped after 2 days), by the file, its stat stamp, the box
+// in pixels and the fit (one copy, whatever its number).
+export const filledPath = (cache: string, p: Picture, box: PixelBox, fit: 'cover' | 'contain' = 'cover') =>
+  `${cache}/${hashOf(['fill', p.file, p.stamp, box.width, box.height, ...(fit === 'cover' ? [] : [fit])])}/image.png`
 
 // The previews' layout in `columns` cells and `maxRows` rows (Infinity under
 // a row: no cap): each picture at most PREVIEW_ROWS tall (less when the band
@@ -92,8 +102,9 @@ export function linesOf(widths: readonly number[], columns: number): number[][] 
 // The previews of the images `numbers`, in lines (previewLayout) of
 // `columns` cells and `maxRows` rows, after their numbers when `labelled`,
 // else after the gutter: each one's filled copy
-// once made, else the plain image (in flip mode none: only the filled copy
-// is stored for its rows). A file that is gone or not a PNG is left out;
+// once made, else the plain image (in flip mode none while the copy is
+// made: only a PNG stored for its rows draws; with no copy, the image as it
+// is stored so). A file that is gone or not a PNG is left out;
 // `isWhole` is false then (it may not be written yet: previewRetry).
 // `isFinal` is false while a copy is made (`redraw` once it is).
 export async function previewsOf(
@@ -118,10 +129,12 @@ export async function previewsOf(
   const previews = new Map<number, Preview>()
   for (const [i, { n, plain, p }] of found.entries()) {
     const box = laid.boxes[i]!
-    const made = filledOf($, ready, p, cellPixels(box, cell), o.redraw)
+    const made = filledOf($, ready, p, cellPixels(box, cell), cell, o.redraw)
     if (made === undefined) isFinal = false
     const q = made ? await pictureOf($, made) : null
-    const source = (q ? await sourceOf($, ready, q, box.rows) : null) ?? plain
+    // Flip mode with no copy (no Typst, or it failed): the image stored for its rows.
+    const bare = flip && made === null ? await sourceOf($, ready, p, box.rows) : plain
+    const source = (q ? await sourceOf($, ready, q, box.rows) : null) ?? bare
     if (source) previews.set(i, { n, source, ...box })
   }
   const lines = laid.lines.map(line => line.flatMap(i => previews.get(i) ?? [])).filter(line => line.length)
@@ -136,9 +149,10 @@ const filling = new Map<string, Set<() => void>>()
 // A picture's filled copy for `box` pixels: its path; undefined while it is
 // made (`redraw` once it is, with every other caller's: the plain image
 // shows meanwhile); null when it failed (not tried again) or with no Typst.
-function filledOf($: EngineInterface, ready: Env, p: Picture, box: PixelBox, redraw: () => void): string | null | undefined {
+function filledOf($: EngineInterface, ready: Env, p: Picture, box: PixelBox, cell: Cell, redraw: () => void): string | null | undefined {
   if (!ready.typst) return null
-  const key = `${p.file}@${p.stamp}@${box.width}x${box.height}`
+  const fit = fillFitOf(p, box, cell)
+  const key = `${p.file}@${p.stamp}@${box.width}x${box.height}@${fit}`
   if (filled.has(key)) return filled.get(key) ?? null
   const waits = filling.get(key)
   if (waits) {
@@ -147,7 +161,7 @@ function filledOf($: EngineInterface, ready: Env, p: Picture, box: PixelBox, red
   }
   const redraws = new Set([redraw])
   filling.set(key, redraws)
-  void makeFilled($, ready, p, box).catch(() => null).then(png => {
+  void makeFilled($, ready, p, box, fit).catch(() => null).then(png => {
     filling.delete(key)
     keep(filled, key, png, PICTURES_KEPT)
     if (png) for (const again of redraws) again()
@@ -159,8 +173,8 @@ function filledOf($: EngineInterface, ready: Env, p: Picture, box: PixelBox, red
 // whole, as a convert), in a root of its own (FILL_SH: fill.typ and a link
 // to the pasted file, removed after). One made in an earlier load is used
 // as is. Null when the root can not be made or Typst fails.
-async function makeFilled($: EngineInterface, ready: Env, p: Picture, box: PixelBox): Promise<string | null> {
-  const out = filledPath(ready.cache, p, box)
+async function makeFilled($: EngineInterface, ready: Env, p: Picture, box: PixelBox, fit: 'cover' | 'contain'): Promise<string | null> {
+  const out = filledPath(ready.cache, p, box, fit)
   const made = await stat($, out).catch(() => null)
   if (made?.kind === 'file' && made.size) return out
   const dir = folderOf(out)
@@ -175,7 +189,7 @@ async function makeFilled($: EngineInterface, ready: Env, p: Picture, box: Pixel
     return null
   }
   try {
-    const { argv, env } = fillCall({ typst: ready.typst!, run, cache: ready.cache, box, out: part })
+    const { argv, env } = fillCall({ typst: ready.typst!, run, cache: ready.cache, box, fit, out: part })
     const ran = await exec($, argv, { timeoutMs: COMPILE_TIMEOUT_MS, env })
     if (ran.exitCode !== 0) {
       await logDebug($, ready.cache, `fill ${p.file} failed:\n${ran.stderr}`)
