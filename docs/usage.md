@@ -2,15 +2,15 @@
 
 ← Back to the [README](../README.md)
 
-Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the drawing changes. The saved answer stays Markdown.
+Intelligent UI draws Claude's answers as rendered Markdown. Only the drawing changes. The saved answer stays Markdown.
 
 ## What it draws
 
-- Headings, lists, task lists, tables, block quotes, links, footnotes and horizontal rules
-- Code blocks with syntax colours, in your terminal's font (found for iTerm2, Ghostty, kitty and Rio; on Linux, else fontconfig's `monospace` font; else Menlo, SF Mono or DejaVu Sans Mono)
-- Math (`$…$` and `$$…$$`, LaTeX syntax, through mitex)
-- Images from `![alt](path)`. A relative path starts from the session's folder. Remote images show as an alt-text box.
-- Live Typst: a fenced block with the language `typst` (or `typ`) is rendered, not shown as code. These packages are in the mod and work offline:
+- **Markdown:** headings, lists, task lists, tables, block quotes, links, footnotes and horizontal rules.
+- **Code blocks** with syntax colours, in your terminal's font. The mod reads the font from iTerm2, Ghostty, kitty and Rio. Else it uses fontconfig's `monospace` on Linux, then Menlo, SF Mono or DejaVu Sans Mono.
+- **Math:** `$…$` and `$$…$$`, in LaTeX syntax.
+- **Images** from `![alt](path)`. A relative path starts from the session's folder. Remote images show as a box with the alt text.
+- **Live Typst:** a code block with the language `typst` (or `typ`) is drawn, not shown as code. These packages come with the mod and work offline:
 
   ```
   #import "@preview/cetz:0.5.2"
@@ -18,78 +18,129 @@ Intelligent UI draws Claude's answers as rendered Markdown pictures. Only the dr
   #import "@preview/fletcher:0.5.8" as fletcher: diagram, node, edge
   ```
 
-  A `theme` dictionary (`theme.fg`, `theme.muted`, `theme.blue`, `theme.palette`, `theme.width`, …) is in scope, so drawings match the terminal's colours. The mod tells Claude about this in a short part of the system prompt. `theme.width` and `theme.height` give the space for a drawing. The mod keeps the size that a message had when it was drawn the first time. When the terminal size changes, the mod makes the drawings larger or smaller by the same amount.
-- Files that Claude sends to you (the SendUserFile tool). The mod draws each file under the row that shows the files, in the same order:
-  - PNG, JPEG, WebP and SVG images. Typst changes a JPEG, WebP or SVG image into a PNG image in the cache folder. The PNG image is the size of the space for the picture in the transcript, or smaller. Typst does this one time for each version of the file and each size of the space. When the space changes, the mod shows the old PNG image until Typst makes the new one.
-  - PDF files. The mod draws one page of the PDF. Typst changes the page into a PNG image in the cache folder. The page fills the space for the picture in the transcript, and it can be larger than the page in the PDF. A line with the page number shows under the page, for example `‹  3  ›`. Click `‹` or `›` to show the page before or the page after. `‹` is gray on page 1, and `›` is gray on the last page. When a page shows, Typst also makes the next page, so that `›` shows it immediately. The mod does not show the number of pages.
+  A `theme` dictionary (`theme.fg`, `theme.muted`, `theme.blue`, `theme.palette`, `theme.width`, `theme.height`, …) lets a drawing use the terminal's colours and fit its space. A short part of the system prompt tells Claude about it. A drawing keeps the layout of its first draw, and scales when the terminal size changes.
+- **Files that Claude sends** (the SendUserFile tool): images, PDF pages and Markdown files. See [Files that Claude sends](#files-that-claude-sends).
+- **Images you paste** (`[Image #N]`): a small preview above the prompt box, and the same small images under your prompt after you send it. See [Preview of pasted images](#preview-of-pasted-images).
+- **Plans** in plan mode, with the mod's own approval question. See [Plan approval](#plan-approval).
 
-    Click the page number to go to a page: a field with the page number opens above the prompt (in fullscreen mode in a wide terminal, at the side of the transcript). Type the page number and push Enter. Push Esc to close the field. If the page does not exist, the field stays open and shows `No page N`.
+## Files that Claude sends
 
-    A PDF with one page has no line under it. If Typst cannot read the PDF (for example, a PDF with a password or a damaged PDF), the row shows one gray line with the error from Typst. If Typst cannot make one page, the row shows the error for that page above the line. Each row starts on page 1. The mod keeps the page of each row in memory only: a reload of the mod sets all rows to page 1 again, and an old row can lose its page when there are many rows. If the PDF gets shorter, a row on a page that is gone shows the last page.
-  - Markdown files (`.md` or `.markdown`, 256 KiB or less). The mod draws the file as rendered pictures, the same as an answer. A relative image path in the file starts from the folder of the file.
+Each file draws under the row that lists the files, in the same order. Other files stay as the normal row.
 
-  Other files stay as the normal row. JPEG images, WebP images, SVG images, PDF files and Markdown files need Typst.
+- **Images:** PNG, JPEG, WebP and SVG. Other types, such as GIF, stay as the normal row. An SVG's size is its width and height in CSS px.
+- **Markdown files** (`.md` or `.markdown`, 256 KiB or less) draw like an answer. A relative image path starts from the file's folder.
+- **PDF files:** one page at a time. See below.
 
-  These images are not larger than the image file. They are not wider than the transcript. The height setting (`/iui height`) sets the most rows that they can use (Typst drawings use it too): by default, half the screen and not more than 24 rows. The mod draws PNG, JPEG, WebP and SVG images only. Other image types (for example GIF) stay as the normal row. The size of an SVG image is its width and height in CSS px.
-- Images that you paste into the prompt (`[Image #N]`). Before you send the prompt, a small preview of each image shows above the prompt box. After you send it, the mod draws the images under your prompt at the same size: side by side, approximately 5 rows tall, with no number (Claude Code shows the numbers there). The height setting does not apply to them. Claude Code's own `[Image #N]` rows stay under them: a mod cannot change these rows. Refer to [Preview of pasted images](#preview-of-pasted-images).
-- The plan in plan mode (the ExitPlanMode tool). The mod draws the plan as a picture in the transcript, the same as an answer. Then the mod asks you to approve the plan. Refer to [Plan approval](#plan-approval).
+JPEG, WebP, SVG, PDF and Markdown need Typst.
+
+**Size.** An image is never larger than its file or wider than the transcript. `/iui height` sets the most rows it can use (by default half the screen, 24 rows at most). The same limit applies to Typst drawings in answers.
+
+### PDF pages
+
+- **Change page:** a line such as `‹  3  ›` shows under the page. Click `‹` or `›`. `‹` is gray on page 1, and `›` on the last page. The mod does not show the number of pages.
+- **Go to a page:** click the page number. A field opens above the prompt (at the side of the transcript in a wide fullscreen terminal). Type the number and push Enter. If the page does not exist, the field shows `No page N`. Push Esc to close it.
+- **One page only:** a PDF with one page has no page line.
+- **Errors:** if Typst cannot read the PDF (for example, it has a password or is damaged), the row shows the error in gray. If one page fails, its error shows above the page line.
+- **Page memory:** each row starts on page 1. The mod keeps the page in memory only, so a reload goes back to page 1, and an old row can lose its page when there are many rows. If the PDF gets shorter, a page that is gone shows the last page.
 
 ## Preview of pasted images
 
-When you paste an image into the prompt box, the box shows `[Image #N]`. The mod then shows a small preview of the image above the prompt box, before you send the prompt. The number of the image (`#N`) shows in dim text at the left of its preview.
+When you paste an image, the prompt box shows `[Image #N]`. The mod shows a small preview of it above the prompt box, with its number in dim text at its left.
 
-- The preview fills its cells. Typst makes a copy of the image that has the size of the cells, one time for each image and size, in the cache folder. To fill the cells, the copy can cut a small part of an edge of the image (at most half a cell). If the shape of the image is very different from the shape of its cells (for example, a wide screenshot of one line), the copy shows all of the image, with an empty strip above and below it or at its sides. Typst runs in a folder of its own with only the pasted image, so it reads no other file. Until the copy is ready, the preview shows the image as it is. Without Typst, or if Typst cannot make the copy, the preview also shows the image as it is.
-- In herdr in iTerm2, a preview shows only after the mod stores it with its rows in the order that iTerm2 shows correctly. While Typst makes the copy, there is no preview. Without Typst, or if Typst cannot make the copy, the mod stores the image as it is.
-- The previews show side by side. When they do not fit in one line, they go on to the next line.
-- A preview is approximately 5 rows tall, or less when the space above the prompt box is small. The image keeps its shape.
-- When you delete the `[Image #N]` text, the preview of that image goes away. When you send or clear the prompt, all the previews go away.
-- A pasted path of an image file (path text that you copied) also shows a preview. Claude Code writes no file for it until you send the prompt, so the mod reads the clipboard one time to find the file. It shows PNG, JPEG and WebP files (JPEG and WebP need Typst).
-- The mod shows PNG images only. If Claude Code wrote no PNG file for an image, that image has no preview.
-- A survey above the prompt box hides the previews until it closes.
-- With `/iui off`, or in a terminal that shows no pictures, there are no previews.
+- **Size:** about 5 rows tall, less when the space is small. The previews sit side by side and wrap to the next line. The image keeps its shape. It fills its cells, so up to half a cell can be cut from one edge. A very wide or tall image (for example, a screenshot of one line) shows whole, with empty space beside it.
+- **Delete or clear:** delete the `[Image #N]` text and its preview goes. Send or clear the prompt and all previews go.
+- **After you send:** the same small images show under your prompt, without numbers. Claude Code's own `[Image #N]` rows stay under them; a mod cannot change those. `/iui height` does not apply to pasted images.
+- **Pasted image paths:** if you copy the path of an image file and paste it, the mod reads the clipboard once to find the file and shows its preview. PNG, JPEG and WebP work (JPEG and WebP need Typst). This does not work over ssh. A dragged path shows its preview only after you send (see [Limitations](limitations.md)).
+- **Pasted images need a PNG:** if Claude Code saved no PNG file for an image, it has no preview.
+- **Without Typst**, or until the fitted copy is ready, the preview shows the image as it is. In herdr in iTerm2, no preview shows while the fitted copy is made.
+- **Hidden:** a survey above the prompt box hides the previews until it closes. With `/iui off`, or in a terminal that shows no pictures, there are no previews.
 
 ## The intelligent-ui skill
 
-The mod has a skill for Claude: `intelligent-ui`. It has the full API of Typst, fletcher, CeTZ and cetz-plot, recipes for many diagram and chart types, and a compile check. Claude loads it by itself before it writes a complex drawing, or after a drawing did not compile. For normal answers and simple drawings, Claude does not load it.
+The mod gives Claude a skill, `intelligent-ui`, with the full Typst, fletcher, CeTZ and cetz-plot API, recipes for many diagrams and charts, and a compile check. Claude loads it by itself before a complex drawing, or after a drawing fails to compile. For normal answers and simple drawings, it does not.
 
-The compile check (`scripts/check.sh` in the skill) compiles a drawing with the mod's template and your theme, in dark and light mode. It shows the errors and writes PNG images. Claude looks at the images and corrects the drawing before it answers.
+The compile check (`scripts/check.sh` in the skill) compiles a drawing with your theme, in dark and light mode. Claude looks at the result and fixes the drawing before it answers.
 
-You can also start the skill yourself: type `/cc-intelligent-ui:intelligent-ui` (or `/intelligent-ui` when no other command has that name), and then ask for the drawing.
+To start it yourself, type `/cc-intelligent-ui:intelligent-ui` (or `/intelligent-ui` when no other command has that name), then ask for the drawing.
 
 ## Commands
 
+Settings that you change are kept for later sessions.
+
 | Command | What it does |
 |---|---|
-| `/iui` | Shows the state, the theme, the text size, the width, the image height and the row grid, a problem that keeps pictures away, and a new version when there is one |
-| `/iui details` | Shows all that the mod found: where the mode comes from, the terminal font, the Typst path, why the terminal can or cannot show pictures, if picture select is on (`Picture select:`), if the `/iui grab` toast is on (`/iui grab hint:`), and the state of the update check (`Update checks:`) |
-| `/iui on` / `off` | Turns the pictures on or off (kept for later sessions) |
-| `/iui setup` / `setup remove` | iTerm2 (macOS only) and herdr (macOS and Linux): adds or removes the shell line that turns pictures on (then close the tab or pane and open a new one). An older line (iTerm2 only) is updated. On Linux outside herdr, it changes no file. |
-| `/iui size <80–200>` | Text size in percent. 100 is the same visual size as your terminal text. |
-| `/iui width` | Shows the width: the most columns that a picture can use |
-| `/iui width <40–400>` | Sets the most columns that a picture can use (kept for later sessions) |
-| `/iui width full` | Pictures use the full width of the terminal, the same as the text of Claude Code (kept for later sessions). This is the default. A picture is never wider than 255 columns. |
-| `/iui height` | Shows the image height: the most rows that an image can use. This applies to images that Claude sends and to Typst drawings in answers. Images that you paste always show small. |
-| `/iui height half` | An image uses half the terminal height, from 6 to 24 rows (kept for later sessions). This is the default. |
-| `/iui height full` | An image uses the terminal height less 16 rows (kept for later sessions). The 16 rows are for the row of the file, the text around it and the prompt. |
-| `/iui height <6–200>` | Sets the most rows that an image can use (kept for later sessions). An image is never taller than with `full`. |
-| `/iui grid` | Shows the row grid setting: on or off |
-| `/iui grid on` | Puts each line of text in a picture on the terminal rows (kept for later sessions). This is the default. Refer to [Selection and the row grid](#selection-and-the-row-grid). |
-| `/iui grid off` | Lines of text in a picture have the usual spacing (kept for later sessions). |
-| `/iui select` | Shows the picture select setting: on or off |
-| `/iui select on` | With Claude Code 2.1.298 or newer, in fullscreen mode, a drag over a picture selects its text and copies it (kept for later sessions). This is the default. Refer to [Picture select](#picture-select-claude-code-21298-or-newer). |
-| `/iui select off` | Stops picture select (kept for later sessions). Then a drag over a picture is the selection of Claude Code. From Claude Code 2.1.305, that selection skips pictures. |
-| `/iui updates` | Shows the update check: on or off, and the newest version that it found |
-| `/iui updates on` | Looks for a new version one time each day at most, and shows a toast when there is one (kept for later sessions). This is the default. Refer to [Update](install.md#update). |
-| `/iui updates off` | Stops the check for a new version and its toast (kept for later sessions) |
-| `/iui theme` | Lists the themes, shows which one is in use, and shows the folder for your own themes |
-| `/iui theme <name>` | Changes to that theme (kept for later sessions) |
-| `/iui grab` | Copies the text under your last mouse selection of pictures. On the main screen, it copies the text of the picture cells on the clipboard. Refer to [Copy text from a picture](#copy-text-from-a-picture). |
-| `/iui dump` | Shows the last clipboard text with picture cells and how the mod read it (for a bug report). It also writes this to `copy-debug.json` in the cache folder. |
-| `/iui probe` | Asks the terminal for its background colour with OSC 11 and shows the raw answers. Refer to [How `auto` is resolved](how-it-works.md#how-auto-is-resolved). |
+| `/iui` | State, theme, text size, width, image height, row grid, any problem that keeps pictures away, and a new version if there is one |
+| `/iui details` | All that the mod found: where the light or dark mode comes from, the terminal font, the Typst path, why pictures show or not, `Picture select:`, `/iui grab hint:` and `Update checks:` |
+| `/iui on` / `off` | Pictures on or off |
+| `/iui theme` | Lists the themes, the one in use, and the folder for your own themes |
+| `/iui theme <name>` | Changes the theme. Default: `claude-code` |
+| `/iui size <80–200>` | Text size in percent. 100 (the default) matches your terminal text |
+| `/iui width` | Shows the most columns a picture can use |
+| `/iui width <40–400>` | Sets the most columns a picture can use |
+| `/iui width full` | Pictures use the full terminal width, like Claude Code's text, 255 columns at most. The default |
+| `/iui height` | Shows the most rows an image or Typst drawing can use. Pasted images always show small |
+| `/iui height half` | Half the terminal height, from 6 to 24 rows. The default |
+| `/iui height full` | The terminal height less 16 rows (room for the file row, the text around it and the prompt) |
+| `/iui height <6–200>` | Sets the most rows, never more than `full` |
+| `/iui grid` | Shows if the row grid is on or off |
+| `/iui grid on` / `off` | Puts each line of text on the terminal rows (on, the default), or uses the usual spacing (off). See [Selection and the row grid](#selection-and-the-row-grid) |
+| `/iui select` | Shows if picture select is on or off |
+| `/iui select on` / `off` | Drag over an answer to copy its text (on, the default). With `off`, a drag is Claude Code's own selection, which skips pictures from Claude Code 2.1.305. See [Picture select](#picture-select-claude-code-21298-or-newer) |
+| `/iui updates` | Shows if the update check is on, and the newest version it found |
+| `/iui updates on` / `off` | Checks for a new version once a day at most and shows a toast (on, the default), or stops the check. See [Update](install.md#update) |
+| `/iui setup` / `setup remove` | Adds or removes the shell line that turns pictures on in iTerm2 (macOS) and herdr (macOS and Linux). Then open a new tab or pane. It updates an older iTerm2 line. On Linux outside herdr it changes nothing |
+| `/iui grab` | Copies the text of your last selection of pictures. On the main screen, it copies the text of the picture cells on the clipboard. See [Copy text from a picture](#copy-text-from-a-picture) |
+| `/iui dump` | Shows the last clipboard with picture cells and how the mod read it, for a bug report. Also writes it to `copy-debug.json` in the cache folder |
+| `/iui probe` | Asks the terminal for its background colour (OSC 11) and shows the raw answers. See [How `auto` is resolved](how-it-works.md#how-auto-is-resolved) |
+
+## Copy text from a picture
+
+Copying an answer works as usual: drag over it, release, paste. This also works for a plan or a Markdown file that Claude sent. Text inside a diagram, a Typst drawing, an image or display math does not copy. Inline math copies as its LaTeX source.
+
+This needs fullscreen mode and Claude Code 2.1.298 or newer. Run `/tui fullscreen` (`/tui default` goes back to the main screen). On the main screen, see [Picture cells on the clipboard](#picture-cells-on-the-clipboard).
+
+### Picture select (Claude Code 2.1.298 or newer)
+
+Picture select is what makes a drag over an answer copy its text. It works in fullscreen mode only, and it is on by default (`/iui select off` and `/iui select on`).
+
+1. **Drag** over the answer with the left button. Start the drag on the answer. The selection shows on a blue background (VS Code's selection colour) and follows the text, as in an editor. The layout does not change.
+2. **Release.** The mod copies the selected text and shows "copied N chars of text". Then paste.
+3. **Clear** the selection with a click in an answer, a new selection, a key in the prompt, your next prompt, `/iui off` or `/iui select off`. A single click on normal text does not clear it (see [Limitations](limitations.md)).
+
+A selection can go on into the next page of the same answer. The copy is usually instant; on a page that is not ready yet it can take up to 0.5 s (2–3 s with a large drawing), so wait for the toast before you paste.
+
+#### Click a link, a file or a command
+
+With picture select, the links, file paths, commands and code block copy buttons in an answer are live.
+
+- **Hover** over one and its cells turn blue. There is no hover highlight while a selection shows.
+- **Click** it (press and release on the same cell) to copy it:
+
+  | Click on | Copies | Toast |
+  |---|---|---|
+  | A web link | Its URL | "copied the link" |
+  | A file path | Its full path | "copied the path" |
+  | A command | The full command | "copied the command" |
+  | The copy button at the top right of a code block | All the code of the block | "copied the code" |
+
+- **Drag** from a link, path or command to select text as usual.
+
+**What counts.** A web link is a Markdown link to an `http:`, `https:` or `mailto:` URL, or a bare URL. A file path is in the text or in inline code, and the file must exist (a relative path starts from the session's folder). A command is any other inline code, for example `` `git status` ``; for `` `! cmd` `` the click copies only `cmd`. A code block's text is not a target: use its copy button or select the text. Links to headings are not targets.
+
+### Picture cells on the clipboard
+
+On the main screen (not fullscreen), there is no picture select. The terminal does the copy itself, and it gives picture cells (kitty placeholder characters), not text. A Claude Code selection that starts outside an answer can also copy picture cells (see [Limitations](limitations.md)). The mod never changes the clipboard for such a copy, because it cannot tell which session the copy came from.
+
+- **Toast:** while the mod is on and has drawn a picture in this session, it watches the clipboard. When the clipboard has picture cells from this session, a toast tells you to run `/iui grab`. On Linux this needs the tools in [Linux](install.md#linux).
+- **`/iui grab`:** run it in the same session. In fullscreen, it copies the text of your last mouse selection. On the main screen, it reads the picture cells on the clipboard and copies their text. If the clipboard already has the text, it says so.
+- **Wrong text?** `/iui dump` shows the cells the mod found and the page it used, and writes them to `copy-debug.json` in the cache folder.
+- **Fullscreen hint:** the first time the mod draws on the main screen, a toast recommends fullscreen mode (once per session).
+
+For the limits, see [Limitations](limitations.md).
 
 ## Links, file paths and commands
 
-In fullscreen mode, with picture select on, you click the links, file paths and commands in the picture itself. Refer to [Click a link, a file or a command](#click-a-link-a-file-or-a-command). In other conditions (the main screen, over ssh, Claude Code before 2.1.298, or `/iui select off`), a picture has no text for the terminal, so a click on a link in the picture does not open it. Then the mod shows the links, file paths and commands of an answer, a plan or a Markdown file that Claude sent in dim rows under its picture. These rows show only when the text has links, file paths or commands. Each item uses one row:
+Without picture select (the main screen, ssh, Claude Code before 2.1.298, or `/iui select off`), a click on a link in a picture does nothing. Instead, the mod lists the links, file paths and commands of an answer, a plan or a sent Markdown file in dim rows under it, one per row. The rows show only when there is something to list:
 
 ```
 ↗ Typst docs  https://typst.app/docs
@@ -98,83 +149,42 @@ In fullscreen mode, with picture select on, you click the links, file paths and 
 $ brew install typst
 ```
 
-- **A web link** (`http:`, `https:` or `mailto:`): the link text, then the URL. If the link text is the URL, the URL shows one time. A cmd+click on the link (or the click that your terminal uses for links) opens it.
-- **A file path**, for example `hooks/lib/copy.ts:42`: a cmd+click opens the file. A relative path starts from the session's folder (for a Markdown file that Claude sent, from the folder of that file). A row shows only when the file exists.
-- **A command** from a `bash`, `sh`, `zsh`, `shell`, `console` or `shell-session` code block, or from inline code that starts with `! `: a click on the row copies the full command, and a toast shows "Copied". A command with more lines shows its first line and the number of the other lines. The click works only where Claude Code gets mouse clicks (fullscreen mode).
+- **Web link** (`http:`, `https:` or `mailto:`): the link text, then the URL (once, if they are the same). Cmd+click (or your terminal's link click) opens it.
+- **File path**, for example `hooks/lib/copy.ts:42`: cmd+click opens the file. A relative path starts from the session's folder (or the folder of a sent Markdown file). The row shows only if the file exists.
+- **Command** from a `bash`, `sh`, `zsh`, `shell`, `console` or `shell-session` code block, or inline code that starts with `! `: click the row to copy the full command ("Copied"). A command with several lines shows its first line and the number of other lines. The click works only in fullscreen mode.
 
-The mod does not take web links from code blocks, inline code or math. It takes file paths from the text and from inline code, but not from code blocks.
-
-## Copy text from a picture
-
-We recommend fullscreen mode: run `/tui fullscreen` (`/tui default` goes back to the main screen). In fullscreen mode, picture select copies the text of a picture (an answer, a plan or a Markdown file that Claude sent). Refer to [Picture select](#picture-select-claude-code-21298-or-newer).
-
-### Picture select (Claude Code 2.1.298 or newer)
-
-Picture select works in fullscreen mode only. It is on by default. `/iui select off` turns it off, and `/iui select on` turns it on again.
-
-1. Drag over a picture with the left button. Start the drag on the picture. The selected cells show on a blue background (VS Code's selection colour), in the order of the text: the first row from where you started, the rows between, and the last row to the pointer. The layout does not change.
-2. Release the button. The mod copies the text of the selected cells (the same words that a copy of these cells gives) and shows the toast "copied N chars of text". Then paste.
-3. These remove the selection: a click with no drag in a picture (a click on a link, a file path or a command also copies it, refer to [Click a link, a file or a command](#click-a-link-a-file-or-a-command)), a new selection in a picture, a key typed in the prompt, a new selection of Claude Code (normal text), your next prompt, and `/iui off` or `/iui select off`. A single click on normal text does not (refer to [Limitations](limitations.md)).
-
-A selection can go on into the next page of the same answer.
-
-#### Click a link, a file or a command
-
-With picture select, the web links, file paths, commands and the copy buttons of code blocks in a picture are live. The dim link rows do not show under the picture.
-
-- Move the pointer over a link, a file path, a command or a copy button (no button). Its cells show on the blue background. Move the pointer off it, and the background goes. While a selection shows, there is no such highlight.
-- Click it (push and release the button on the same cell). The mod copies it and shows a toast: a web link copies its URL ("copied the link"), a file path copies its full path ("copied the path"), a command copies the full command ("copied the command"), and the copy button of a code block (at the top right of the block) copies all the code of the block ("copied the code").
-- A drag that starts on a link, a file path or a command selects text, as on other text.
-
-A web link is a Markdown link to an `http:`, `https:` or `mailto:` URL, or a URL in the text. A file path is in the text or in inline code, and the file must exist (a relative path starts from the session's folder). A command is any inline code that is not a file that exists, for example `` `git status` `` (a click copies its text; for `` `! cmd` `` it copies only `cmd`). The text of a code block is not a target: to copy all of it, click its copy button, or select its text. A link to a heading in the same text is not a link for this.
-
-When a page is drawn or comes on the screen, the mod gets the page ready for the highlight in the background. It also finds the position of each word on the page. Thus the first highlight and the copy are fast. If you push the button on a page that is not ready, the mod gets that page ready first, and the first highlight shows a short time later. If the words of the page are not ready when you release the button, the copy waits for them: approximately 0.05 s for plain text (only ASCII characters, no math, no Typst block and no image), 0.15–0.5 s for other text, and more (2–3 s) for a page with a large Typst drawing. No toast shows while the mod does this. Only the toast of the copy shows. The mod keeps the positions in memory, so the next copy from the same page is fast.
-
-### Picture cells on the clipboard
-
-On the main screen (not fullscreen mode), there is no picture select. The terminal copies the selection itself, not Claude Code. The copy gives picture cells (kitty placeholder characters), not text. A selection of Claude Code that starts outside a picture can also copy picture cells (refer to [Limitations](limitations.md)). The mod never changes the clipboard for such a copy, because it cannot know which session the copy is from.
-
-While the mod is on and has drawn a picture in this session, it sees each change of the clipboard (on macOS in 0.3 s or less; on Linux at once, with the tools in [Linux](install.md#linux)). When the clipboard has picture cells of a picture in this session, a toast tells you to use `/iui grab`. Run `/iui grab` in the same session. When the mod draws its first picture on the main screen, a toast recommends fullscreen mode (one time in each session).
-
-`/iui grab` puts the text on the clipboard. In fullscreen mode, it reads the last mouse selection of Claude Code and copies its text. With no selection (the main screen), it reads the picture cells on the clipboard and copies their text. If the clipboard has the text already, it tells you. If the copied text is not correct, `/iui dump` shows the cells that the mod found and the page that it used. It also writes all of this to `copy-debug.json` in the cache folder.
-
-A copy of picture cells through `$.ui.copy` gets the text in place of the cells.
-
-For the limits, refer to [Limitations](limitations.md).
+Web links are not taken from code blocks, inline code or math. File paths are taken from the text and inline code, not from code blocks.
 
 ## Selection and the row grid
 
-The terminal draws a mouse selection as full cells, thus a selection covers full rows. Without the grid, the lines of text in a picture are not on the terminal rows. A line of body text is approximately 1.3 rows tall, and a line in a list or a table is approximately 1.6 rows tall. Thus, after some lines, the selection is not on the text that the mod copies.
+The terminal draws a selection in whole rows. Without the grid, text lines in a picture do not line up with the rows (a body line is about 1.3 rows tall, a list or table line about 1.6), so after a few lines the selection drifts from the text that is copied.
 
-The row grid (`/iui grid on`, the default) puts each line of text on the terminal rows:
+The row grid (`/iui grid on`, the default) puts each line of text on the terminal rows, so the selection covers the text you get:
 
-- Each line of body text, a list, a quote or a table uses one row (or more rows if the text is large). The middle of the text is in the middle of a row.
-- Each heading, each code line and each gap between blocks uses full rows.
-- The middle of a line that uses 2 rows (or 4 rows) is on the border between two rows. Thus the mod moves such a line down by half a row, and adds half a row above and below the block that holds it. For example, a level-2 heading uses 3 rows, and its text is in the middle row. Thus a selection of one row covers the full height of the text.
-- If a line of body text uses 2 rows (with a large text size), the picture starts half a row down, thus body text does not move. Only a line that uses an odd number of rows (for example, some headings) gets the half rows. If the picture starts with such a heading, the picture starts at the heading.
-- A heading that has the half rows has no gap below it: the half row below its text is the gap to the text under the heading. The gap above the heading stays. For example, at 100%, a level-3 heading has 2 empty rows above it and 1 empty row below it.
-- The reply bullet is on the row that holds the middle of the first line. For example, the bullet is on the second row of a level-1 heading.
-- Some blocks have a height that the mod cannot set, for example display math, an image or a Typst drawing. The mod adds space to such a block, so that its height is a number of full rows.
+- **Text lines:** each line of body text, a list, a quote or a table uses one row (more with a large text size), with the text centred in the row.
+- **Headings and code:** each heading, code line and gap between blocks uses whole rows. A level-2 heading uses 3 rows, with its text in the middle row.
+- **Other blocks** (display math, images, Typst drawings) get extra space so that they use whole rows.
+- **Reply bullet:** it sits on the row of the first line's text.
 
-Thus the selection covers the text that the mod copies. The lines are closer together than without the grid, so the look is not the same as VS Code. The grid is on by default. Use `/iui grid off` for the usual spacing. For the limits, refer to [Limitations](limitations.md).
+Lines are closer together than without the grid, so the look differs a little from VS Code. Use `/iui grid off` for the usual spacing. For the limits, see [Limitations](limitations.md).
 
 ## Plan approval
 
-When Claude exits plan mode, the mod draws the plan as a picture in the transcript. Under the picture, the mod shows its own question, "Approve this plan?", in place of the Claude Code dialog. A dim line above the question tells you that the rendered plan is above. The question has these options:
+When Claude exits plan mode, the mod draws the plan in the transcript. Under it, the mod asks "Approve this plan?" in place of Claude Code's dialog:
 
 | Option | What it does |
 |---|---|
-| Yes, auto-accept edits | Approves the plan. Claude Code then accepts file edits with no question (`acceptEdits` mode). |
-| Yes, manually approve edits | Approves the plan. Claude Code then asks you before each file edit (`default` mode). |
-| Yes, clear context + auto-accept | Approves the plan, stops the turn and runs `/clear`. Then the mod sends "Implement this plan:" and the plan as a new prompt, in `acceptEdits` mode. |
-| Edit the plan | Opens the plan file in an editor. The mod waits until you close the file (10 minutes at most). Then it asks "Approve the edited plan?". When you approve, Claude gets the edited plan. |
-| Type something | Sends your text to Claude as changes to the plan. Claude stays in plan mode and writes a new plan. |
+| Yes, auto-accept edits | Approves. Claude Code then accepts file edits without asking (`acceptEdits` mode). |
+| Yes, manually approve edits | Approves. Claude Code asks before each file edit (`default` mode). |
+| Yes, clear context + auto-accept | Approves, stops the turn and runs `/clear`. Then sends "Implement this plan:" with the plan as a new prompt, in `acceptEdits` mode. |
+| Edit the plan | Opens the plan file in an editor and waits until you close it (10 minutes at most). Then asks "Approve the edited plan?". Claude gets the edited plan. |
+| Type something | Sends your text to Claude as changes. Claude stays in plan mode and writes a new plan. |
 | Esc | Rejects the plan and stops the turn. |
 
-The editor is VS Code (`code --wait`) when the `code` command is on your PATH. If `code` is not on the PATH, macOS uses TextEdit (`open -W -t`). In that case, quit TextEdit when you complete the edit. On Linux with a display, the mod uses the first of VSCodium (`codium --wait`), Zed (`zed --wait`), Sublime Text (`subl --wait`), Kate (`kate --block`), gedit (`gedit --wait`) and gvim (`gvim -f`) that is on the PATH. Close the file (or the window) when you complete the edit. Over ssh with no `code` command, and on Linux with none of these editors, the "Edit the plan" option does not show.
+**Editor.** VS Code (`code --wait`) when `code` is on your PATH. Else, on macOS, TextEdit (quit TextEdit when you are done). On Linux with a display, the first of VSCodium, Zed, Sublime Text, Kate, gedit and gvim on your PATH (close the file or window when you are done). Over ssh without `code`, or on Linux with none of these, "Edit the plan" does not show.
 
-The mod shows the plan file as it is when the question opens. Claude can write the plan file and exit plan mode in the same message. Then Claude Code sends the plan from before that write. In this case, the mod waits for the write to complete (5 seconds at most) and reads the file again. You approve the plan that you see, and Claude gets that plan.
+**The plan you see is the plan Claude gets.** If Claude writes the plan file and exits plan mode in the same message, the mod waits for the write (5 s at most) and reads the file again.
 
-The mod uses this flow only when it can draw the plan: the mod is on, Typst is installed, the terminal draws pictures, and the plan is from the main conversation (not from a subagent). In all other conditions, Claude Code shows its own dialog, as with no mod. If the flow fails, Claude Code also shows its own dialog.
+**When it applies.** Only when the mod can draw the plan: the mod is on, Typst is installed, the terminal shows pictures, and the plan is from the main conversation (not a subagent). Otherwise, or if the flow fails, Claude Code shows its own dialog.
 
-For the limits of this flow, refer to [Limitations](limitations.md).
+For the limits, see [Limitations](limitations.md).

@@ -6,42 +6,61 @@
 
 - Claude Code 2.1.298 or later (tested on 2.1.307)
 - [Typst](https://typst.app) 0.15 (tested on 0.15.1)
-- macOS (tested) or Linux with X11 or Wayland. It works on a Linux desktop (tested on Ubuntu 24.04 with GNOME). Refer to [Linux](#linux).
-- A terminal where Claude Code draws pictures. Refer to [Terminals](#terminals).
+- macOS (tested), or Linux with X11 or Wayland (tested on Ubuntu 24.04 with GNOME). Refer to [Linux](#linux).
+- A terminal where Claude Code can show pictures. Refer to [Terminals](#terminals).
 
 ## Terminals
 
-- **kitty (0.28 or later), Ghostty and cmux (Ghostty inside, macOS only):** pictures work with no setting. kitty and Ghostty work on macOS and on Linux.
-- **iTerm2 3.6 or later (3.7.5 tested, macOS only):** Claude Code needs `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` when it starts. A mod cannot set it early enough. The first time the mod runs in iTerm2, it asks to add one line to your shell's start file (`~/.zshrc`, a fish `conf.d` file, or for bash on macOS the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` that exists; it makes `~/.bash_profile` only when none of them exists). The line sets the variable in iTerm2 and herdr only, not in tmux or screen. Then close the tab, open a new iTerm2 tab, and start Claude Code there. You can also run `/iui setup` (undo: `/iui setup remove`).
-- **herdr (0.9.5 tested, in Ghostty and iTerm2):** herdr is a terminal multiplexer. It draws the pictures of its panes in the terminal that it runs in, so that terminal must show kitty pictures (kitty, Ghostty or iTerm2 3.6 or later). Claude Code needs `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` in herdr too. The first time the mod runs in a herdr pane, it asks to add the same line to your shell's start file. If the file has the line of an older version (iTerm2 only), the mod asks to update it. Then close the pane, open a new herdr pane, and start Claude Code there. You can also run `/iui setup` (undo: `/iui setup remove`). herdr works on macOS and on Linux.
-  - herdr runs the shell of `SHELL` in its panes. If herdr starts with no `SHELL` in its environment (for example from a launcher or a service), its panes run `/bin/sh`, which does not read your shell's start file, so the line has no effect. Start herdr from a normal shell, or set `SHELL` for it.
-  - herdr hides the name of the terminal that it runs in. With the `auto` theme, the mod gets the background from herdr: herdr gives the background of the terminal in front. This also works with `herdr --remote`.
-  - For the font, the mod finds the herdr client that you use. You can attach to one herdr server from more than one terminal (for example Ghostty and kitty). On macOS, the mod uses the client in the terminal app in front. If that app has two or more clients, it uses the one where you typed last. If the app in front has no client (for example, a browser), the mod keeps the client that it used before. On Linux, the mod uses the client where you typed last. The mod does not use only the place where you typed last on macOS, because iTerm2 answers each picture that herdr sends, and that looks like typing in iTerm2. The mod reads the variables and the terminal app of that client, then reads the font of that terminal. When you go to a different terminal, the mod finds it at the next check (every 1 s) and draws the pictures again with that font. If you attach a new client in the app that is in front, or on Linux, the mod can find it only at the full check (every 10 s). If the mod cannot find a client, it uses the variables that herdr keeps of the terminal that started the herdr server (`GHOSTTY_RESOURCES_DIR` for Ghostty, `KITTY_PID` for kitty, `ITERM_PROFILE` for iTerm2). `/iui details` shows the terminal and how the mod found it, for example `herdr 0.9.5 (in Ghostty, the terminal in front)`, `herdr 0.9.5 (in kitty, the client you used last)` or `herdr 0.9.5 (in Ghostty, from the server's start)`.
-  - Pages are shorter in herdr, so that herdr can send each one to the terminal. Refer to [Limitations](limitations.md).
-  - In iTerm2, herdr sends each row of a picture as one part of the image, and iTerm2 counts the top of that part from the bottom of the image. Thus the rows would show in the opposite order. When the herdr client that the mod uses is iTerm2, the mod keeps the rows of each page and each picture in an order that iTerm2 shows correctly. Picture select also works. When you go to a different terminal (for example Ghostty), the mod draws the pictures again in the usual order. `/iui details` then shows `pages and pictures stored upside down by rows`. With `herdr --remote` in iTerm2, the mod cannot find the client, so the rows of the pictures show in the wrong order. Refer to [Limitations](limitations.md).
-- **Rio 0.5.27 or later (not tested):** set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` before you start Claude Code. Rio works on macOS and on Linux.
-- **The setup line.** `/iui setup` (and a yes to the question in iTerm2 or herdr) adds this block to your shell's start file. It sets the variable in iTerm2 and herdr only, not in tmux or screen:
+- **kitty 0.28+, Ghostty, cmux:** works with no setup. kitty and Ghostty run on macOS and Linux; cmux (Ghostty inside) on macOS only.
+- **iTerm2 3.6+ (macOS, 3.7.5 tested):** needs [the setup line](#the-setup-line). The first time the mod runs in iTerm2, it asks to add it. Say yes, close the tab, and start Claude Code in a new iTerm2 tab.
+- **herdr (0.9.5 tested, in Ghostty and iTerm2):** needs the setup line too, asked for the same way. Then start Claude Code in a new herdr pane. herdr must run in a terminal that shows kitty pictures (kitty, Ghostty or iTerm2 3.6+). Refer to [herdr](#herdr).
+- **Rio 0.5.27+ (not tested):** set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` before you start Claude Code. Runs on macOS and Linux.
+- **ssh:** works when your local terminal is kitty or Ghostty (`TERM` must come through ssh), or when you set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` on the remote computer. Pictures go as data, so a page over 4096 pixels on a side or over 2 MiB shows as text, and an image that large does not show.
+- **tmux and screen:** no pictures. Claude Code does not send pictures through them, even with the variable set. Set `IUI_FORCE=1` to try anyway.
+- **Warp and WezTerm (not yet):** they do not draw kitty pictures with Unicode placeholders. Support comes when [warpdotdev/warp#16312](https://github.com/warpdotdev/warp/pull/16312) and [wezterm/wezterm#7924](https://github.com/wezterm/wezterm/pull/7924) are merged.
+- **Not supported:** Konsole (no Unicode placeholders), Alacritty, Terminal.app, Windows Terminal, GNOME Terminal and other VTE terminals, foot, VS Code, Tabby, Hyper and JetBrains terminals (no kitty pictures).
+- **Background sessions** (agent view, forks, `claude attach`) cannot show pictures.
 
-  ```sh
-  # >>> cc-intelligent-ui: Claude Code pictures in iTerm2 >>>
-  if { [ "$TERM_PROGRAM" = "iTerm.app" ] || [ "$TERM_PROGRAM" = "herdr" ]; } && [ -z "$TMUX" ] && [ -z "$STY" ]; then export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1; fi
-  # <<< cc-intelligent-ui <<<
-  ```
+Where pictures cannot show, you see the normal text. `/iui details` tells you why.
 
-  For fish, the line is `if test "$TERM_PROGRAM" = "iTerm.app" -o "$TERM_PROGRAM" = "herdr"; and not set -q TMUX; and not set -q STY; set -gx CLAUDE_CODE_FORCE_TERMINAL_IMAGES 1; end`. The markers stay as in older versions, whose line was for iTerm2 only. `/iui setup` replaces an older line, and `/iui setup remove` removes the block. If the mod cannot read the file, it changes nothing and shows the line to add.
-- Do not put the variable in the `env` of `~/.claude/settings.json`. It then applies in every terminal, also where pictures cannot show.
-- **Warp (not yet):** Warp does not draw kitty pictures with Unicode placeholders yet. The pull request [warpdotdev/warp#16312](https://github.com/warpdotdev/warp/pull/16312) adds them. The mod will support Warp when that pull request is merged.
-- **WezTerm (not yet):** WezTerm does not draw kitty pictures with Unicode placeholders yet, so it shows no pictures, also with the variable set. The pull request [wezterm/wezterm#7924](https://github.com/wezterm/wezterm/pull/7924) adds them. The mod will support WezTerm when that pull request is merged.
-- **Not supported:** Konsole does not draw kitty pictures with Unicode placeholders, so it shows no pictures, also with the variable set. Alacritty, Terminal.app, Windows Terminal, GNOME Terminal (and other VTE terminals), foot, VS Code, Tabby, Hyper and JetBrains terminals have no kitty pictures.
-- **tmux and screen:** no pictures. Claude Code does not send pictures through tmux or screen, also with the variable set. Set `IUI_FORCE=1` to try anyway.
-- **ssh:** pictures work when the terminal on your computer is kitty or Ghostty (`TERM` must come through ssh), or when you set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` on the remote computer. The mod sends each picture as data, because the terminal cannot read files on the remote computer. A page larger than 4096 pixels on a side or 2 MiB shows as text. An image of that size does not show.
-- Background sessions (agent view, forks, `claude attach`) cannot draw pictures.
+### The setup line
 
-Where pictures cannot draw, the mod shows the normal text. To see why a terminal can or cannot show pictures, run `/iui details`.
+iTerm2 and herdr show pictures only when `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` is set before Claude Code starts. A mod cannot set it early enough, so the mod adds this block to your shell's start file when you agree, or when you run `/iui setup`:
+
+```sh
+# >>> cc-intelligent-ui: Claude Code pictures in iTerm2 >>>
+if { [ "$TERM_PROGRAM" = "iTerm.app" ] || [ "$TERM_PROGRAM" = "herdr" ]; } && [ -z "$TMUX" ] && [ -z "$STY" ]; then export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1; fi
+# <<< cc-intelligent-ui <<<
+```
+
+- **Where it sets the variable:** in iTerm2 and herdr only, not in tmux or screen.
+- **fish:** the line is `if test "$TERM_PROGRAM" = "iTerm.app" -o "$TERM_PROGRAM" = "herdr"; and not set -q TMUX; and not set -q STY; set -gx CLAUDE_CODE_FORCE_TERMINAL_IMAGES 1; end`.
+- **The start file** of the shell in `SHELL`:
+  - zsh: `${ZDOTDIR:-~}/.zshrc`
+  - bash on macOS: the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` that exists (a login bash reads only that one). `~/.bash_profile` is made only when none exists.
+  - bash on Linux: `~/.bashrc`
+  - fish: `${XDG_CONFIG_HOME:-~/.config}/fish/conf.d/cc-intelligent-ui.fish`
+- **Older versions:** their line was for iTerm2 only (the markers are the same). `/iui setup` replaces it, and in herdr the mod asks to update it.
+- **Undo:** `/iui setup remove`, or delete the marked lines.
+- **Another shell, or a file the mod cannot read:** the mod changes nothing and shows the line to add.
+- **Not in `settings.json`:** do not put the variable in the `env` of `~/.claude/settings.json`. It then applies in every terminal, also where pictures cannot show.
+
+### herdr
+
+- **`SHELL`:** herdr runs the shell of `SHELL` in its panes. If herdr starts without `SHELL` (for example from a launcher or a service), its panes run `/bin/sh`, which does not read your start file. Start herdr from a normal shell, or set `SHELL` for it.
+- **Theme:** herdr hides the outer terminal. With the `auto` theme, the mod asks herdr for the background of the terminal in front. This also works with `herdr --remote`.
+- **Font:** you can attach to one herdr server from more than one terminal. The mod uses the font of the terminal of the herdr client you use:
+  - On macOS, the client in the terminal app in front (the one where you typed last if that app has two or more). If the app in front has no client (for example a browser), the mod keeps the last client.
+  - On Linux, the client where you typed last.
+  - The mod checks for a change every 1 s and redraws with the new font. A newly attached client in the app in front, or any new client on Linux, is found at the full check every 10 s.
+  - With no client found, the mod uses the variables of the terminal that started the herdr server (`GHOSTTY_RESOURCES_DIR`, `KITTY_PID` or `ITERM_PROFILE`).
+  - `/iui details` shows the terminal and how the mod found it, for example `herdr 0.9.5 (in kitty, the client you used last)`.
+- **iTerm2 under herdr:** iTerm2 would show the rows of each picture in reverse order, so the mod stores pages and pictures upside down by rows. Selecting text in an answer still works, and `/iui details` shows `pages and pictures stored upside down by rows`. With `herdr --remote` in iTerm2, the mod cannot find the client and the rows show in the wrong order.
+- **Shorter pages:** pages are shorter in herdr, so that herdr can pass each one on. Refer to [Limitations](limitations.md).
 
 ## Install steps
 
-There are two ways: the install script, or by hand.
+Use the install script, or install by hand.
 
 ### The install script
 
@@ -51,53 +70,104 @@ In a shell, on macOS or Linux:
 curl -fsSL https://intelligentui.art/install.sh | bash
 ```
 
-You can also download the script, read it, and run it with `bash install.sh`. Its source is [`site/install.sh`](../site/install.sh). When it is done, restart Claude Code, or type `/reload-plugins` in a session. To update, run it again: each step that is done already changes nothing.
+Or download the script, read it, and run `bash install.sh`. The source is [`site/install.sh`](../site/install.sh). When it is done, restart Claude Code or type `/reload-plugins`. To update, run it again: steps that are already done change nothing.
 
-The script does these steps, in this order:
+What it does:
 
-1. **Checks.** The system must be macOS or Linux, on arm64 or x86_64. The `claude` command must be on your `PATH` (or in `~/.local/bin` or `~/.claude/local`). If Claude Code is not installed, the script tells you where to get it ([Set up Claude Code](https://code.claude.com/docs/en/setup)), changes nothing, and stops with exit code 1. If Claude Code is older than 2.1.298, it shows a warning and continues.
-2. **Typst.** The script looks for Typst as the mod does: in the `PATH` of a login shell (`sh -l`; on macOS this puts `/usr/local/bin` first), then on the `PATH`, then in `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/snap/bin`, `~/.cargo/bin`, `~/.local/bin`, `/home/linuxbrew/.linuxbrew/bin` and `~/.linuxbrew/bin`. If the first Typst that it finds is 0.15 or later, it changes nothing. If not, it downloads the official Typst 0.15.1 release file for your system from [github.com/typst/typst/releases](https://github.com/typst/typst/releases/tag/v0.15.1) (`typst-aarch64-apple-darwin`, `typst-x86_64-apple-darwin`, `typst-aarch64-unknown-linux-musl` or `typst-x86_64-unknown-linux-musl`, `.tar.xz`), with `curl` over HTTPS only. It compares the file's SHA-256 with the value written in the script. If they are not the same, it deletes the file, installs nothing and stops. Then it extracts the file in a private temporary folder (deleted at the end), makes sure that the program runs, and moves it to `~/.local/bin/typst` in one step. An older `typst` in `~/.local/bin` is replaced. Linux needs `xz` for `tar` (the `xz-utils` package on Debian and Ubuntu). The script tells you when `~/.local/bin` is not on your `PATH` (the mod finds Typst there anyway), and when an older Typst comes first, so that the mod uses that one.
-3. **The mod.** With the Claude Code commands only. If the `razorback16` marketplace is not known (`claude plugin marketplace list`), it runs `claude plugin marketplace add razorback16/cc-intelligent-ui`; else `claude plugin marketplace update razorback16`. Then, if the mod is not installed for your user (`claude plugin list`), it runs `claude plugin install cc-intelligent-ui@razorback16 --scope user`; else `claude plugin update cc-intelligent-ui@razorback16 --scope user`. The script shows each command before it runs it.
+1. **Checks** your system (macOS or Linux, arm64 or x86_64) and that Claude Code is installed.
+2. **Typst:** if no Typst 0.15 or later is found, installs the official Typst 0.15.1 into `~/.local/bin`, after a SHA-256 check.
+3. **The mod:** adds the `razorback16` marketplace and installs the mod, or updates both.
+4. **Auto-update:** turns it on for the marketplace in your Claude Code `settings.json`, with a backup.
+5. **iTerm2 and herdr:** if either is there, adds [the setup line](#the-setup-line) to your shell's start file, with a backup.
+6. **Summary:** what changed, and how to undo each step.
 
-   The script gets the newest version only from the official source: the GitHub repository `razorback16/cc-intelligent-ui` (or its `https://github.com/...` git URL) with no ref. If the `razorback16` marketplace comes from another source, for example a fork, a pinned ref (`#v0.3.0`) or a local folder, an update can not get the newest version. Then, if your user settings (`settings.json`) declare the `razorback16` marketplace, the script runs `claude plugin marketplace remove razorback16 --scope user` (this removes only that entry) and `claude plugin marketplace add razorback16/cc-intelligent-ui`. If they do not declare it (an older Claude Code added it, or another scope declares it), `remove --scope user` would fail, so the script runs only `claude plugin marketplace add razorback16/cc-intelligent-ui`, which changes the source by itself. Then it updates the mod. Claude Code can uninstall the mod (also its copies in projects) with the old marketplace; if it does, the script installs the mod again. Your `/iui` settings are kept, because Claude Code keeps them under the name `cc-intelligent-ui@razorback16`. If the mod was disabled, it stays disabled. The script shows the old source and the command to add it back. If the old source had a newer version (for example a work folder), the script says so.
+**Options** (environment variables):
 
-   If a copy of the mod from another marketplace is installed for your user (for example `cc-intelligent-ui@other`), both copies would run. The script uninstalls that copy after the `razorback16` copy is installed, and shows the command to install it again. A copy with no marketplace (`cc-intelligent-ui@skills-dir` in a skills folder of Claude Code, or `cc-intelligent-ui@inline` from `--plugin-dir`) can not be uninstalled with `claude plugin`: the script shows it with its folder and does not change it. The `razorback16` copy is used, not that one. The script does not change copies in project or local scope. It shows each one, with its project folder and the command to remove it, because in that project such a copy can be used instead of the user copy.
-
-   If the update of the mod or of the marketplace fails, the summary says that the mod was not updated (not that the newest version is installed), and the script ends with exit code 1.
-4. **Auto-update.** The script sets this entry in your user settings, `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`). This is the setting that Claude Code documents for a marketplace in `extraKnownMarketplaces`:
-
-   ```json
-   "extraKnownMarketplaces": {
-     "razorback16": {
-       "source": { "source": "github", "repo": "razorback16/cc-intelligent-ui" },
-       "autoUpdate": true
-     }
-   }
-   ```
-
-   `claude plugin marketplace add` already writes the `razorback16` entry with its `source`; the script adds `"autoUpdate": true` to it. It changes only that: all other bytes of the file (keys, their order, values, spaces) stay the same. It writes a new file in the same folder and then renames it over the old one, with the same permissions. If `settings.json` is a link, the file that it points to changes. It keeps the file before this change as `settings.json.bak-iui`, only when it changed the file. Step 3 (`claude plugin marketplace add` and `install`) changed `settings.json` already, so the backup undoes only the auto-update change, not step 3. If the file is not there, it makes it. If `autoUpdate` is `true` already, it changes nothing. If `autoUpdate` is `false` (you selected **Disable auto-update**), the script keeps it, says that auto-update is off by your choice, and tells you how to turn it on. When it adds the marketplace again from GitHub (step 3), it keeps `"autoUpdate": false` for the new entry. If the file is read-only, or has more than one name (a hard link), the script does not change it. If the `razorback16` entry has another `source`, the script does not change the file. If the file is not valid JSON (for example, it has comments), the script changes nothing, shows the entry to add, and ends with exit code 1. It uses `perl` (no modules) to read and change the JSON. It never uses `sed` on JSON.
-5. **Pictures in iTerm2 and herdr.** Claude Code shows pictures in iTerm2 and herdr only when `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` is set when it starts. If iTerm2 is installed (macOS: `/Applications/iTerm.app`, `~/Applications/iTerm.app`, or Spotlight finds it) or `herdr` is there (on the `PATH` or in the folders of step 2), the script adds the mod's own block, the same that `/iui setup` adds, to the start file of your login shell (from `SHELL`): `${ZDOTDIR:-~}/.zshrc` for zsh; for bash, `~/.bashrc` on Linux, and on macOS the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile` that exists (a login bash reads only that one; the script makes `~/.bash_profile` only when none exists); `${XDG_CONFIG_HOME:-~/.config}/fish/conf.d/cc-intelligent-ui.fish` for fish. The block is between the lines `# >>> cc-intelligent-ui: Claude Code pictures in iTerm2 >>>` and `# <<< cc-intelligent-ui <<<`. It sets the variable in iTerm2 and herdr only, not in tmux or screen. An older block of the mod is replaced, not added again; if the block is there already, nothing changes. If the file is a link, the file that it points to changes. The script writes a new file in the same folder and renames it over the old one, with the same permissions, and keeps the old file as `<file>.bak-iui`. If the file can not be read, is not a regular file, is read-only, has more than one name (a hard link), or is larger than 4 MB, the script changes nothing, shows the lines to add, and ends with exit code 1. For another shell, it changes nothing and shows the line to add. Undo: `/iui setup remove` in Claude Code, or delete the marked lines.
-6. **Summary.** What was installed or updated, where Typst is, the state of auto-update and of the shell setup, and how to undo each step.
-
-Options (environment variables):
-
-- `IUI_NO_TYPST=1`: no Typst step. The script does not look for Typst and downloads nothing.
-- `IUI_NO_AUTO_UPDATE=1`: no auto-update step. `settings.json` does not change.
-- `IUI_NO_SHELL_SETUP=1`: no shell setup step (5). No shell start file changes.
+- `IUI_NO_TYPST=1`: skip step 2. The script does not look for Typst and downloads nothing.
+- `IUI_NO_AUTO_UPDATE=1`: skip step 4. `settings.json` does not change.
+- `IUI_NO_SHELL_SETUP=1`: skip step 5. No shell start file changes.
 
 For example: `curl -fsSL https://intelligentui.art/install.sh | IUI_NO_TYPST=1 bash`.
 
-The script never uses `sudo` and runs no downloaded code other than the Typst program that it checked. All its work is in functions that the last line runs, so a download that stops in the middle runs nothing. Its output is plain text.
+**Safety.** The script never uses `sudo`. It runs no downloaded code except the Typst program it checked. It writes each file as a new file in the same folder and renames it over the old one, with the same permissions. All its work is in functions that the last line runs, so a cut download runs nothing. Its output is plain text.
 
-To undo:
+**Undo:**
 
 - The mod: `claude plugin uninstall cc-intelligent-ui@razorback16`
 - The marketplace: `claude plugin marketplace remove razorback16`. Claude Code also removes the `razorback16` entry of `extraKnownMarketplaces` from your settings.
-- Only auto-update: in Claude Code, type `/plugin`, go to **Marketplaces**, select **razorback16**, then select **Disable auto-update**. In Claude Code 2.1.307, this also sets `"autoUpdate": false` in the settings file that declares the marketplace. Or copy `settings.json.bak-iui` back to `settings.json` (it is the file before the auto-update change only).
-- The old marketplace source, if the script replaced it: `claude plugin marketplace remove razorback16`, then `claude plugin marketplace add <old source>` (the script shows the old source).
-- A copy from another marketplace that the script uninstalled: `claude plugin install <id> --scope user` (the script shows the id).
+- Only auto-update: in Claude Code, type `/plugin`, go to **Marketplaces**, select **razorback16**, then **Disable auto-update**. In Claude Code 2.1.307 this also sets `"autoUpdate": false` in the settings file that declares the marketplace. Or copy `settings.json.bak-iui` back to `settings.json` (it is the file before the auto-update change only).
+- An old marketplace source the script replaced: `claude plugin marketplace remove razorback16`, then `claude plugin marketplace add <old source>` (the script shows the old source).
+- A copy from another marketplace the script uninstalled: `claude plugin install <id> --scope user` (the script shows the id).
 - Typst, if the script installed it: `rm ~/.local/bin/typst`
-- The shell setup: `/iui setup remove` in Claude Code, or delete the lines from `# >>> cc-intelligent-ui` to `# <<< cc-intelligent-ui <<<` in the start file that the script names.
+- The shell setup: `/iui setup remove` in Claude Code, or delete the lines from `# >>> cc-intelligent-ui` to `# <<< cc-intelligent-ui <<<` in the start file the script names.
+
+<details>
+<summary><b>Each step in detail</b></summary>
+
+**1. Checks**
+
+- The `claude` command must be on your `PATH`, or in `~/.local/bin` or `~/.claude/local`. Without it, the script points you to [Set up Claude Code](https://code.claude.com/docs/en/setup), changes nothing, and exits with code 1.
+- Claude Code older than 2.1.298 gives a warning; the script continues.
+
+**2. Typst**
+
+- It looks for Typst as the mod does: the `PATH` of a login shell (`sh -l`; on macOS `/usr/local/bin` comes first there), then your `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/snap/bin`, `~/.cargo/bin`, `~/.local/bin`, `/home/linuxbrew/.linuxbrew/bin` and `~/.linuxbrew/bin`. If the first one it finds is 0.15 or later, nothing changes.
+- Else it downloads the release file for your system from [GitHub](https://github.com/typst/typst/releases/tag/v0.15.1) (`typst-aarch64-apple-darwin`, `typst-x86_64-apple-darwin`, `typst-aarch64-unknown-linux-musl` or `typst-x86_64-unknown-linux-musl`, `.tar.xz`) with `curl`, over HTTPS only.
+- On a SHA-256 mismatch with the value in the script, it deletes the file, installs nothing, and stops.
+- It extracts the file in a private temporary folder (deleted at the end), checks that the program runs, and moves it to `~/.local/bin/typst`, replacing an older one there.
+- Linux needs `xz` for `tar` (`xz-utils` on Debian and Ubuntu).
+- It tells you when `~/.local/bin` is not on your `PATH` (the mod finds Typst there anyway), and when an older Typst comes first, so the mod would use that one.
+
+**3. The mod**
+
+The script uses only the `claude plugin` commands and shows each one before it runs it.
+
+- **Marketplace:** `claude plugin marketplace add razorback16/cc-intelligent-ui` if `razorback16` is not known, else `claude plugin marketplace update razorback16`.
+- **Mod:** `claude plugin install cc-intelligent-ui@razorback16 --scope user` if it is not installed for your user, else `claude plugin update cc-intelligent-ui@razorback16 --scope user`.
+- **Another marketplace source.** Updates come only from the GitHub repository `razorback16/cc-intelligent-ui` (or its `https://github.com/...` URL) with no ref. If `razorback16` comes from somewhere else (a fork, a pinned ref such as `#v0.3.0`, a local folder), the script adds it again from GitHub, then updates the mod. It runs `claude plugin marketplace remove razorback16 --scope user` first only when your user `settings.json` declares the marketplace; otherwise `add` changes the source by itself.
+  - If Claude Code uninstalls the mod (also its project copies) during this, the script installs it again.
+  - Your `/iui` settings stay (they belong to `cc-intelligent-ui@razorback16`). A disabled mod stays disabled.
+  - The script shows the old source and the command to add it back, and tells you if the old source had a newer version (for example a work folder).
+- **Other copies of the mod.** A user copy from another marketplace (for example `cc-intelligent-ui@other`) would also run, so the script uninstalls it after the `razorback16` copy is in, and shows the command to install it again. These are only shown, with their folder:
+  - A copy with no marketplace (`cc-intelligent-ui@skills-dir` in a Claude Code skills folder, or `cc-intelligent-ui@inline` from `--plugin-dir`). The `razorback16` copy is used, not that one.
+  - Copies in project or local scope, with the command to remove them. In that project, such a copy can be used instead of the user copy.
+- **A failed update** of the mod or the marketplace: the summary says the mod was not updated, and the script exits with code 1.
+
+**4. Auto-update**
+
+In your user settings, `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`), the script adds `"autoUpdate": true` to the `razorback16` entry that `claude plugin marketplace add` wrote. This is the documented Claude Code setting:
+
+```json
+"extraKnownMarketplaces": {
+  "razorback16": {
+    "source": { "source": "github", "repo": "razorback16/cc-intelligent-ui" },
+    "autoUpdate": true
+  }
+}
+```
+
+- **Only that changes.** All other bytes of the file (keys, order, values, spaces) stay the same. It edits the JSON with `perl` (no modules), never with `sed`.
+- **Backup:** `settings.json.bak-iui`, only when the file changed. It undoes only the auto-update change, not step 3.
+- **No file:** it makes one. **A link:** the file it points to changes.
+- **`true` already:** nothing changes.
+- **`false`** (you chose **Disable auto-update**): kept, also when step 3 adds the marketplace again. The script says how to turn it on.
+- **Not changed:** a read-only file, a hard link (more than one name), or a `razorback16` entry with another `source`.
+- **Not valid JSON** (for example, with comments): nothing changes, the script shows the entry to add, and exits with code 1.
+
+**5. iTerm2 and herdr**
+
+If iTerm2 is installed (macOS: `/Applications/iTerm.app`, `~/Applications/iTerm.app`, or found by Spotlight) or `herdr` is there (on the `PATH` or in the folders of step 2), the script adds the same block as `/iui setup` to the same [start file](#the-setup-line) of your login shell.
+
+- Another shell: nothing changes; the script shows the line to add.
+- An older block of the mod is replaced. If the block is there already, nothing changes. If the file is a link, the file it points to changes.
+- **Backup:** `<file>.bak-iui`.
+- **Not changed:** a file that cannot be read, is not a regular file, is read-only, is a hard link, or is larger than 4 MB. The script then shows the lines to add and exits with code 1.
+
+**6. Summary**
+
+What was installed or updated, where Typst is, the state of auto-update and of the shell setup, and how to undo each step.
+
+</details>
 
 ### By hand
 
@@ -108,61 +178,61 @@ To undo:
    /plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui
    ```
 
-   Answer `y` to add the marketplace, then push Enter to install for your user. The mod starts at once, with no restart. From a shell, use `claude plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui`.
-3. Turn on auto-update, so that you get each new version. Refer to [Turn on auto-update](#turn-on-auto-update).
-4. In iTerm2 or herdr, answer yes when the mod asks to add its line to your shell's start file, or run `/iui setup`. Refer to [Terminals](#terminals).
+   Answer `y` to add the marketplace, then press Enter to install for your user. The mod starts at once, with no restart. From a shell: `claude plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui`.
+3. [Turn on auto-update](#turn-on-auto-update) to get each new version.
+4. In iTerm2 or herdr, say yes when the mod asks to add [the setup line](#the-setup-line), or run `/iui setup`.
 
 ## Install Typst on Linux
 
-You need Typst 0.15 or later. Use one of these ways:
+You need Typst 0.15 or later. Use one of these:
 
 - **Cargo** (Rust): `cargo install --locked typst-cli`. Typst goes into `~/.cargo/bin`.
 - **The release file:** download `typst-x86_64-unknown-linux-musl.tar.xz` (or `typst-aarch64-unknown-linux-musl.tar.xz` for ARM) from [the Typst releases](https://github.com/typst/typst/releases). Extract it and put `typst` in a folder on your `PATH`, for example `~/.local/bin`.
-- **A package of your distribution, Snap (`sudo snap install typst`) or Homebrew on Linux (`brew install typst`).** Make sure that the version is 0.15 or later (`typst --version`). Some distributions have an older version.
+- **A distribution package, Snap (`sudo snap install typst`) or Homebrew on Linux (`brew install typst`).** Check the version with `typst --version`: some distributions have an older one.
 
-The mod finds Typst on the `PATH` of your login shell. It also looks in `/usr/local/bin`, `/usr/bin`, `/snap/bin`, `~/.cargo/bin`, `~/.local/bin` and the Homebrew folders.
+The mod finds Typst on the `PATH` of your login shell, and also in `/usr/local/bin`, `/usr/bin`, `/snap/bin`, `~/.cargo/bin`, `~/.local/bin` and the Homebrew folders.
 
 ## Linux
 
-The mod works on Linux with X11 and with Wayland. It uses these tools. Most Linux systems have the first three.
+The mod works on Linux with X11 and Wayland. It uses these tools (most systems have the first three):
 
-- **perl** (perl 5): reads the terminal size and its cell size, and watches for a change of the size. It also writes the frame files of the highlight for picture select (with `MIME::Base64`, a core module). On macOS, `/usr/bin/perl` also watches the clipboard for the `/iui grab` toast, with Apple's PerlObjCBridge (macOS has it).
-- **fontconfig** (`fc-match`, `fc-list`): finds the terminal font when the terminal's config does not name one. kitty and most terminals use fontconfig's `monospace` font. Ghostty uses its own JetBrains Mono when its config names no font. If fontconfig does not have JetBrains Mono, the mod copies the font from the Ghostty program (refer to [How it works](how-it-works.md)). The mod also uses `fc-list` to find if the font that the terminal config names is installed.
-- **The light or dark mode of the desktop** (for the `auto` theme): the freedesktop portal (`org.freedesktop.appearance color-scheme`, through `gdbus` or `busctl`). GNOME, KDE Plasma and most desktops have the portal. If the portal does not answer, the mod reads GNOME's `color-scheme` (`gsettings`).
-- **The clipboard** (only for the `/iui grab` toast and for `/iui grab` on the main screen, refer to [Picture cells on the clipboard](usage.md#picture-cells-on-the-clipboard)). The mod uses the first of these that it finds:
-  1. **Wayland, not GNOME:** `wl-paste` from `wl-clipboard`. `wl-paste --watch` tells the mod about each clipboard change. It needs the data-control protocol of the compositor (KDE Plasma, Sway, Hyprland and other wlroots compositors have it).
-  2. **X11, and GNOME on Wayland (through Xwayland):** `clipnotify` tells the mod about each clipboard change, and `xclip` reads the clipboard. If `clipnotify` or `xclip` is not installed, the mod uses GTK 3 from Python (`python3-gi`, which most GNOME desktops have) in its place. The mod does not use `xsel`: it cannot show the targets of a copy, so it cannot skip a password manager's copy (`/iui details` tells you to install `xclip`).
-  3. **GNOME on Wayland with no X11 tool:** `wl-paste`. GNOME does not have the data-control protocol, so `wl-paste --watch` stops, and there is no `/iui grab` toast.
+- **perl** (perl 5): reads the terminal size and cell size and watches for changes. It also writes the highlight frames for picture select (with the core module `MIME::Base64`). On macOS, `/usr/bin/perl` with Apple's PerlObjCBridge also watches the clipboard for the `/iui grab` toast.
+- **fontconfig** (`fc-match`, `fc-list`): finds the terminal font when the terminal config names none, and checks that a named font is installed. kitty and most terminals use fontconfig's `monospace`. Ghostty uses its own JetBrains Mono when its config names no font; if fontconfig does not have it, the mod copies it from the Ghostty program (refer to [How it works](how-it-works.md)).
+- **Light or dark mode** (for the `auto` theme): the freedesktop portal (`org.freedesktop.appearance color-scheme`, through `gdbus` or `busctl`), which GNOME, KDE Plasma and most desktops have. If it does not answer, GNOME's `color-scheme` (`gsettings`).
+- **The clipboard**, only for the `/iui grab` toast and for `/iui grab` on the main screen (refer to [Picture cells on the clipboard](usage.md#picture-cells-on-the-clipboard)). The mod uses the first that works:
+  1. **Wayland, not GNOME:** `wl-paste --watch` from `wl-clipboard`. It needs the compositor's data-control protocol (KDE Plasma, Sway, Hyprland and other wlroots compositors have it).
+  2. **X11, and GNOME on Wayland (through Xwayland):** `clipnotify` to see changes and `xclip` to read. Without them, GTK 3 from Python (`python3-gi`, on most GNOME desktops). `xsel` is not used: it cannot show the targets of a copy, so the mod could not skip a password manager's copy (`/iui details` tells you to install `xclip`).
+  3. **GNOME on Wayland with no X11 tool:** `wl-paste`. GNOME has no data-control protocol, so `wl-paste --watch` stops and there is no toast.
 
-  If none of these work, there is no `/iui grab` toast. Picture select, `/iui grab` (with a selection, in fullscreen mode), Claude Code's `/copy` and the `ui.copy` hook still work. `/iui details` shows the tool in use, or why there is no toast, on the line `/iui grab hint:`.
-- **"Edit the plan"** (refer to [Plan approval](usage.md#plan-approval)): VS Code (`code --wait`), else the first of VSCodium, Zed, Sublime Text, Kate, gedit and gvim that is on the `PATH`. These editors can wait until you close the file. If none is installed, the option does not show.
-- **The cache folder** is in `$TMPDIR`, else in `/tmp`.
+  With none of these, there is no `/iui grab` toast. Picture select, `/iui grab` (with a selection, in fullscreen), Claude Code's `/copy` and the `ui.copy` hook still work. `/iui details` shows the tool in use, or why there is no toast, on the line `/iui grab hint:`.
+- **"Edit the plan"** (refer to [Plan approval](usage.md#plan-approval)): VS Code (`code --wait`), else the first on the `PATH` of VSCodium, Zed, Sublime Text, Kate, gedit and gvim (editors that can wait until you close the file). With none, the option does not show.
+- **The cache folder** is in `$TMPDIR`, else `/tmp`.
 
-`/iui setup` is for iTerm2 and herdr. On Linux it changes no file, but in a herdr pane it adds the line (to `~/.bashrc` for bash, because herdr does not start a login shell on Linux).
+`/iui setup` changes no file on Linux, except in a herdr pane: there it adds the setup line (to `~/.bashrc` for bash, because herdr does not start a login shell on Linux).
 
-To install the clipboard tools, for example:
+To install the clipboard tools:
 
-- Debian and Ubuntu: `sudo apt install wl-clipboard xclip` (`clipnotify` is not in their packages: build it from [cdown/clipnotify](https://github.com/cdown/clipnotify), or use GTK 3 from Python: `sudo apt install python3-gi gir1.2-gtk-3.0`).
+- Debian and Ubuntu: `sudo apt install wl-clipboard xclip`. `clipnotify` is not packaged: build it from [cdown/clipnotify](https://github.com/cdown/clipnotify), or use GTK 3 from Python: `sudo apt install python3-gi gir1.2-gtk-3.0`.
 - Fedora: `sudo dnf install wl-clipboard xclip`.
 - Arch Linux: `sudo pacman -S wl-clipboard xclip clipnotify`.
 
 ## Update
 
-Claude Code finds a new version of the mod from the version number in its `plugin.json`. For a marketplace that is not from Anthropic, such as `razorback16`, auto-update is off by default.
+Claude Code sees a new version by the version number in the mod's `plugin.json`. For a marketplace not from Anthropic, such as `razorback16`, auto-update is off by default.
 
 ### Turn on auto-update
 
-The [install script](#the-install-script) turns it on for you. To turn it on yourself:
+The [install script](#the-install-script) turns it on. To do it yourself:
 
 1. In Claude Code, type `/plugin`.
 2. Go to **Marketplaces**, then select **razorback16**.
 3. Select **Enable auto-update**.
 
-Claude Code then updates the mod in approximately 10 minutes after the first message of a session. The new version starts in the next session, or after you type `/reload-plugins`.
+Claude Code then updates the mod about 10 minutes after the first message of a session. The new version starts in the next session, or after `/reload-plugins`.
 
 ### Update manually
 
-Run the [install script](#the-install-script) again, or, from a shell:
+Run the [install script](#the-install-script) again, or from a shell:
 
 ```
 claude plugin marketplace update razorback16
@@ -173,15 +243,15 @@ Then type `/reload-plugins` in Claude Code, or start a new session.
 
 ### The update notice
 
-The mod looks for a new version one time each day at most, after a session starts. When there is a newer version, a toast shows the new version, your version and the update commands. A toast for one version shows one time each day at most. `/iui` and `/iui details` also show the new version.
+At most once a day, after a session starts, the mod checks for a new version. If there is one, a toast shows the new version, your version and the update commands (at most once a day for each version). `/iui` and `/iui details` also show it.
 
-- Network use: one GET request for a public file on GitHub (`https://raw.githubusercontent.com/razorback16/cc-intelligent-ui/main/.claude-plugin/plugin.json`) each day at most. The mod sends no data about you or your sessions. The request goes through Claude Code.
-- `/iui updates off` stops the check and the toast (kept for later sessions). `/iui updates on` starts them again.
-- The mod does not look for a new version when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_UPDATES` or `DISABLE_AUTOUPDATER` is set, in a background session, or with `claude -p`.
+- **Network:** one GET request through Claude Code for a public file on GitHub (`https://raw.githubusercontent.com/razorback16/cc-intelligent-ui/main/.claude-plugin/plugin.json`). No data about you or your sessions is sent.
+- **Turn it off:** `/iui updates off` (kept for later sessions). `/iui updates on` turns it back on.
+- **No check** when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_UPDATES` or `DISABLE_AUTOUPDATER` is set, in a background session, or with `claude -p`.
 
 ## Try it from a clone
 
-To try it from a clone without installing:
+To try it without installing:
 
 ```
 git clone https://github.com/razorback16/cc-intelligent-ui

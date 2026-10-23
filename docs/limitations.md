@@ -4,12 +4,12 @@
 
 ## Copy and picture select
 
-- **Fullscreen only.** Picture select needs fullscreen mode and Claude Code 2.1.298 or newer. It does not work over ssh. Anywhere else, a copy of a picture gives picture cells, which paste as strange characters. Use `/iui grab`, Claude Code's `/copy`, or `/iui off` instead.
-- **Start the drag on the picture.** On Claude Code 2.1.298 to 2.1.304, a selection that starts outside a picture (or a double or triple click) is Claude Code's own selection, and it can copy picture cells. From 2.1.305, Claude Code's selection skips pictures. A drag with a modifier key (for example Option in iTerm2) is the terminal's own selection and also copies picture cells.
-- **One picture at a time.** A selection stays in the picture where it started, so you cannot select text and a picture together. There is no double click, triple click or Shift+click.
-- **Whole words.** A word is copied when the selection covers its middle. In code, in long words (30 characters or more, such as paths and URLs) and in CJK text, the copy goes by character. Inline math copies as its LaTeX source (`$A = \pi r^2$`). If inline math breaks across two lines, select its first line. Display math, text in images and text in Typst drawings do not copy.
-- **Clearing a selection.** A single click on normal text and Escape do not clear a picture selection, because Claude Code does not tell the mod about them. A click in a picture, a key in the prompt, a new selection, your next prompt or `/iui off` does.
-- **A Claude Code selection stays on screen** when you then drag over a picture. Click normal text or push a key first.
+- **Fullscreen only.** Picture select needs fullscreen mode and Claude Code 2.1.298 or newer. It does not work over ssh. Anywhere else, a copy of an answer gives picture cells, which paste as strange characters. Use `/iui grab`, Claude Code's `/copy`, or `/iui off` instead.
+- **Start the drag on the answer.** On Claude Code 2.1.298 to 2.1.304, a selection that starts outside an answer (or a double or triple click) is Claude Code's own selection, and it can copy picture cells. From 2.1.305, Claude Code's selection skips pictures. A drag with a modifier key (for example Option in iTerm2) is the terminal's own selection and also copies picture cells.
+- **One answer at a time.** A selection stays in the answer where it started, so you cannot select it together with normal text. There is no double click, triple click or Shift+click.
+- **Whole words.** A word is copied when the selection covers its middle. In code, in long words (30 characters or more, such as paths and URLs) and in CJK text, the copy goes by character. Inline math copies as its LaTeX source (`$A = \pi r^2$`). If inline math breaks across two lines, select its first line. Display math and text in images, diagrams and Typst drawings do not copy.
+- **Clearing a selection.** A single click on normal text and Escape do not clear a picture selection, because Claude Code does not tell the mod about them. A click in an answer, a key in the prompt, a new selection, your next prompt or `/iui off` does.
+- **A Claude Code selection stays on screen** when you then drag over an answer. Click normal text or push a key first.
 - **Short waits.** The mod reads the words of a page in the background. If you release the button before they are ready, the copy takes up to 0.5 s (2–3 s for a large Typst drawing). Wait for the "copied N chars" toast before you paste. On a page that is not ready, the highlight also comes a moment after the press.
 - **The highlight** needs `perl`. Without it, select and copy still work, with no highlight. The colour is VS Code's, not your theme's. A page over 4 MiB has no highlight. If the terminal draws a page with a different aspect than its cells, the highlight can be off by part of a cell. After Claude Code redraws a page, the highlight comes back only when the selection changes. Ready pages use up to 128 MB of memory.
 - **Copy on release.** The copy happens when you release the button, even if `copyOnSelect` is off in `/config`.
@@ -24,8 +24,8 @@
 
 - **A click copies; it does not open.** The terminal does not send cmd+click to Claude Code, and on macOS ctrl+click is the secondary click.
 - **Not every link is a target.** Code blocks are not targets: select the text. A file path is a target only if the file existed when the answer was drawn. Links to headings, and links in Typst drawings, math or images, are not targets. Until the mod knows the words of a page, hover shows nothing and a click waits.
-- **The dim rows under a picture** (with the copy button of a `bash` block) do not show with picture select.
-- **Without picture select** (main screen, ssh, older Claude Code, `/iui select off`), a click on a picture does nothing. Use the link rows under it. A command row copies only in fullscreen mode. A `file://` link opens in the app that your terminal chooses.
+- **No link rows with picture select.** The dim rows of links, paths and commands under an answer do not show. Click them in the answer instead.
+- **Without picture select** (main screen, ssh, older Claude Code, `/iui select off`), a click in an answer does nothing. Use the link rows under it. A command row copies only in fullscreen mode. A `file://` link opens in the app that your terminal chooses.
 
 ## How pictures look
 
@@ -49,7 +49,7 @@
 
 ## Other features
 
-- **Dragged image paths.** A path that you drag into the terminal does not change the clipboard, so its preview shows only after you send the prompt. If the clipboard holds the path of a different image at that time, the preview shows that image until you send.
+- **Pasted image paths.** There is no preview for a pasted path over ssh. A path that you drag into the terminal does not change the clipboard, so its preview shows only after you send the prompt. If the clipboard holds the path of a different image at that time, the preview shows that image until you send.
 - **PDF files.** The page buttons work only in fullscreen mode. The mod shows one page at a time, with no page count, and you cannot copy text from a page. The page field gets the keyboard only when the prompt is empty; otherwise click the field to type. Esc then goes to the prompt. To close the field, click it and push Esc, or click its close mark.
 - **Plan approval.** A mod cannot draw Claude Code's dialog, so the mod asks its own question, with 4 options at most. There is no "keep planning" option: type a reply or push Esc. The edit option needs a GUI editor that waits until you close the file, so not vim or nano, and on Linux not `xdg-open`. Where an organization manages Claude Code, plugin permission hooks do not run, and Claude Code's dialog shows after the mod's question.
 - **Cache folders.** The mod uses only its private folder `$TMPDIR/cc-intelligent-ui-<uid>`, which must be yours, mode 700 and not a link. If it is not, the mod draws nothing and `/iui details` says why: fix or remove the folder, then start Claude Code again. The mod also keeps drawing spaces in `~/.cache/cc-intelligent-ui/designs` for 180 days, and fonts copied out of terminal apps in `~/.cache/cc-intelligent-ui/fonts` (fonts of an older app build are deleted after 30 days). It uses `$XDG_CACHE_HOME` when set.

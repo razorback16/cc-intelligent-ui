@@ -1,18 +1,21 @@
 # Intelligent UI themes
 
-A theme is a folder with a `theme.json`. Intelligent UI ships three:
+A theme is a folder with a `theme.json`. For how to choose and make a theme, refer to [Themes](../../docs/themes.md).
 
 | Folder | Name | Looks like |
 |---|---|---|
 | `claude-code` (default) | Claude Code | Claude Code's own Markdown in the terminal, with its dark and light themes |
 | `vscode-modern` | VS Code Modern | VS Code's Markdown preview, Dark Modern / Light Modern |
-| `vscode` | VS Code | the same, with the Dark+ / Light+ colours; every theme merges over this one |
+| `vscode` | VS Code | The same, with the Dark+ / Light+ colours. Every theme merges over this one. |
 
-Your own themes go in `~/.claude/cc-intelligent-ui/themes/<name>/theme.json`. A theme there with the same folder name as a built-in one is used in its place. It is still merged over the built-in `vscode`, like every theme. Choose a theme with `/iui theme <name>`.
+- **Your themes:** `~/.claude/cc-intelligent-ui/themes/<name>/theme.json`. One with the same folder name as a built-in theme is used in its place, still merged over the built-in `vscode`.
+- **Choose one:** `/iui theme <name>`.
 
 ## Merging
 
-Every key is optional. The template merges your `theme.json` over `vscode/theme.json`, so you only write what you change. A value of the wrong type (for example a colour that is not `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`, or text where a number belongs) is ignored, and the vscode value is used. The file must be valid JSON; if it is not, Intelligent UI uses the default theme, `claude-code`, and tells you.
+- **Every key is optional.** The template merges your `theme.json` over `vscode/theme.json`, so write only what you change.
+- **Wrong type** (for example a colour that is not `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`, or text where a number belongs): ignored, and the `vscode` value is used.
+- **Invalid JSON:** Intelligent UI uses the default theme, `claude-code`, and tells you.
 
 Example: pink inline code, rounder boxes.
 
@@ -27,10 +30,10 @@ Example: pink inline code, rounder boxes.
 
 ## Units
 
-- `*-px`: CSS pixels of VS Code's preview. Its body text is 14px, so 1px = 11/14 pt (the body is always 11pt; Intelligent UI scales the whole picture to your terminal).
-- `*-em`: em of that element's own text.
-- `size`: a fraction of the body text size. For code, `"terminal"` means the size of your terminal's own text.
-- Colours: `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`. The page is transparent, so a translucent background (for example `#ffffff1a`) looks right on any terminal colour. The terminal draws the mouse selection under the picture: it shows through a translucent background, but an opaque one (`code-bg`, `quote-bg`, `inline-code-bg`) hides it.
+- **`*-px`:** CSS pixels of VS Code's preview. Its body text is 14px, so 1px = 11/14 pt. The body is always 11pt; Intelligent UI scales the whole picture to your terminal.
+- **`*-em`:** em of that element's own text.
+- **`size`:** a fraction of the body text size. For code, `"terminal"` means your terminal's text size.
+- **Colours:** `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`. The page is transparent, so a translucent background (for example `#ffffff1a`) looks right on any terminal colour. The terminal draws the mouse selection under the picture: a translucent background lets it show, an opaque one (`code-bg`, `quote-bg`, `inline-code-bg`) hides it.
 
 ## Keys and vscode defaults
 
@@ -62,12 +65,17 @@ Example: pink inline code, rounder boxes.
 | `table.pad-x-px`, `pad-y-px`, `border-px`, `header-weight` | `10`, `5`, `1`, `700` | |
 | `rule.border-px`, `gap-em` | `1`, `1.5` | Horizontal rule |
 
-With `/iui grid on`, the lines of text lie on the terminal's rows. Then some keys change their effect:
+## With the row grid
 
-- `text.leading-em`, `text.paragraph-em`, `heading.leading-em`, `heading.rule-pad-em`, `list.item-spacing-em` and `code-block.line-height` are not used. Each line is one row (a large heading is two or more rows; a line of an even number of rows is half a row down, with half a row more above and below its block). The gap between paragraphs and blocks is one row. The items of a tight list have no gap. The items of a loose list (a list with a blank line between its items or in an item) have a gap of one row.
-- The header row of a code block has the rows of one line of code.
-- `heading.above-em` and `below-em`, `rule.gap-em`, `code-block.pad-px`, `quote.pad-y-em` and `table.pad-y-px` are rounded to the nearest whole number of rows. Gaps above and below headings and rules are one row or more.
-- With `table.style` `"grid"`, `table.pad-y-px` is rounded to the nearest whole number of rows and a half (half a row or more), and the table has half a row more above and below its box. Each rule is then in the middle of a row.
+With `/iui grid on`, lines of text sit on the terminal's rows. Some keys then work differently:
+
+- **Not used:** `text.leading-em`, `text.paragraph-em`, `heading.leading-em`, `heading.rule-pad-em`, `list.item-spacing-em` and `code-block.line-height`.
+  - Each line is one row. A large heading is two or more rows; a line of an even number of rows sits half a row down, with half a row more above and below its block.
+  - The gap between paragraphs and blocks is one row.
+  - A tight list has no gap between items. A loose list (with a blank line between or inside its items) has a one-row gap.
+- **Code block header:** as tall as one line of code.
+- **Rounded to the nearest whole row:** `heading.above-em`, `heading.below-em`, `rule.gap-em`, `code-block.pad-px`, `quote.pad-y-em` and `table.pad-y-px`. Gaps above and below headings and rules are at least one row.
+- **`table.style` `"grid"`:** `table.pad-y-px` is rounded to the nearest whole number of rows plus a half (at least half a row), and the table gets half a row more above and below its box, so each rule sits in the middle of a row.
 
 ## Licence
 

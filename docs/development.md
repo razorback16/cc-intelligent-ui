@@ -10,54 +10,110 @@ cd cc-intelligent-ui
 claude --plugin-dir .          # once: Claude Code writes the API types to .claude-plugin/types/
 npx -p typescript tsc -p .     # type check
 claude plugin test .           # tests
-sh tests/cache-sh-test.sh      # the cache folder sweep (CACHE_SH) in sh, dash and bash --posix
-sh tests/fonts-sh-test.sh      # the copy of a font out of a terminal's program (PROGRAM_FONTS_SH and _PL) with perl
-sh tests/bold-sh-test.sh       # the fake bold of md.typ (term-bold=0) with the real Typst and Monaco (skips with no Monaco)
-sh tests/code-sh-test.sh       # code blocks of md.typ (width, header, copy button mark, row grid) with the real Typst (skips with no typst)
-sh tests/root-sh-test.sh       # the Typst root of a compile (STAGE_SH): answer code reads no other file, with the real Typst (its compiles skip with no typst)
-sh tests/fill-sh-test.sh       # the root of a pasted image's preview (FILL_SH): only fill.typ and the pasted file, with the real Typst (its compiles skip with no typst)
-sh tests/check-sh-test.sh      # the skill's check.sh: a private cache folder, and a block reads no other file (skips with no Typst 0.15)
-sh tests/footprint-sh-test.sh  # release gate: the validator's footprint is whole (no [+N chars] mark, calls line of 850 characters at most)
-sh tests/gap-sh-test.sh        # the gap at a page break of md.typ (seams), on and off the row grid, with the real Typst (skips with no typst)
-sh tests/flip-sh-test.sh       # the write of a flipped PNG or a frame (WRITE_PL) with the real perl, also two writers of one file at once
-sh tests/herdr-sh-test.sh      # the herdr client finder (HERDR_CLIENT_SH) with fake ps, stat, lsof and lsappinfo, in sh, dash and bash
-sh tests/install-sh-test.sh    # the installer site/install.sh in a sandbox HOME with a fake claude, curl and uname (shellcheck when installed)
+sh tests/cache-sh-test.sh      # cache folder sweep, in sh, dash and bash --posix
+sh tests/fonts-sh-test.sh      # copying a font out of a terminal program
+sh tests/bold-sh-test.sh       # fake bold with real Typst and Monaco (skips with no Monaco)
+sh tests/code-sh-test.sh       # code blocks: width, header, copy button, row grid (skips with no typst)
+sh tests/root-sh-test.sh       # the Typst root: answer code reads no other file (compiles skip with no typst)
+sh tests/fill-sh-test.sh       # the paste preview root: only fill.typ and the image (compiles skip with no typst)
+sh tests/check-sh-test.sh      # the skill's check.sh: private cache, no other file read (skips with no Typst 0.15)
+sh tests/footprint-sh-test.sh  # release gate: the validator footprint is whole
+sh tests/gap-sh-test.sh        # the gap at a page break, on and off the row grid (skips with no typst)
+sh tests/flip-sh-test.sh       # writing a flipped PNG or frame with real perl, also two writers at once
+sh tests/herdr-sh-test.sh      # the herdr client finder with fake ps, stat, lsof and lsappinfo
+sh tests/install-sh-test.sh    # site/install.sh in a sandbox HOME (shellcheck when installed)
 claude plugin validate .
 ```
 
-`.claude-plugin/types/` is not in git. `tsconfig.json` extends the `tsconfig.json` in it, so run Claude Code with the folder once before `tsc`.
+`.claude-plugin/types/` is not in git. `tsconfig.json` extends the one in it, so run Claude Code with the folder once before `tsc`.
 
 ## Release
 
-Claude Code updates the mod only when the `version` in `.claude-plugin/plugin.json` changes. For a release, change the version and `CHANGELOG.md`, run the tests above, and tag the commit `v<version>`. Deploy the site together with the release: it serves `site/install.sh` at https://intelligentui.art/install.sh. After the deploy, check that the script is there:
+1. **Bump the version** in `.claude-plugin/plugin.json`. Claude Code updates the mod only when this changes.
+2. **Add a section** to `CHANGELOG.md`.
+3. **Run the tests** above.
+4. **Tag the commit** `v<version>`:
 
-```
-curl -fsSL https://intelligentui.art/install.sh | head -1    # #!/usr/bin/env bash
-```
+   ```
+   git tag -a v<version> -m "cc-intelligent-ui <version>"
+   ```
+
+5. **Deploy the site** with the release. It serves `site/install.sh` at https://intelligentui.art/install.sh, and `.github/workflows/pages.yml` deploys it on a push to `main` that changes `site/`. Then check that the script is there:
+
+   ```
+   curl -fsSL https://intelligentui.art/install.sh | head -1    # #!/usr/bin/env bash
+   ```
 
 ## Debug log
 
-Set `IUI_DEBUG=1` before you start Claude Code. The mod then writes trace lines to `debug.log` in the cache folder (`${TMPDIR}/cc-intelligent-ui-<uid>/`, `/tmp` when `TMPDIR` is not set).
+Set `IUI_DEBUG=1` before you start Claude Code. The mod then writes `debug.log` in the cache folder (`${TMPDIR}/cc-intelligent-ui-<uid>/`, `/tmp` when `TMPDIR` is not set).
 
-Picture select writes trace lines that start with `select:`:
+Picture select lines start with `select:`:
 
-- `select: <phase> #<order> ...`: one line for each post of a `Client`. It gives the phase and the order, the drawing's id, the page, the anchor and the head (the `Client`'s cells), the size of the `Client`'s region, the page's size in cells, the rows of the message on screen (`onScreen`), the page's top row in the message, its rows above the screen (`above`), and the selected rows of each page.
-- `select: blit <id> page <n> rows <a>..<b> (<count>)` (or `plain`): one line for each blit of the highlight. It gives the time that the frame waited for the page cache (`wait`, 0 when the page is ready), the times to make the frame (`frame`) and to write it (`write`), the frame's bytes, and the time of `$.ui.blit` (`blit`).
-- `select: cache start|first|pause|resume|stop|drop|built ...`: the page cache. `drop` is a page file that no drawing uses now (a redraw). `start` gives the time to read the PNG and the pages in the queue. `first` is a `down` on a page that is not ready. `built` gives the page's size, `ready in` (the time until a frame can be made), `done in` (the time until the tinted pieces are made too), the read, the number of slices, their max and their p95, the pages kept with their MB, and the pages in the queue.
-- `select: words <id> page <n> <k> words in <ms> (background)`: the background probe of a page's words (`none` when it found no words).
-- `select: copy <n> chars <ms>ms after the up (text <ms>ms, words cached | words probed for page <n>); native selection seen (...) | no native selection`: the copy at `up`, and whether Claude Code has a selection of its own with picture cells.
+- `select: <phase> #<order> ...`: each `Client` post. The drawing's id, page, anchor and head, the region size, the page size in cells, the message rows on screen (`onScreen`), the page's top row, its rows above the screen (`above`), and the selected rows of each page.
+- `select: blit <id> page <n> rows <a>..<b> (<count>)` (or `plain`): each highlight blit. Time waiting for the page cache (`wait`), to make the frame (`frame`), to write it (`write`), the frame's bytes, and the `$.ui.blit` time (`blit`).
+- `select: cache start|first|pause|resume|stop|drop|built ...`: the page cache. `start`: PNG read time and queue. `first`: a `down` on a page that is not ready. `drop`: a page file no longer drawn. `built`: size, `ready in`, `done in`, read time, slice count, max and p95, pages kept with their MB, and queue.
+- `select: words <id> page <n> <k> words in <ms> (background)`: the background word probe (`none` when it found no words).
+- `select: copy <n> chars <ms>ms after the up (text <ms>ms, words cached | words probed for page <n>); native selection seen (...) | no native selection`: the copy at `up`, and whether Claude Code has its own selection with picture cells.
 - `select: native copy seen: ...`: picture cells on the clipboard, or a `$.ui.copy` with picture cells.
-- `select: hover <id> page <n> target <i> (<kind>) rows <row>:<x0>-<x1>,...` (or `select: hover none`): the target under the pointer changed (`web`, `file`, `command` or `code`, and its cells; `code` is the copy button of a code block).
-- `select: click <id> page <n> at <x>,<y> target <kind>|none`: one line for each click (a `clear`), with the target that it copies.
+- `select: hover <id> page <n> target <i> (<kind>) rows <row>:<x0>-<x1>,...` (or `select: hover none`): the target under the pointer changed. Kind is `web`, `file`, `command` or `code` (a code block's copy button).
+- `select: click <id> page <n> at <x>,<y> target <kind>|none`: each click (a `clear`) and the target it copies.
 
 ## Module layout
 
-The hooks module is `hooks/register.tsx`. It connects the hooks to the modules in `hooks/lib/`. Each module has one topic, for example `markdown.ts` (blocks and segments), `mode.ts` (light or dark), `typst.ts` (compile), `fonts.ts` (the lean font set: the fonts that a compile of plain text loads), `draw.tsx` (the pages of an answer and the link rows under them), `links.ts` (the links, file paths and commands of a text), `answer.ts` (one text through the compile and cache steps), `plan.tsx` (the plan approval question and the plan rows), `composer.tsx` (the previews of the images pasted in the draft, above the prompt box, and the files of pasted image paths, from one clipboard read), `frame.ts` (the terminal size and the watcher process, which also reports the clipboard changes), `clipboard.ts` (how the clipboard is read and watched for the `/iui grab` toast and read for a pasted image path: macOS, or the Linux tools), `copy.ts` (the text under a mouse selection of pictures), `select.ts` and `blit.ts` (picture select and its highlight), `frames.ts` (the frames of a page: the cell edges, the bands, the row pieces and the frame PNG), `pagecache.ts` (the background page cache: the build queue in slices, and the words probe), `png.ts` (PNG decode, also in steps, and the deflate pieces, in plain JavaScript), `flip.ts` (herdr in iTerm2: the pages and pictures stored with the bands of their rows moved), `probe.ts` (the drawn pages, and the words of a page that a copy reads, kept in memory) and `updates.ts` (the daily check for a new version). The values that change are in one object, `S`, in `state.ts`. The hook bodies in `register.tsx` call `$` themselves; every other `$` call is a wrapper with a short name in `api.ts` (for example `cat` for `$.fs.read`, `exec` for `$.process.run`). The `calls:` note of `claude plugin validate` names each method with the wrappers that call it (`via cat`), and a method that a hook body calls with none. The validator cuts a note at about 1,000 characters and marks the cut `[+N chars]`; the catalogue scan then cannot read the footprint. `tests/footprint-sh-test.sh` is the release gate for this: it fails on a `[+N chars]` mark in the text or the `--json` report, on a calls line (the text after `calls: `) of more than 850 characters, and on a `$` call in `hooks/` outside `api.ts` and `register.tsx`. The tests import from `hooks/register.tsx`, which exports the names that they use.
+`hooks/register.tsx` is the hooks module. It connects the hooks to the modules in `hooks/lib/`, one topic each:
 
-The skill for Claude is in `skills/intelligent-ui/`: `SKILL.md` (the contract, the workflow and an index), `references/` (one file for each topic: Typst, fletcher, CeTZ, plots and charts) and `scripts/check.sh` (the compile check, with the real template). `TYPST_PROMPT` in `hooks/lib/settings.ts` tells Claude when to load it.
+| Module | Topic |
+| --- | --- |
+| `answer.ts` | One text through compile and cache, and its states before it is ready |
+| `api.ts` | The wrappers for every `$` call outside `register.tsx` |
+| `blit.ts` | Picture select's highlight with `$.ui.blit` |
+| `clipboard.ts` | Reading and watching the clipboard, on macOS and Linux |
+| `command.ts` | The `/iui` command and its typeahead |
+| `composer.tsx` | Previews of pasted images and pasted image paths |
+| `copy.ts` | The text under a mouse selection of pictures |
+| `designs.ts` | The drawing space kept per answer across sessions |
+| `draw.tsx` | The pages of an answer and the link rows under them |
+| `env.ts` | Setup at load: cache folder, Typst, terminal, font, theme |
+| `epoch.ts` | Swapping all pictures at once after a resize or setting change |
+| `flip.ts` | herdr in iTerm2: pictures stored with row bands reversed |
+| `fonts.ts` | The lean font set |
+| `frame.ts` | Terminal size and the watcher process |
+| `frames.ts` | A page's frames: cell edges, row pieces, frame PNG |
+| `grid.ts` | The row grid's first-line position |
+| `host.ts` | Shell snippets: tty size, terminal font, light or dark for `auto` |
+| `images.ts` | Which images, PDFs and Markdown files a message names |
+| `links.ts` | Links, file paths and commands in a text |
+| `log.ts` | The debug log |
+| `markdown.ts` | Blocks, fences and segments |
+| `mode.ts` | Light or dark (pure) |
+| `pagecache.ts` | The background page cache and word probe |
+| `pictures.tsx` | Files Claude sends: images, PDFs, Markdown |
+| `plan.tsx` | The plan approval question and plan rows |
+| `png.ts` | PNG decode and deflate pieces in plain JavaScript |
+| `probe.ts` | Drawn pages and their words, in memory |
+| `select.ts` | Picture select |
+| `settings.ts` | Sizes, limits, timings, and the system prompt text |
+| `setup.ts` | `/iui setup` for iTerm2 and herdr |
+| `state.ts` | Shared types and the state object `S` |
+| `stream.ts` | Streaming and the compile queue |
+| `targets.ts` | Click targets on a page |
+| `terminal.ts` | What the terminal can draw |
+| `terminals.ts` | Each terminal's config: background and font |
+| `themes.ts` | Themes and `/iui theme` |
+| `typst.ts` | Finding Typst, measuring fonts, compiling, the Typst root |
+| `updates.ts` | The daily check for a new version |
 
-The Typst template is `render/md.typ`. The themes are in `render/themes/` (refer to [`render/themes/README.md`](../render/themes/README.md)). The vendored Typst packages are in `render/packages/preview/`.
+`hooks/sel.tsx` is picture select's `Client`. The tests import from `hooks/register.tsx`, which exports the names they use.
 
-## Marketing images
+**Footprint gate.** Only hook bodies in `register.tsx` and the wrappers in `api.ts` call `$` (for example `cat` wraps `$.fs.read`, `exec` wraps `$.process.run`). The `calls:` note of `claude plugin validate` names each method and its wrappers (`via cat`). The validator cuts that note at about 1,000 characters and marks the cut `[+N chars]`, and then the catalogue scan cannot read the footprint. `tests/footprint-sh-test.sh` fails on:
 
-`outcomes/build.sh` renders the samples in `outcomes/samples/` and frames them into the images in `outcomes/out/`. Refer to the [Gallery](gallery.md).
+- a `[+N chars]` mark in the text or the `--json` report,
+- a calls line (the text after `calls: `) over 850 characters,
+- a `$` call in `hooks/` outside `api.ts` and `register.tsx`.
+
+## Other parts
+
+- **The skill** is in `skills/intelligent-ui/`: `SKILL.md` (contract, workflow, index), `references/` (Typst, fletcher, CeTZ, plots and charts) and `scripts/check.sh` (compile check with the real template). `TYPST_PROMPT` in `hooks/lib/settings.ts` tells Claude when to load it.
+- **The template** is `render/md.typ`. Themes are in `render/themes/` (see [`render/themes/README.md`](../render/themes/README.md)). Vendored Typst packages are in `render/packages/preview/`.
+- **Marketing images.** `outcomes/build.sh` renders `outcomes/samples/` into `outcomes/out/`. See the [Gallery](gallery.md).

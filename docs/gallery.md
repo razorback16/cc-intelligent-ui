@@ -2,7 +2,7 @@
 
 ← Back to the [README](../README.md)
 
-Real answers, drawn by Intelligent UI in Claude Code. The framed images follow your GitHub theme: you see the dark terminal in dark mode and the light terminal in light mode. The sources of the answers are in [`outcomes/samples/`](../outcomes/samples/).
+Real Claude answers, drawn by Intelligent UI. The first three show a dark and a light terminal side by side. The others follow your GitHub theme. The answers' Markdown is in [`outcomes/samples/`](../outcomes/samples/).
 
 ## In a dark and a light terminal
 
@@ -12,9 +12,9 @@ Real answers, drawn by Intelligent UI in Claude Code. The framed images follow y
 
 ![Claude explains git rebase: a commit graph before and after the rebase and a table that compares merge and rebase, in a dark and a light terminal](../outcomes/out/0-hero-3-rebase.png)
 
-## Real Markdown, right in the terminal
+## Markdown
 
-Headings, an image, a table, inline math, a code block with syntax colours, a task list and a block quote.
+Headings, an image, a table, inline math, highlighted code, a task list and a quote.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../outcomes/out/1-overview-dark.png">
@@ -22,7 +22,7 @@ Headings, an image, a table, inline math, a code block with syntax colours, a ta
   <img alt="One Claude answer with a banner image, a heading, a table, inline math, a syntax-coloured code block, a task list and a block quote, drawn in Claude Code" src="../outcomes/out/1-overview-light.png" width="640">
 </picture>
 
-## LaTeX math that reads like a paper
+## LaTeX math
 
 Euler's identity, the Gaussian integral, Maxwell's equations, a matrix, a piecewise function, the Fourier transform and the Schrödinger equation.
 
@@ -32,9 +32,9 @@ Euler's identity, the Gaussian integral, Maxwell's equations, a matrix, a piecew
   <img alt="Typeset LaTeX math in Claude Code: the Gaussian integral, Maxwell's equations, a rotation matrix, a piecewise function, the Fourier transform and the Schrödinger equation" src="../outcomes/out/2-math-light.png" width="800">
 </picture>
 
-## A fractal, calculated as it draws
+## A fractal
 
-Typst calculates each pixel of the Mandelbrot set at render time.
+The Mandelbrot set, with each pixel calculated by Typst as the answer draws.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../outcomes/out/3-mandelbrot-dark.png">
@@ -42,7 +42,7 @@ Typst calculates each pixel of the Mandelbrot set at render time.
   <img alt="A Mandelbrot set with smooth colouring, calculated by a live Typst block in a Claude answer" src="../outcomes/out/3-mandelbrot-light.png" width="800">
 </picture>
 
-## Recursion and colour, live
+## Recursion and colour
 
 A recursive fractal tree and a Lissajous curve, drawn with CeTZ.
 
@@ -52,7 +52,7 @@ A recursive fractal tree and a Lissajous curve, drawn with CeTZ.
   <img alt="A recursive fractal tree with a colour gradient next to a rainbow Lissajous curve, drawn with CeTZ in a Claude answer" src="../outcomes/out/4-fractal-light.png" width="800">
 </picture>
 
-## Plots with axes and a legend
+## Plots
 
 A damped oscillator and its exponential envelope, drawn with cetz-plot.
 
