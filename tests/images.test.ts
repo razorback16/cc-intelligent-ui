@@ -603,17 +603,41 @@ test('in herdr in iTerm2, a PNG whose flip takes longer than a slice of real tim
   expect(pngs.has(image.props.source.file)).toBe(true)
 })
 
-test('in herdr in iTerm2, a picture whose flipped copy could not be stored is tried again at the next draw', async ($, on) => {
+test('in herdr in iTerm2, a picture whose flipped copy could not be stored is tried again at a draw after the back-off', async ($, on) => {
   // The first write fails (as when another session wrote the same file at that time).
-  const { pngs, writes } = world(on, { typst: true, herdr: '/Applications/iTerm.app/Contents/MacOS/iTerm2', files: { '/t/icon.png': HEAD }, bytes: ROWS_PNG, failWrites: 1 })
+  const { clock, pngs, writes } = world(on, { typst: true, herdr: '/Applications/iTerm.app/Contents/MacOS/iTerm2', files: { '/t/icon.png': HEAD }, bytes: ROWS_PNG, failWrites: 1 })
   await ready($)
   const ui = await $.ui.mount(sent(attach('/t/icon.png')))
   expect(images(await ui.drawn())).toEqual([])
+  await clock.advance(5000)
   await ui.redraw(sent(attach('/t/icon.png')).props)
   const [image] = images(await ui.drawn())
   expect(writes()).toBe(2)
   expect(image.props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/flip\.png$/)
   expect([...decodePng(pngs.get(image.props.source.file)!).data]).toEqual([...flipRows(ROWS_IMG, 10).data])
+})
+
+test('in herdr in iTerm2, many draws after a failed flip run no write until the back-off ends, which doubles after each failure', async ($, on) => {
+  const { clock, writes } = world(on, { typst: true, herdr: '/Applications/iTerm.app/Contents/MacOS/iTerm2', files: { '/t/icon.png': HEAD }, bytes: ROWS_PNG, failWrites: 2 })
+  await ready($)
+  const ui = await $.ui.mount(sent(attach('/t/icon.png')))
+  const draw = async () => {
+    await ui.redraw(sent(attach('/t/icon.png')).props)
+    return images(await ui.drawn())
+  }
+  expect(images(await ui.drawn())).toEqual([])
+  for (let i = 0; i < 10; i++) expect(await draw()).toEqual([])
+  expect(writes()).toBe(1)
+  // After 5 s: one more try, which fails; the next wait is 10 s.
+  await clock.advance(5000)
+  for (let i = 0; i < 10; i++) expect(await draw()).toEqual([])
+  expect(writes()).toBe(2)
+  await clock.advance(5000)
+  for (let i = 0; i < 10; i++) expect(await draw()).toEqual([])
+  expect(writes()).toBe(2)
+  await clock.advance(5000)
+  expect((await draw()).length).toBe(1)
+  expect(writes()).toBe(3)
 })
 
 test('in herdr in Ghostty, a PNG Claude sends draws as it is', async ($, on) => {
