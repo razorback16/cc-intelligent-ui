@@ -37,6 +37,8 @@ function world(on: any, o: {
   measure?: string
   run?: (argv: string[]) => ReturnType<typeof ok> | undefined
   stored?: Record<string, unknown>
+  // The built-in themes claude-code and vscode (their folders and theme.json).
+  themes?: boolean
 }): World {
   S.fontPaths = ''
   mock.store(on, o.stored)
@@ -85,7 +87,13 @@ function world(on: any, o: {
     return ok('', 1)
   })
   const files = o.files ?? {}
-  on('fs.read', async ($: any, e: any, next: any) => (e.path in files ? { value: files[e.path] } : e.path.startsWith('/h/') || e.path.startsWith('/c/') ? { deny: 'ENOENT' } : next(e)))
+  const theme = (path: string) => (o.themes ? /\/render\/themes\/(claude-code|vscode)\/theme\.json$/.exec(path)?.[1] : undefined)
+  on('fs.read', async ($: any, e: any, next: any) =>
+    e.path in files ? { value: files[e.path] } : theme(e.path) ? { value: `{"name":"${theme(e.path)}"}` } : e.path.startsWith('/h/') || e.path.startsWith('/c/') ? { deny: 'ENOENT' } : next(e))
+  if (o.themes) {
+    on('fs.list', async ($: any, e: any, next: any) =>
+      e.path.endsWith('/render/themes') ? { value: ['claude-code', 'vscode'].map(name => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) } : next(e))
+  }
   on('fs.exists', async ($: any, e: any, next: any) => (e.path.startsWith('/h/') ? { value: e.path in files } : e.path === '/usr/bin/typst' ? { value: true } : next(e)))
   return { ran, fontPaths, copies: () => ran.filter(argv => argv.includes(PROGRAM_FONTS_SH)), clock, envs }
 }
@@ -395,6 +403,88 @@ pollTest('herdr: the end of the session stops the check each second', async ($, 
   const from = w.ran.length
   await w.clock.advance(5000)
   expect(checksSince(w, from)).toBe(0)
+})
+
+// The fonts measured (typst eval of measure.typ): the terminal font and the theme folder's name.
+const measuresOf = (w: World) =>
+  w.ran.filter(argv => argv[1] === 'eval').map(argv => `${argAfter(argv, '--input').replace(/^term-font=/, '')}|${argv.at(-1)!.replace(/^.*\//, '')}`)
+// Microtasks until `done()`, for a hook chain that runs no timer.
+const until = async (done: () => boolean) => {
+  for (let i = 0; i < 2000 && !done(); i++) await Promise.resolve()
+}
+
+pollTest('herdr: a new terminal font measured while /iui theme sets another theme is measured again for that theme', async ($, on) => {
+  let client = ghosttyClient
+  let hold: Promise<void> | null = null
+  let held = false
+  let release = () => {}
+  const w = world(on, {
+    isMac: true,
+    env: HERDR_SERVER_ENV,
+    families: ['Iosevka', 'Fira Code'],
+    files: { '/h/kc/kitty.conf': 'font_family Fira Code\n' },
+    themes: true,
+    run: argv => {
+      if (hold && argv[1] === 'eval' && argv.includes('term-font=Fira Code')) {
+        const h = hold
+        hold = null
+        held = true
+        return h.then(() => ok('{}')) as any
+      }
+      return clientIs(() => client)(argv) ?? tickIs(() => null)(argv) ?? shows('font-family = Iosevka\n')(argv)
+    },
+  })
+  await details($)
+  // kitty's client: the full scan finds it, and its font's measure waits.
+  client = kittyClient
+  hold = new Promise<void>(r => (release = r))
+  await w.clock.advance(HERDR_SCAN_MS)
+  await until(() => held)
+  expect(held).toBe(true)
+  expect(measuresOf(w).at(-1)).toBe('Fira Code|claude-code')
+  // A theme is set meanwhile (with the font known then), then the old measure ends.
+  expect((await $.command.run({ command: 'iui', args: 'theme vscode' } as any)).text).toContain('Theme set to vscode.')
+  expect(measuresOf(w).at(-1)).toBe('Iosevka|vscode')
+  release()
+  await until(() => measuresOf(w).at(-1) === 'Fira Code|vscode')
+  expect(measuresOf(w).at(-1)).toBe('Fira Code|vscode')
+})
+
+pollTest('herdr: /iui theme whose measure ends after a new terminal font measures again with that font', async ($, on) => {
+  let client = ghosttyClient
+  let hold: Promise<void> | null = null
+  let held = false
+  let release = () => {}
+  const w = world(on, {
+    isMac: true,
+    env: HERDR_SERVER_ENV,
+    families: ['Iosevka', 'Fira Code'],
+    files: { '/h/kc/kitty.conf': 'font_family Fira Code\n' },
+    themes: true,
+    run: argv => {
+      if (hold && argv[1] === 'eval' && argv.includes('term-font=Iosevka') && argv.at(-1)!.endsWith('/vscode')) {
+        const h = hold
+        hold = null
+        held = true
+        return h.then(() => ok('{}')) as any
+      }
+      return clientIs(() => client)(argv) ?? tickIs(() => null)(argv) ?? shows('font-family = Iosevka\n')(argv)
+    },
+  })
+  await details($)
+  hold = new Promise<void>(r => (release = r))
+  const theme = $.command.run({ command: 'iui', args: 'theme vscode' } as any)
+  await until(() => held)
+  expect(held).toBe(true)
+  // kitty's client meanwhile: its font is read and measured.
+  client = kittyClient
+  await w.clock.advance(HERDR_SCAN_MS)
+  await until(() => measuresOf(w).at(-1) === 'Fira Code|vscode')
+  const before = measuresOf(w).filter(m => m === 'Fira Code|vscode').length
+  release()
+  expect((await theme).text).toContain('Theme set to vscode.')
+  // The theme's measure for the old font is not kept: one more with the new font.
+  expect(measuresOf(w).filter(m => m === 'Fira Code|vscode').length).toBe(before + 1)
 })
 
 fontTest('herdr: a terminal in front with no known client makes a full scan at the next second, and only once while it stays in front', async ($, on) => {

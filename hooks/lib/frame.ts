@@ -334,6 +334,11 @@ export function refont($: EngineInterface): Promise<boolean> {
       const termFont = (await termFontOf($, env.isMac).catch(() => '')) || env.termFont
       const themeDir = S.look?.dir ?? `${env.root}/render/themes/${BASE_THEME}`
       const read = env.typst ? await measureFonts($, env.typst, env.root, env.cache, termFont, themeDir).catch(() => DEFAULT_METRICS) : env.metrics
+      // A theme set meanwhile (/iui theme): its fonts are measured again, never an older theme's written.
+      if ((S.look?.dir ?? `${env.root}/render/themes/${BASE_THEME}`) !== themeDir) {
+        fontAgain = true
+        continue
+      }
       const metrics = read === DEFAULT_METRICS ? env.metrics : read
       if (termFont === env.termFont && sameMetrics(metrics, env.metrics)) continue
       env.termFont = termFont

@@ -776,8 +776,16 @@ async function setTheme($: EngineInterface, name: string | undefined): Promise<s
     return `No usable theme named ${name}.\n\n${themeListing(themes, problems, was?.name ?? DEFAULT_THEME, userThemesOf(ready.home), ready.home)}`
   }
   if (S.look?.name !== was?.name || S.look?.dir !== was?.dir || S.look?.stamp !== was?.stamp) {
-    // The theme's fonts set the column width and the code size.
-    if (ready.typst && S.look) ready.metrics = await measureFonts($, ready.typst, ready.root, ready.cache, ready.termFont, S.look.dir)
+    // The theme's fonts set the column width and the code size; measured again
+    // when the terminal font changed meanwhile (refont), never for an older font.
+    if (ready.typst && S.look) {
+      let font: string
+      do {
+        font = ready.termFont
+        const metrics = await measureFonts($, ready.typst, ready.root, ready.cache, font, S.look.dir)
+        if (font === ready.termFont) ready.metrics = metrics
+      } while (font !== ready.termFont)
+    }
     beginEpoch($)
   }
   if (name) await save($, 'theme-name', chosen.name)
