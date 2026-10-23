@@ -10,6 +10,7 @@ import { epochOpen, fauxBoldOf, finalized, keep, lastKey, lastText, live, pendin
 import { fontFit, hashOf, inlineOf, renderKey, sizing } from './draw'
 import { needsRoom } from './markdown'
 import { pictureColumns } from './frame'
+import { isFlipHere } from './terminal'
 import { pictureRowsFor } from './images'
 import { designInMemory, designKey, loadDesign } from './designs'
 import { resultOf, touchLater } from './typst'
@@ -105,16 +106,17 @@ export async function pagesOf($: EngineInterface, o: PagesInput): Promise<Drawin
     return o.canStream && (live.has(id) || (seen !== text && !finalized.has(id) && (S.stepsLive > 0 || seen !== undefined)))
   }
   const room = await roomOf($, { hasRoom, textHash, base, env, rows, widthPt, rowPt, isLive: liveNow() })
+  const flip = isFlipHere(env)
   const key = renderKey({
     textHash, columns, cell, size: S.size, mode: S.theme, termFont: env.termFont,
-    columnPt, templateStamp: env.stamp, look: active, inline: env.inline, herdr: env.herdr, base, room, grid: S.grid, fauxBold: fauxBoldOf(env.metrics),
+    columnPt, templateStamp: env.stamp, look: active, inline: env.inline, herdr: env.herdr, flip, base, room, grid: S.grid, fauxBold: fauxBoldOf(env.metrics),
   })
   const seen = lastText.get(id)
   const changed = seen !== text
   lastText.set(id, text)
   const job: Job = {
     key, requestId: id, text, columns, cell, theme: S.theme, size: S.size, grid: S.grid, themeDir: active.dir, env, epoch: S.epoch,
-    ...(base ? { base } : {}), ...(room ? { room } : {}), ...(o.onScreen !== undefined ? { onScreen: o.onScreen } : {}),
+    ...(base ? { base } : {}), ...(room ? { room } : {}), ...(flip ? { flip } : {}), ...(o.onScreen !== undefined ? { onScreen: o.onScreen } : {}),
   }
   // The picture drawn last for the same text, at another key.
   const was = lastKey.get(id)

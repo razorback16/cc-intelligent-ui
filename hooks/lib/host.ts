@@ -16,7 +16,7 @@ import {
   rioConfigDirOf, RIO_DEFAULT_FONT, RIO_OLD_FONT, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf, type CmuxAppearance, type KittyEntries,
 } from './terminals'
 import { firstLine } from './markdown'
-import { herdrClientChanged, herdrClientOf, herdrHostOf, isCmuxIn, isGhosttyHere, isGhosttyIn, isKittyIn, isRioIn, type OuterName } from './terminal'
+import { herdrClientChanged, herdrClientOf, herdrHostOf, isCmuxIn, isFlipHere, isGhosttyHere, isGhosttyIn, isKittyIn, isRioIn, type OuterName } from './terminal'
 import { refont } from './frame'
 import { clockEvery, envGet, fsExists, fsRead, processRun } from './api'
 
@@ -692,11 +692,13 @@ async function readLinuxScheme($: EngineInterface): Promise<LinuxScheme | null> 
 
 // One poll (never two at once): under herdr the client first (another
 // terminal sets the terminal values again, then the font and its metrics
-// are read again), then with auto the mode. A changed mode or font redraws.
+// are read again), then with auto the mode. A changed mode, font or flip
+// mode (isFlipHere: iTerm2 in or out) redraws.
 export async function pollHost($: EngineInterface) {
   if (S.checking || (S.setting !== 'auto' && !S.isHerdr)) return
   S.checking = true
   let refonted = false
+  const flipWas = isFlipHere()
   try {
     const moved = S.isHerdr && (await readHerdrClient($).catch(() => false))
     if (moved) await setOuter($)
@@ -705,7 +707,7 @@ export async function pollHost($: EngineInterface) {
   } finally {
     S.checking = false
   }
-  if (!refonted) return showMode($)
+  if (!refonted && isFlipHere() === flipWas) return showMode($)
   S.theme = resolveMode(S.setting, S.host)
   beginEpoch($)
 }

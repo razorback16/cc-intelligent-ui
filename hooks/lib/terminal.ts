@@ -164,13 +164,19 @@ export function herdrClientOf(stdout: string): HerdrClient | null {
 export const herdrClientKey = (c: HerdrClient | null) => (c ? JSON.stringify([c.kind, ...OUTER_NAMES.map(name => c.env[name] ?? '')]) : '')
 export const herdrClientChanged = (was: HerdrClient | null, now: HerdrClient | null) => herdrClientKey(was) !== herdrClientKey(now)
 
+// Flip mode (flip.ts): herdr, not over ssh, and the client the user typed in
+// last is iTerm2. A remote herdr pane (`herdr --remote`) finds no client.
+export const flipOf = (o: { herdr?: boolean; inline: boolean; client: HerdrClient | null }) => !!o.herdr && !o.inline && o.client?.kind === 'iterm'
+export const isFlipHere = (env: { herdr?: boolean; inline: boolean } | null = S.env) => !!env && flipOf({ herdr: env.herdr, inline: env.inline, client: S.herdrClient })
+
 const HERDR_HOSTS = { ghostty: 'Ghostty', cmux: 'cmux', kitty: 'kitty', iterm: 'iTerm2', rio: 'Rio' } as const
 // herdr in /iui details, and where its terminal came from: the client
-// typed in last, or the server's variables (the fallback).
+// typed in last, or the server's variables (the fallback); `flip`: flip mode is on.
 export type HerdrFrom = 'client' | 'server'
-export const herdrText = (version: string, host: HerdrHost, from: HerdrFrom = 'server') =>
+export const FLIP_TEXT = "pages and pictures stored upside down by rows, for iTerm2's placement bug"
+export const herdrText = (version: string, host: HerdrHost, from: HerdrFrom = 'server', flip = false) =>
   `herdr${version ? ` ${version}` : ''} (${
-    host ? `in ${HERDR_HOSTS[host]}, ${from === 'client' ? 'the client you used last' : "from the server's start"}` : 'outer terminal not known'
+    host ? `in ${HERDR_HOSTS[host]}, ${from === 'client' ? 'the client you used last' : "from the server's start"}${flip ? `; ${FLIP_TEXT}` : ''}` : 'outer terminal not known'
   })`
 
 // Whether /iui setup can turn pictures on: they are off, and this is iTerm2

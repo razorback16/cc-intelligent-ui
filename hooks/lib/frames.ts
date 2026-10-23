@@ -5,6 +5,7 @@
 import type { IuiTheme } from '../../types'
 import { chunk, concat, decodeSteps, deflatePiece, headOf, tailOf, type Piece, type Rgba } from './png'
 import type { SelRow } from './select'
+import { reverseBands } from './flip'
 
 export type Rgb = readonly [number, number, number]
 
@@ -51,8 +52,10 @@ const chunked = (raw: Uint8Array, line: number): Chunked => {
 }
 
 // A decoded page ready for frames: its pixels, the cells' pixel edges, the
-// plain row pieces, and the tinted ones made so far.
-export type Frames = { img: Rgba; xs: number[]; ys: number[]; color: Rgb; head: Uint8Array; plain: Chunked[]; tint: (Chunked | undefined)[] }
+// plain row pieces, and the tinted ones made so far. `flip`: a page stored
+// for flip mode (flip.ts): its pixels are in order, its frames' row pieces go
+// in reverse order.
+export type Frames = { img: Rgba; xs: number[]; ys: number[]; color: Rgb; head: Uint8Array; plain: Chunked[]; tint: (Chunked | undefined)[]; flip?: boolean }
 
 export function framesOf(img: Rgba, box: { columns: number; rows: number }, color: Rgb): Frames {
   const steps = framesFrom(img, box, color)
@@ -65,9 +68,12 @@ export function framesOf(img: Rgba, box: { columns: number; rows: number }, colo
 // The same Frames from a PNG's bytes, in steps: the decode's (decodeSteps),
 // then a yield after each plain row piece. The Frames are yielded once they
 // can make frames; the steps after it make the tinted piece of each row.
-export function* framesSteps(png: Uint8Array, box: { columns: number; rows: number }, color: Rgb): Generator<Frames | undefined, Frames, void> {
+// `box.flip`: the PNG is stored for flip mode, so its bands are put back in
+// order first (a page drawn at another box keeps them: no frames fit it).
+export function* framesSteps(png: Uint8Array, box: { columns: number; rows: number; flip?: boolean }, color: Rgb): Generator<Frames | undefined, Frames, void> {
   const img = yield* decodeSteps(png)
-  const f = yield* framesFrom(img, box, color)
+  const flip = !!box.flip && reverseBands(img, box.rows)
+  const f = yield* framesFrom(img, box, color, flip)
   yield f
   const line = img.width * 4 + 1
   for (let r = 0; r < box.rows; r++) {
@@ -77,7 +83,7 @@ export function* framesSteps(png: Uint8Array, box: { columns: number; rows: numb
   return f
 }
 
-function* framesFrom(img: Rgba, box: { columns: number; rows: number }, color: Rgb): Generator<undefined, Frames, void> {
+function* framesFrom(img: Rgba, box: { columns: number; rows: number }, color: Rgb, flip = false): Generator<undefined, Frames, void> {
   const xs = edgesOf(img.width, box.columns)
   const ys = edgesOf(img.height, box.rows)
   const line = img.width * 4 + 1
@@ -86,7 +92,7 @@ function* framesFrom(img: Rgba, box: { columns: number; rows: number }, color: R
     plain.push(chunked(bandOf(img, ys[r]!, ys[r + 1]!, 0, 0, color), line))
     yield
   }
-  return { img, xs, ys, color, head: headOf(img.width, img.height), plain, tint: [] }
+  return { img, xs, ys, color, head: headOf(img.width, img.height), plain, tint: [], ...(flip ? { flip } : {}) }
 }
 
 // The bytes a page's Frames hold (the pixels and the pieces).
@@ -126,6 +132,7 @@ export function frameNow(f: Frames, rows: readonly SelRow[], budgetMs = TINT_MS,
     }
     return chunked(bandOf(f.img, y0, y1, f.xs[Math.max(0, sel.x0)]!, f.xs[Math.min(columns, sel.x1 + 1)]!, f.color), line)
   })
+  if (f.flip) parts.reverse()
   return { png: concat([f.head, ...parts.map(p => p.chunk), tailOf(parts.map(p => p.piece))]), isWhole }
 }
 

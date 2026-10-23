@@ -71,6 +71,8 @@ export function renderKey(o: {
   inline?: boolean
   // Under herdr: pages are cut shorter too (herdrBudget).
   herdr?: boolean
+  // Flip mode (herdr in iTerm2): pages stored with their bands moved (flip.ts).
+  flip?: boolean
   // The folder relative images start from, when it is not the session's (a
   // Markdown file's): the same text there shows other images.
   base?: string
@@ -88,6 +90,7 @@ export function renderKey(o: {
   return hashOf([
     o.textHash, o.columns, o.cell.width, o.cell.height, o.size, o.mode, o.termFont, o.columnPt,
     o.templateStamp, o.look.name, o.look.dir, o.look.stamp, TEMPLATE_VERSION, ...(o.inline ? ['inline'] : []), ...(o.herdr ? ['herdr'] : []),
+    ...(o.flip ? ['flip'] : []),
     ...(o.base ? ['base', o.base] : []),
     ...(room ? ['room', room.heightPt, room.design.widthPt, room.design.heightPt] : []),
     ...(o.grid ? ['grid', GRID_VERSION] : []),

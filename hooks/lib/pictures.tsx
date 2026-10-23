@@ -11,7 +11,7 @@ import {
   type Env,
 } from './state'
 import { jobDone } from './epoch'
-import { fitBox, fitsInline, INLINE_MAX_BYTES, roomColumns } from './terminal'
+import { fitBox, fitsInline, INLINE_MAX_BYTES, isFlipHere, roomColumns } from './terminal'
 import {
   convertBox, convertedPath, factsAfter, folderOf, isNoPageError, lastKnownPage, NO_FACTS, onScreenOf, pageControls, pageOf, parsePage, pasteDirOf, pictureCells,
   pictureRowsFor, type PdfFacts, type PixelBox, type SentFile,
@@ -19,8 +19,9 @@ import {
 import { imagePathOf } from './markdown'
 import { drawPages, hashOf, linkRowsOf, linksFor, type ShownLink } from './draw'
 import { convertCall, logDebug, parseOd, pngSize } from './typst'
+import { flipFile } from './flip'
 import { pagesOf, type Drawing } from './answer'
-import { HEADERS_SH } from './host'
+import { HEADERS_SH, perlFor } from './host'
 import { frameFor, pictureColumns, shownFor, type Frame } from './frame'
 import { clockAfter, fsExists, fsList, fsRead, fsStat, fsWrite, processRun, sessionId, sessionRoot, uiClose, invalidate, uiOpen, uiResolve } from './api'
 
@@ -105,11 +106,14 @@ export async function pictureBytes($: EngineInterface, p: Picture): Promise<stri
 }
 
 // The Images for the files that are PNGs, sized to the Frame on screen.
-// `at`: as statOf.
+// `at`: as statOf. In flip mode each is first a PNG Typst makes at its box
+// (8-bit RGBA, no larger than drawn), which shownOne stores flipped.
 export async function shownOf($: EngineInterface, e: RowInput, ready: Env, files: readonly string[], at?: StatAt): Promise<Shown[]> {
   const shown: Shown[] = []
+  const box = isFlipHere(ready) ? boxOf(shownFor(e.viewport), ready.inline, S.shownHeight) : null
   for (const file of new Set(files)) {
-    const s = await shownOne($, e, ready, file, nameOf(file), at)
+    const png = box ? ((await convertedOf($, ready, file, box, at)) ?? file) : file
+    const s = png ? await shownOne($, e, ready, png, nameOf(file), at) : null
     if (s) shown.push(s)
   }
   return shown
@@ -119,7 +123,8 @@ export async function shownOf($: EngineInterface, e: RowInput, ready: Env, files
 // (shownFor, S.shownHeight: a new size shows when its epoch commits, with
 // every other picture), and at most as wide as the room now; null when it is not a PNG. `alt` is the file's name
 // (the name of the file it was made of). Its generation follows the file's
-// stat alone: a new box is not a new file.
+// stat alone: a new box is not a new file. In flip mode it draws the PNG
+// stored for its rows (flippedOf); null when that fails.
 export async function shownOne($: EngineInterface, e: RowInput, ready: Env, file: string, alt = nameOf(file), at?: StatAt): Promise<Shown | null> {
   const p = await pictureOf($, file, at)
   if (!p) return null
@@ -129,8 +134,35 @@ export async function shownOne($: EngineInterface, e: RowInput, ready: Env, file
     const png = await pictureBytes($, p)
     return png ? { source: { png }, ...fit, alt } : null
   }
+  if (isFlipHere(ready)) {
+    const flipped = await flippedOf($, ready, p, fit.rows)
+    if (!flipped) return null
+    return { source: { file: flipped, format: 'png', generation: Number.parseInt(hashOf([p.stamp, fit.rows]).slice(0, 8), 16) }, ...fit, alt }
+  }
   const generation = Number.parseInt(hashOf([p.stamp]).slice(0, 8), 16)
   return { source: { file, format: 'png', generation }, ...fit, alt }
+}
+
+// Flip mode: a PNG stored for herdr in iTerm2 drawn `rows` rows tall
+// (flip.ts), in a key folder of the cache by the file, its stat stamp and
+// the rows; made once (one run per key), kept from an earlier load. Null
+// when it fails.
+const flipped = new Map<string, Promise<string | null>>()
+function flippedOf($: EngineInterface, ready: Env, p: Picture, rows: number): Promise<string | null> {
+  const key = `${p.file}@${p.stamp}@${rows}`
+  let got = flipped.get(key)
+  if (!got) {
+    const out = `${ready.cache}/${hashOf(['flip', p.file, p.stamp, rows])}/flip.png`
+    got = (async () => {
+      const made = await fsStat($, out).catch(() => null)
+      if (made?.kind === 'file' && made.size) return out
+      const ok = await flipFile($, { src: p.file, out, rows, isPage: false, perl: perlFor(ready.isMac) })
+      if (!ok) await logDebug($, ready.cache, `could not store ${p.file} for herdr in iTerm2`)
+      return ok ? out : null
+    })()
+    keep(flipped, key, got, PICTURES_KEPT)
+  }
+  return got
 }
 
 const nameOf = (file: string) => file.split('/').pop() || 'image'
@@ -271,6 +303,8 @@ export async function sentOf(
   const target = epochOpen() ? frameFor(e.viewport) : null
   const box = boxOf(shown, o.ready.inline, S.shownHeight)
   const next = target ? boxOf(target, o.ready.inline, S.height) : null
+  // Flip mode: a PNG too is made by Typst at its box first (as shownOf).
+  const flip = isFlipHere(o.ready)
   const under: Under[] = []
   for (const f of o.files) {
     const full = imagePathOf(f.path, o.ready.cwd)
@@ -291,11 +325,11 @@ export async function sentOf(
       if (u) under.push(u)
       continue
     }
-    if (f.kind !== 'png' && next && (next.width !== box.width || next.height !== box.height)) {
+    if ((f.kind !== 'png' || flip) && next && (next.width !== box.width || next.height !== box.height)) {
       void convertedOf($, o.ready, full, next, o.at).catch(() => null)
       if (!(await hasPngOf($, full, o.at))) continue
     }
-    const png = f.kind === 'png' ? full : await convertedOf($, o.ready, full, box, o.at)
+    const png = f.kind === 'png' && !flip ? full : ((await convertedOf($, o.ready, full, box, o.at)) ?? (f.kind === 'png' ? full : null))
     const picture = png ? await shownOne($, e, o.ready, png, nameOf(full), o.at) : null
     if (picture) under.push(picture)
   }

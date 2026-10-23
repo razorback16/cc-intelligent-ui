@@ -325,6 +325,33 @@ fontTest('herdr: a change of client (Ghostty to kitty) is seen by the next poll:
   expect(w.fontPaths.length).toBeGreaterThan(measured)
 })
 
+const itermClient = 'pid 50400\natime 30\ntty ttys013\ncmd herdr\napp /Applications/iTerm.app/Contents/MacOS/iTerm2\nenv\nherdr TERM=xterm-256color TERM_PROGRAM=iTerm.app\n'
+
+fontTest('herdr: a change of client to iTerm2 and back turns flip mode on and off, and redraws even with the same font', async ($, on) => {
+  let client = ghosttyClient
+  let redraws = 0
+  on('state.set', async ($: any, e: any, next: any) => {
+    if (e.key === 'done') redraws++
+    return next(e)
+  })
+  const w = world(on, { isMac: true, env: HERDR_SERVER_ENV, families: ['Iosevka'], run: argv => clientIs(() => client)(argv) ?? shows('font-family = Iosevka\n')(argv) })
+  expect(await details($)).not.toContain('upside down')
+  await w.clock.advance(3000)
+  const before = redraws
+  // iTerm2's font is not read here (no profile), so the font stays: only flip mode changes.
+  client = itermClient
+  await w.clock.advance(3000)
+  const flipped = await details($)
+  expect(flipped).toContain("(in iTerm2, the client you used last; pages and pictures stored upside down by rows, for iTerm2's placement bug)")
+  expect(flipped).toContain('terminal font Iosevka.')
+  expect(redraws).toBeGreaterThan(before)
+  const during = redraws
+  client = ghosttyClient
+  await w.clock.advance(3000)
+  expect(await details($)).not.toContain('upside down')
+  expect(redraws).toBeGreaterThan(during)
+})
+
 // ---- kitty ----------------------------------------------------------------------
 
 const kittyConf = (line: string) => ({ '/h/.config/kitty/kitty.conf': `${line}\n` })

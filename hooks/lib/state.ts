@@ -75,8 +75,8 @@ export type Env = {
   designs: string
 }
 // `columns` and `rows`: the cell box the page was compiled for (it is drawn
-// at that box, never stretched).
-export type Page = { file: string; width: number; height: number; alt: string; columns: number; rows: number }
+// at that box, never stretched). `flip`: stored for flip mode (flip.ts).
+export type Page = { file: string; width: number; height: number; alt: string; columns: number; rows: number; flip?: boolean }
 export type Result = { pages: Page[]; bulletRow: number; note?: string }
 export type Job = {
   key: string
@@ -94,6 +94,8 @@ export type Job = {
   base?: string
   // The room for its drawings (a text with a live Typst block or a local image).
   room?: Room
+  // Flip mode (herdr in iTerm2): its pages are stored flipped (flip.ts).
+  flip?: boolean
   // The epoch (S.epoch) it was enqueued in: only the open epoch's jobs hold
   // its commit (set by enqueue).
   epoch: number

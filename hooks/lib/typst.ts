@@ -8,10 +8,11 @@ import { firstLine, imagePathOf, localImages, plainOf, splitInTwo, splitSegments
 import { segmentBudget } from './terminal'
 import { fontFit, placeFirstLine, sizing } from './draw'
 import { DEFAULT_GRID, gridOf } from './grid'
-import { HEADERS_SH } from './host'
+import { HEADERS_SH, perlFor } from './host'
 import { logDebug } from './log'
 import { positionsOf, type Mark, type Positions } from './copy'
 import { hasBoldFace, leanFontsFor } from './fonts'
+import { flipFile } from './flip'
 import { clockAfter, envGet, fsExists, fsList, fsRead, fsWrite, processRun, spawn } from './api'
 
 // The typst command and its environment. Network off (see NO_NETWORK) and a
@@ -512,8 +513,30 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     }
     pages = pages.map(p => ({ ...p, rows: Math.min(MAX_IMAGE_ROWS, p.rows) }))
   }
+  // Flip mode: each page stored for herdr in iTerm2, in place; a page that can not be stored fails the compile (the text shows).
+  if (job.flip) {
+    const flipped = await flipPages($, job, pages, signal)
+    if (typeof flipped === 'string') return flipped
+    pages = flipped
+  }
   const { bulletRow } = firstLinePlace(job, segments)
   const result: Result = { pages, bulletRow, ...(note ? { note } : {}) }
   await fsWrite($, `${dir}/pages.json`, JSON.stringify(result))
   return result
+}
+
+// The pages of a compile stored for flip mode (flip.ts: rows × B pixels
+// tall, the bands reversed), each in place, with its new height.
+async function flipPages($: EngineInterface, job: Job, pages: readonly Page[], signal?: AbortSignal): Promise<Page[] | 'failed' | 'cancelled'> {
+  const out: Page[] = []
+  for (const p of pages) {
+    const made = await flipFile($, { src: p.file, out: p.file, rows: p.rows, isPage: true, perl: perlFor(job.env.isMac), ...(signal ? { signal } : {}) })
+    if (signal?.aborted) return 'cancelled'
+    if (!made) {
+      await logDebug($, job.env.cache, `compile ${job.key}: could not store ${p.file} for herdr in iTerm2`)
+      return 'failed'
+    }
+    out.push({ ...p, height: made.height, flip: true })
+  }
+  return out
 }

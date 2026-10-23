@@ -48,7 +48,7 @@ import { pagesOf, type Drawing } from './lib/answer'
 import { clipboardNow, clipWatchArgs, clipWayReady, hintText } from './lib/clipboard'
 import { setUp } from './lib/env'
 import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/frame'
-import { herdrText, roomColumns } from './lib/terminal'
+import { herdrText, isFlipHere, roomColumns } from './lib/terminal'
 import { onScreenOf, pastedImagePath, pastedNumbers, sentFiles } from './lib/images'
 import { drawPageField, pasteDir, pdfPagesOf, rowsAfter, sentOf, shownOf, underRow, type Shown, type Under } from './lib/pictures'
 import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
@@ -827,8 +827,8 @@ export const register: Register = on => {
         : S.isHerdr && S.setupNeeded
         ? 'Claude Code draws no pictures in herdr until CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 is set when it starts (run /iui setup), so answers stay text'
         : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+, Rio 0.5.27+ and herdr with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
-      // In herdr: its version, the terminal it runs in and where that came from.
-      const herdr = S.isHerdr ? `terminal ${herdrText(S.herdrVersion, S.herdrHost, S.herdrClient ? 'client' : 'server')}: ` : ''
+      // In herdr: its version, the terminal it runs in and where that came from (and flip mode).
+      const herdr = S.isHerdr ? `terminal ${herdrText(S.herdrVersion, S.herdrHost, S.herdrClient ? 'client' : 'server', isFlipHere(ready))}: ` : ''
       await clipWayReady()
       const auto = `Picture select: ${selectState()}\n/iui grab hint: ${hintOf(state === 'on')}`
       const updates = `Update checks: ${updateLine(await updateState($))}`

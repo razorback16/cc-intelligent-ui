@@ -1,5 +1,6 @@
 // Intelligent UI: makes a PNG of a JPEG, WebP or SVG, or of one page of a
-// PDF (the engine's Image draws PNG only). Compiled at 72 ppi, where 1 pt
+// PDF (the engine's Image draws PNG only); in herdr in iTerm2 of a PNG too
+// (an 8-bit RGBA PNG at its box). Compiled at 72 ppi, where 1 pt
 // is 1 pixel.
 //
 // Inputs: f = the image's absolute path (with --root /); maxw, maxh = the
@@ -19,6 +20,7 @@
 #let be16(i) = at(i) * 256 + at(i + 1)
 #let le16(i) = at(i) + at(i + 1) * 256
 #let le24(i) = le16(i) + at(i + 2) * 65536
+#let be32(i) = be16(i) * 65536 + be16(i + 2)
 #let has-tag(i, tag) = data.len() >= i + tag.len() and data.slice(i, i + tag.len()) == bytes(tag)
 
 // A JPEG's (width, height): from the first SOF marker.
@@ -46,7 +48,7 @@
 
 #let svg = lower(f).ends-with(".svg")
 #let pdf = has-tag(0, "%PDF-") or lower(f).ends-with(".pdf")
-#let size = if has-tag(0, "RIFF") and has-tag(8, "WEBP") { webp-size() } else if at(0) == 0xff and at(1) == 0xd8 { jpeg-size() }
+#let size = if has-tag(0, "RIFF") and has-tag(8, "WEBP") { webp-size() } else if at(0) == 0xff and at(1) == 0xd8 { jpeg-size() } else if has-tag(1, "PNG") and has-tag(12, "IHDR") { (be32(16), be32(20)) }
 
 // A PDF page is vector: its size in pt is its size in pixels, and it fits
 // the box, the aspect kept (it can be made larger).

@@ -1,6 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { onScreenOf } from '../hooks/lib/images'
+import { encodeSteps, flipRows, WRITE_PL } from '../hooks/lib/flip'
+import { decodePng, fromBase64, toBase64, type Rgba } from '../hooks/lib/png'
+import { HERDR_CLIENT_SH } from '../hooks/lib/host'
 import {
   claudeTmpOf, convertBox, convertCall, convertedPath, DEFAULT_CELL, factsAfter, folderOf, imageKindOf, isMarkdownPath, isNoPageError, isPdfPath, lastKnownPage,
   NO_FACTS, pageControls, pageCountOf, pageOf, parsePage, pasteDirOf, pastedImagePath, pastedNumbers, COMMIT_MIN_MS, DEFAULT_HEIGHT, RESIZE_QUIET_MS, PICTURE_MAX_ROWS, PICTURE_ROOM_ROWS, pictureCells,
@@ -364,6 +367,10 @@ function world(on: any, o: {
   holdCompile?: Promise<void>
   pdfs?: Record<string, number>
   noHint?: boolean
+  // herdr (TERM_PROGRAM=herdr): the terminal app of the client found.
+  herdr?: string
+  // The bytes (base64) a read of a PNG in the cache gives (else PNG).
+  bytes?: string
 } = {}) {
   // Intelligent UI's store in memory (as mock.store), and its writes by key;
   // `redrawsAt`: by key, the `done` writes (redraws) made when its write ended.
@@ -385,7 +392,7 @@ function world(on: any, o: {
     return { value: undefined }
   })
   const clock = mock.clock(on)
-  mock.env(on, { HOME: '/h', TERM: 'xterm-kitty', ...o.vars })
+  mock.env(on, { HOME: '/h', TERM: 'xterm-kitty', ...(o.herdr ? { TERM_PROGRAM: 'herdr' } : {}), ...o.vars })
   const files = o.files ?? {}
   const texts = o.texts ?? {}
   const mtimes = o.mtimes ?? {}
@@ -395,6 +402,8 @@ function world(on: any, o: {
   const reads: string[] = []
   const converts: string[][] = []
   const moves: string[][] = []
+  // The PNGs perl writes (flip mode), by path.
+  const pngs = new Map<string, Uint8Array>()
   const docs: any[] = []
   const logs: string[] = []
   const stats = new Map<string, number>()
@@ -424,6 +433,8 @@ function world(on: any, o: {
     const argv: string[] = e.argv
     const cmd = argv.join(' ')
     if (argv[0] === 'kill') return ok('')
+    if (o.herdr && argv[0] === 'sh' && argv[2] === HERDR_CLIENT_SH) return ok(`pid 77\natime 5\ntty /dev/ttys003\ncmd herdr\napp ${o.herdr}\nenv\nherdr TERM=xterm-256color\n`)
+    if (argv[0] === '/usr/bin/perl' && argv[2] === WRITE_PL) return (pngs.set(argv[3]!, fromBase64(e.init.stdin)), ok(''))
     if (/cc-intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (argv[0] === 'id' && argv[1] === '-u') return ok('501\n')
     if (cmd.includes('command -v typst')) return o.typst ? ok('/usr/bin/typst\n') : ok('', 1)
@@ -484,14 +495,14 @@ function world(on: any, o: {
     return { value: undefined }
   })
   on('fs.read', async ($: any, e: any, next: any) => {
-    if (e.as === 'bytes' && e.path in files) return (reads.push(e.path), { value: { base64: PNG } })
+    if (e.as === 'bytes' && e.path in files) return (reads.push(e.path), { value: { base64: o.bytes && e.path.startsWith('/c/') ? o.bytes : PNG } })
     if (e.as !== 'bytes' && e.path in texts) return (reads.push(e.path), { value: texts[e.path] })
     if (written.has(e.path)) return { value: written.get(e.path) }
     return e.path.startsWith('/c/') || e.path.startsWith('/t/') ? { deny: 'ENOENT' } : next(e)
   })
   on('ui.toast', async () => ({ value: undefined }))
   on('ui.render', () => ENGINE as any)
-  return { clock, heads, reads, converts, moves, docs, logs, files, texts, mtimes, written, kept, redrawsAt, redraws: () => redraws }
+  return { clock, heads, reads, converts, moves, pngs, docs, logs, files, texts, mtimes, written, kept, redrawsAt, redraws: () => redraws }
 }
 
 const sent = (output: unknown, isErrored = false, id = 'tu-1') =>
@@ -525,6 +536,41 @@ test('a PNG Claude sends draws under its row, at its own size', async ($, on) =>
   await ui.redraw(sent(attach('/t/icon.png')).props)
   expect(images(await ui.drawn()).length).toBe(1)
   expect(heads).toEqual(['/t/icon.png'])
+})
+
+// A small RGBA picture (each row its own colour) as a PNG, and its pixels.
+const ROWS_IMG: Rgba = (() => {
+  const data = new Uint8Array(8 * 20 * 4)
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 8; x++) data.set([y * 12, x * 30, 255 - y, 255], (y * 8 + x) * 4)
+  return { width: 8, height: 20, data }
+})()
+const ROWS_PNG = (() => {
+  const steps = encodeSteps(ROWS_IMG)
+  for (;;) {
+    const got = steps.next()
+    if (got.done) return toBase64(got.value)
+  }
+})()
+
+test('in herdr in iTerm2, a PNG Claude sends is made by Typst at its box, then stored flipped by rows for that box, and drawn from that file', async ($, on) => {
+  const { converts, pngs } = world(on, { typst: true, herdr: '/Applications/iTerm.app/Contents/MacOS/iTerm2', files: { '/t/icon.png': HEAD }, bytes: ROWS_PNG })
+  await ready($)
+  const ui = await $.ui.mount(sent(attach('/t/icon.png')))
+  const [image] = images(await ui.drawn())
+  expect(converts.map(argv => argv.find(a => a.startsWith('f='))?.slice(2))).toEqual(['/t/icon.png'])
+  expect(image.props).toMatchObject({ columns: 40, rows: 10, alt: 'icon.png' })
+  expect(image.props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/flip\.png$/)
+  expect([...decodePng(pngs.get(image.props.source.file)!).data]).toEqual([...flipRows(ROWS_IMG, 10).data])
+  expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).toContain("pages and pictures stored upside down by rows, for iTerm2's placement bug")
+})
+
+test('in herdr in Ghostty, a PNG Claude sends draws as it is', async ($, on) => {
+  const { converts, pngs } = world(on, { typst: true, herdr: '/Applications/Ghostty.app/Contents/MacOS/ghostty', files: { '/t/icon.png': HEAD }, bytes: ROWS_PNG })
+  await ready($)
+  const ui = await $.ui.mount(sent(attach('/t/icon.png')))
+  expect(images(await ui.drawn())[0].props.source).toMatchObject({ file: '/t/icon.png', format: 'png' })
+  expect([converts.length, pngs.size]).toEqual([0, 0])
+  expect((await $.command.run({ command: 'iui', args: 'details' } as any)).text).not.toContain('upside down')
 })
 
 test('over ssh, a PNG Claude sends goes as bytes', async ($, on) => {
