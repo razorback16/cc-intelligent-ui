@@ -1000,7 +1000,7 @@ export const register: Register = on => {
         const mode = bg ? ` -> luminance ${luminanceOf(bg).toFixed(3)}, ${modeOfLuminance(luminanceOf(bg))}` : got?.reply ? ' -> not an OSC 11 answer' : ''
         lines.push(`${i}: ${what}${mode}`)
       }
-      return { text: `OSC 11 probe (the terminal's background), ${PROBE_RUNS} runs:\n${lines.join('\n')}\nThe poll uses it: ${USE_OSC11 ? 'yes' : 'no (off)'}.` }
+      return { text: `OSC 11 probe (the terminal's background), ${PROBE_RUNS} runs:\n${lines.join('\n')}\nThe poll uses it: ${USE_OSC11 ? 'yes' : S.isHerdr ? 'in herdr, at the start and at a change of client only' : 'no (off)'}.` }
     }
     if (asked.kind === 'theme') return { text: await runTheme($, asked.name) }
     const state = (await read($, isOn)) ? 'on' : 'off'
