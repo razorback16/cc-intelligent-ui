@@ -110,7 +110,8 @@ export const sameLit = (a: Lit | null, b: Lit | null) => a === b || (!!a && !!b 
 // answer stays the last one made, so only a new one counts (one there
 // before ours stays as it is).
 export const NATIVE_POLL_MS = 250
-const UNREAD = '\0'
+// Not read yet; no nativeOf value is this (those hold a '|').
+const UNREAD = 'unread'
 const native = { timer: null as { cancel: () => void } | null, last: UNREAD as string | undefined }
 const nativeOf = (s: { text: string; requestId?: string } | undefined) => (s ? `${s.requestId ?? ''}|${s.text}` : undefined)
 

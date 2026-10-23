@@ -124,7 +124,7 @@ While the mod is on and has drawn a picture in this session, it sees each change
 
 `/iui grab` puts the text on the clipboard. In fullscreen mode, it reads the last mouse selection of Claude Code and copies its text. With no selection (the main screen), it reads the picture cells on the clipboard and copies their text. If the clipboard has the text already, it tells you. If the copied text is not correct, `/iui dump` shows the cells that the mod found and the page that it used. It also writes all of this to `copy-debug.json` in the cache folder.
 
-A copy of picture cells through Claude Code's `/copy` or `$.ui.copy` gets the text in place of the cells.
+A copy of picture cells through `$.ui.copy` gets the text in place of the cells.
 
 For the limits, refer to [Limitations](limitations.md).
 

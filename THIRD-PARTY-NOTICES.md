@@ -26,4 +26,4 @@ The colours, sizes and spacing of the `vscode` and `vscode-modern` themes come f
 
 ## show-your-work
 
-The one-line Perl command that reads the terminal's cell size in pixels (`CELL_SH` in `hooks/register.tsx`) comes from [show-your-work](https://github.com/iamumeransari/claude-show-your-work). MIT, Copyright (c) 2026 Umer Ansari.
+The one-line Perl command that reads the terminal's cell size in pixels (`CELL_SH` in `hooks/lib/host.ts`) comes from [show-your-work](https://github.com/iamumeransari/claude-show-your-work). MIT, Copyright (c) 2026 Umer Ansari.

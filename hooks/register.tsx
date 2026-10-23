@@ -910,7 +910,7 @@ export const register: Register = on => {
     if (notice) lines.push(notice)
     lines.push('Change: /iui on | off | size | width | height | grid | select | updates | theme. More: /iui details')
     return { text: bad + lines.join('\n') }
-  })
+  }).catch(($, e, next) => next(e))
 
   on('config.set', { key: 'theme' }, async ($, e, next) => {
     const set = await next(e)

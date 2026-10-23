@@ -309,14 +309,14 @@ test('an [Image #0] mark and a uid that is not a number give nothing', () => {
 })
 
 test('the pasted-image path follows Claude Code folder names', () => {
-  expect(projectSlug('/Users/subhagato/Development/apps/claude-intelligent-ui')).toBe('-Users-subhagato-Development-apps-claude-intelligent-ui')
+  expect(projectSlug('/Users/me/Development/apps/claude-intelligent-ui')).toBe('-Users-me-Development-apps-claude-intelligent-ui')
   expect(projectSlug('/home/me/my_app.v2')).toBe('-home-me-my-app-v2')
   expect(claudeTmpOf({ uid: '501\n', isMac: true })).toBe('/private/tmp/claude-501')
   expect(claudeTmpOf({ uid: '1000', isMac: false })).toBe('/tmp/claude-1000')
   expect(claudeTmpOf({ tmpdir: '/scratch/', uid: '1000', isMac: false })).toBe('/scratch/claude-1000')
   expect(claudeTmpOf({ uid: '', isMac: true })).toBe('')
-  const dir = pasteDirOf('/private/tmp/claude-501', '/Users/subhagato/Development/apps/claude-intelligent-ui', 'f8bb4b84-0e51-456a-9e49-8e5db49500ae')
-  expect(pastedImagePath(dir, 5)).toBe('/private/tmp/claude-501/-Users-subhagato-Development-apps-claude-intelligent-ui/f8bb4b84-0e51-456a-9e49-8e5db49500ae/images/5.png')
+  const dir = pasteDirOf('/private/tmp/claude-501', '/Users/me/Development/apps/claude-intelligent-ui', 'f8bb4b84-0e51-456a-9e49-8e5db49500ae')
+  expect(pastedImagePath(dir, 5)).toBe('/private/tmp/claude-501/-Users-me-Development-apps-claude-intelligent-ui/f8bb4b84-0e51-456a-9e49-8e5db49500ae/images/5.png')
 })
 
 // ---- The render hooks -------------------------------------------------------

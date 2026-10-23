@@ -4,7 +4,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { S } from './state'
 import { readText } from './host'
-import { envGet, fsWrite, processRun, storeGet, storeSet, uiAsk, uiLog, uiToast } from './api'
+import { envGet, fsExists, fsWrite, processRun, storeGet, storeSet, uiAsk, uiLog, uiToast } from './api'
 
 // Claude Code turns pictures on by itself in kitty and Ghostty only; iTerm2
 // needs CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 when Claude Code starts (a mod's
@@ -67,6 +67,14 @@ async function shellRc($: EngineInterface): Promise<ShellRc | null> {
   })
 }
 
+// The start file's text: '' when it is confirmed missing, null when it
+// exists (or may exist) but cannot be read. A write over null would lose it.
+async function readRc($: EngineInterface, path: string): Promise<string | null> {
+  const there = await fsExists($, path).catch(() => true)
+  if (!there) return ''
+  return readText($, path)
+}
+
 // What /iui setup says where iTerm2 does not run (not macOS): it changes no file.
 export const SETUP_NOT_MAC = '/iui setup is for iTerm2, which runs on macOS only, so Intelligent UI changed no file. ' +
   'On Linux, kitty and Ghostty show pictures with no setup. ' +
@@ -78,7 +86,8 @@ export async function runSetup($: EngineInterface, remove: boolean): Promise<str
   const rc = await shellRc($)
   const manual = `export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 (only in iTerm2, not in tmux or screen)`
   if (!rc) return `Intelligent UI does not know your shell, so it changed no file. Add this to your shell's start file: ${manual}`
-  const text = (await readText($, rc.path)) ?? ''
+  const text = await readRc($, rc.path)
+  if (text === null) return `Intelligent UI could not read ${rc.path}, so it changed no file. Add this to it yourself: ${manual}`
   const restart = 'Close this tab, open a new iTerm2 tab, and start Claude Code there to see pictures.'
   if (remove) {
     if (!hasSetup(text)) return `${rc.path} has no Intelligent UI block.`
@@ -97,8 +106,10 @@ export async function offerSetup($: EngineInterface) {
   S.setupAsked = true
   if ((await storeGet($, 'setup').catch(() => undefined)) === 'never') return
   const rc = await shellRc($)
-  if (rc && hasSetup((await readText($, rc.path)) ?? '')) return
-  const file = rc ? rc.path.replace((await envGet($, 'HOME')) ?? '\u0000', '~') : "your shell's start file"
+  const text = rc ? await readRc($, rc.path) : ''
+  if (text === null || (rc && hasSetup(text))) return
+  const home = (await envGet($, 'HOME')) ?? ''
+  const file = rc ? (home ? rc.path.replace(home, '~') : rc.path) : "your shell's start file"
   const answer = await uiAsk($, 
     `Intelligent UI draws answers as pictures, but in iTerm2 Claude Code needs CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 when it starts. Add one line to ${file} that sets it in iTerm2 only (not in tmux or screen)?`,
     { header: 'iui', options: ['Add the line', 'Not now', 'Never ask'] },
