@@ -17,7 +17,7 @@ import { fsExists, fsRead, uiCopy, uiResolve, uiToast } from './api'
 
 // FNV-1a over the parts, twice with different offsets: 16 hex digits.
 export function hashOf(parts: readonly (string | number)[]): string {
-  const s = parts.join('\u0000')
+  const s = parts.join('\u241f')
   let a = 0x811c9dc5
   let b = 0x050c5d1f
   for (let i = 0; i < s.length; i++) {

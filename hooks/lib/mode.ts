@@ -92,4 +92,4 @@ export function parseOsc11(text: string): Rgb | null {
 
 // Control characters shown as text (\e, \a, \xNN), for /iui probe.
 export const escapeControls = (text: string) =>
-  text.replace(/[\x00-\x1f\x7f]/g, c => (c === '\x1b' ? '\\e' : c === '\x07' ? '\\a' : `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`))
+  text.replace(/[\x00-\x1f\x7f]/g, c => (c.charCodeAt(0) === 27 ? '\\e' : c.charCodeAt(0) === 7 ? '\\a' : `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`))

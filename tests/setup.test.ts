@@ -58,7 +58,7 @@ test('a block of the other kind is replaced, not added next to the first', () =>
 })
 
 // An iTerm2 session on a Mac with the engine's pictures off and a zsh user.
-const iterm = (on: any, files: Record<string, string>, answer: string | null, o: { env?: Record<string, string>; stored?: Record<string, unknown> } = {}) => {
+const iterm = (on: any, files: Record<string, string>, answer: string | null, o: { env?: Record<string, string>; stored?: Record<string, unknown>; unreadable?: string } = {}) => {
   const store = new Map(Object.entries(o.stored ?? {}))
   on('store.get', async ($: any, e: any) => ({ value: store.get(e.key) }))
   on('store.set', async ($: any, e: any) => (store.set(e.key, e.value), { value: undefined }))
@@ -83,7 +83,7 @@ const iterm = (on: any, files: Record<string, string>, answer: string | null, o:
       ? { value: { exitCode: 0, stdout: '/tmp/mdp\nDarwin\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
       : next(e)
   })
-  on('fs.read', async ($: any, e: any, next: any) => (e.path in files ? { value: files[e.path] } : e.path.startsWith('/h/') ? { deny: 'no such file' } : next(e)))
+  on('fs.read', async ($: any, e: any, next: any) => (e.path === o.unreadable ? { deny: 'EACCES: permission denied' } : e.path in files ? { value: files[e.path] } : e.path.startsWith('/h/') ? { deny: 'no such file' } : next(e)))
   on('fs.exists', async ($: any, e: any, next: any) => (e.path.startsWith('/h/') ? { value: e.path in files } : next(e)))
   on('fs.write', async ($: any, e: any, next: any) => {
     if (!e.path.startsWith('/h/')) return next(e)
@@ -223,4 +223,36 @@ test('a yes with a shell it does not know changes no file; the toast points to t
   // The shell is not known: the question was asked, a yes changes no file.
   expect(files['/h/.zshrc']).toBe('')
   expect(toasts.filter(t => /transcript|tab/.test(t))).toEqual(['See the transcript for the setup.'])
+})
+
+// A start file that exists but whose read fails (over 4 MiB, EACCES, an I/O error).
+const unreadable = (on: any, files: Record<string, string>, answer: string | null, o: Parameters<typeof iterm>[3] = {}) =>
+  iterm(on, files, answer, { ...o, unreadable: '/h/.zshrc' })
+
+test('/iui setup does not replace a start file whose read fails', async ($, on) => {
+  const files: Record<string, string> = { '/h/.zshrc': 'export PATH=/important:$PATH\n' }
+  unreadable(on, files, 'Not now', { stored: { setup: 'never' } })
+  const ran = await $.command.run({ command: 'iui', args: 'setup' } as any)
+  expect(ran.text).toContain('could not read /h/.zshrc')
+  expect(ran.text).toContain('changed no file')
+  expect(ran.text).toContain('export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1')
+  expect(files['/h/.zshrc']).toBe('export PATH=/important:$PATH\n')
+})
+
+test('/iui setup remove does not write a start file whose read fails', async ($, on) => {
+  const files: Record<string, string> = { '/h/.zshrc': `${setupBlock('sh')}export A=1\n` }
+  unreadable(on, files, 'Not now', { stored: { setup: 'never' } })
+  const ran = await $.command.run({ command: 'iui', args: 'setup remove' } as any)
+  expect(ran.text).toContain('could not read /h/.zshrc')
+  expect(files['/h/.zshrc']).toBe(`${setupBlock('sh')}export A=1\n`)
+})
+
+test('a yes to the question does not write a start file whose read fails', async ($, on) => {
+  const files: Record<string, string> = { '/h/.zshrc': 'export A=1\n' }
+  const { asked, clock } = unreadable(on, files, 'Add the line')
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await clock.settle()
+  // The file cannot be checked, so the question is not asked at all.
+  expect(asked.length).toBe(0)
+  expect(files['/h/.zshrc']).toBe('export A=1\n')
 })
