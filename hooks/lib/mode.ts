@@ -90,17 +90,21 @@ export function parseOsc11(text: string): Rgb | null {
   return { r: part(m[1]!), g: part(m[2]!), b: part(m[3]!) }
 }
 
-// Under herdr, the OSC 11 answer (the background of the terminal in front)
-// does not always reach the mod (Claude Code reads it first). A poll with no
-// answer keeps the last answer's mode until OSC11_MISSES polls in a row have
-// none; then the other sources count. `last`: the answer kept and the misses
-// in a row since it (null: none kept).
-export const OSC11_MISSES = 3
-export type Osc11Kept = { seen: HostMode; misses: number } | null
-export function keptOsc11(last: Osc11Kept, answer: HostMode | null): { kept: Osc11Kept; use: HostMode | null } {
-  if (answer) return { kept: { seen: answer, misses: 0 }, use: answer }
-  if (last && last.misses + 1 < OSC11_MISSES) return { kept: { seen: last.seen, misses: last.misses + 1 }, use: last.seen }
-  return { kept: null, use: null }
+// Under herdr, the OSC 11 answer (the background of the terminal in front).
+// The probe reads the tty that Claude Code reads, so it runs only at the
+// start and for a new herdr client, at most OSC11_TRIES times (an answer
+// can go to Claude Code). `answer`: a probe's mode (undefined: no probe this
+// time); `base`: the mode of the other sources now. The answer stays while
+// those give the mode they gave when it came (null: not known, no change);
+// a change there (the OS, the terminal's config) wins.
+export const OSC11_TRIES = 3
+export type Osc11Kept = { seen: HostMode; base: IuiTheme | null } | null
+export function keptOsc11(last: Osc11Kept, base: HostMode | null, answer?: HostMode | null): { kept: Osc11Kept; use: HostMode | null } {
+  if (answer) return { kept: { seen: answer, base: base?.mode ?? null }, use: answer }
+  if (!last) return { kept: null, use: base }
+  if (!base) return { kept: last, use: last.seen }
+  if (last.base === null) return { kept: { seen: last.seen, base: base.mode }, use: last.seen }
+  return last.base === base.mode ? { kept: last, use: last.seen } : { kept: null, use: base }
 }
 
 // Control characters shown as text (\e, \a, \xNN), for /iui probe.

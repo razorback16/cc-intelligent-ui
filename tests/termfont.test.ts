@@ -551,6 +551,54 @@ fontTest('herdr: a terminal in front with no known client makes a full scan at t
   expect(await details($)).toContain('(in kitty, the terminal in front)')
 })
 
+// A detached pane (no client attached): no light check (nothing to read)
+// and no full scan each second, whatever app is in front; the full scan
+// runs each HERDR_SCAN_MS. An old scan with no `front` line is the same.
+for (const scan of ['front com.mitchellh.ghostty\n', '']) {
+  fontTest(`herdr detached (no client${scan ? '' : ', no front line'}): one full scan each 10 s, no check each second`, async ($, on) => {
+    let front = 'com.mitchellh.ghostty'
+    const w = world(on, {
+      isMac: true,
+      env: HERDR_SERVER_ENV,
+      families: ['Iosevka'],
+      run: argv => clientIs(() => scan)(argv) ?? tickIs(() => front)(argv) ?? shows('font-family = Iosevka\n')(argv),
+    })
+    await details($)
+    const scanned = scansOf(w)
+    const ticks = () => w.ran.filter(argv => argv[2] === HERDR_TICK_SH).length
+    await w.clock.advance(3000)
+    // Another terminal comes in front: still no scan before the 10 s one.
+    front = 'net.kovidgoyal.kitty'
+    await w.clock.advance(HERDR_SCAN_MS - 4000)
+    expect(scansOf(w)).toBe(scanned)
+    await w.clock.advance(1000)
+    expect(scansOf(w)).toBe(scanned + 1)
+    expect(ticks()).toBe(0)
+    expect(await details($)).toContain("(in Ghostty, from the server's start)")
+  })
+}
+
+// The client scan reads other processes' variables: only while the mod is on and pictures show.
+pollTest('herdr, the mod stored off: no client scan at the start; /iui on scans', async ($, on) => {
+  const w = world(on, { isMac: true, env: HERDR_SERVER_ENV, families: ['Iosevka'], stored: { enabled: false }, run: argv => clientIs(() => ghosttyClient)(argv) ?? tickIs(() => null)(argv) ?? shows('font-family = Iosevka\n')(argv) })
+  expect(await details($)).toContain("(in Ghostty, from the server's start)")
+  await w.clock.advance(5000)
+  expect(scansOf(w)).toBe(0)
+  await $.command.run({ command: 'iui', args: 'on' } as any)
+  await w.clock.advance(1000)
+  expect(scansOf(w)).toBe(1)
+  expect(await details($)).toContain('(in Ghostty, the client you used last)')
+})
+
+pollTest('herdr with pictures off (setup not done): no client scan', async ($, on) => {
+  const { CLAUDE_CODE_FORCE_TERMINAL_IMAGES: _, ...env } = HERDR_SERVER_ENV
+  on('tool.call', { tool: 'AskUserQuestion' }, async () => ({ deny: 'dismissed' }))
+  const w = world(on, { isMac: true, env, families: ['Iosevka'], run: argv => clientIs(() => ghosttyClient)(argv) ?? tickIs(() => null)(argv) ?? shows('font-family = Iosevka\n')(argv) })
+  await details($)
+  await w.clock.advance(5000)
+  expect(scansOf(w)).toBe(0)
+})
+
 const itermClient = 'pid 50400\natime 30\ntty ttys013\ncmd herdr\napp /Applications/iTerm.app/Contents/MacOS/iTerm2\nenv\nherdr TERM=xterm-256color TERM_PROGRAM=iTerm.app\n'
 
 fontTest('herdr: a change of client to iTerm2 and back turns flip mode on and off, and redraws even with the same font', async ($, on) => {

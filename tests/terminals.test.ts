@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, envOfText, ghosttyBackgroundOf, ghosttyHasColors, ghosttyThemesOf, ghosttyValueOf,
-  clientFrontKindOf, frontKindOf, herdrClientChanged, herdrClientOf, herdrClientsOf, herdrHostOf, herdrText, herdrTickOf, herdrTickPick, pickHerdrClient, ttyNameOf, type HerdrClient, isHerdrIn, isItermIn, jsoncOf, keptOsc11, needsSetup, OSC11_MISSES, outerKindOf, type HostMode,
+  clientFrontKindOf, frontKindOf, herdrClientChanged, herdrClientOf, herdrClientsOf, herdrHostOf, herdrText, herdrTickOf, herdrTickPick, pickHerdrClient, ttyNameOf, type HerdrClient, isHerdrIn, isItermIn, jsoncOf, keptOsc11, needsSetup, OSC11_TRIES, outerKindOf, CLIENT_NAMES, HERDR_CLIENT_SH, type HostMode,
   KITTY_DEFAULT_BG, kittyAutoFileOf, kittyBackgroundOf, kittyConfigDirsOf, kittyEntriesOf, kittyFontOf, kittyIncludePath, kittyLinesOf,
   kittySchemeOfGnome, kittyValueOf,
   RIO_DEFAULT_BG, RIO_DEFAULT_FONT, rioBackgroundOf, rioConfigDirOf, rioFontOf, rioForcedOf, rioThemeNamesOf, rioThemePath, tomlStringsOf,
@@ -362,22 +362,37 @@ test('a change of herdr client: another terminal, profile or config counts; anot
   expect(herdrClientChanged(ghostty, { ...ghostty, env: { ...ghostty.env, COLORFGBG: '0;15' } })).toBe(true)
 })
 
-test("herdr's OSC 11: a missed answer keeps the last one until OSC11_MISSES polls in a row miss", () => {
-  expect(OSC11_MISSES).toBe(3)
+test("herdr's OSC 11: the answer stays while the other sources give the mode they gave when it came; a change there wins", () => {
+  expect(OSC11_TRIES).toBe(3)
   const light: HostMode = { mode: 'light', source: 'herdr' }
   const dark: HostMode = { mode: 'dark', source: 'herdr' }
+  const ghosttyDark: HostMode = { mode: 'dark', source: 'Ghostty' }
+  const ghosttyLight: HostMode = { mode: 'light', source: 'Ghostty' }
+  // No answer kept: the other sources (or none).
   expect(keptOsc11(null, null)).toEqual({ kept: null, use: null })
-  let step = keptOsc11(null, light)
-  expect(step).toEqual({ kept: { seen: light, misses: 0 }, use: light })
-  step = keptOsc11(step.kept, null)
-  expect(step).toEqual({ kept: { seen: light, misses: 1 }, use: light })
-  step = keptOsc11(step.kept, null)
-  expect(step).toEqual({ kept: { seen: light, misses: 2 }, use: light })
-  // The third miss in a row: the other sources count.
-  expect(keptOsc11(step.kept, null)).toEqual({ kept: null, use: null })
-  // An answer starts again from 0.
-  step = keptOsc11(keptOsc11(step.kept, dark).kept, null)
-  expect(step).toEqual({ kept: { seen: dark, misses: 1 }, use: dark })
+  expect(keptOsc11(null, ghosttyDark)).toEqual({ kept: null, use: ghosttyDark })
+  expect(keptOsc11(null, ghosttyDark, null)).toEqual({ kept: null, use: ghosttyDark })
+  // An answer wins over the config, and is kept with the config's mode then.
+  let step = keptOsc11(null, ghosttyDark, light)
+  expect(step).toEqual({ kept: { seen: light, base: 'dark' }, use: light })
+  // Reads with no probe: the config gives the same mode, so the answer stays.
+  step = keptOsc11(step.kept, ghosttyDark)
+  expect(step).toEqual({ kept: { seen: light, base: 'dark' }, use: light })
+  // A missed probe or a failed read changes nothing.
+  expect(keptOsc11(step.kept, ghosttyDark, null).use).toBe(light)
+  expect(keptOsc11(step.kept, null).use).toBe(light)
+  // The config (or the OS) changes: it wins, and the answer is dropped.
+  expect(keptOsc11(step.kept, ghosttyLight)).toEqual({ kept: null, use: ghosttyLight })
+  // An answer with no other source: the first mode read later is its reference.
+  step = keptOsc11(null, null, dark)
+  expect(step).toEqual({ kept: { seen: dark, base: null }, use: dark })
+  step = keptOsc11(step.kept, ghosttyLight)
+  expect(step).toEqual({ kept: { seen: dark, base: 'light' }, use: dark })
+  expect(keptOsc11(step.kept, ghosttyDark).use).toBe(ghosttyDark)
+})
+
+test("herdr's client scan prints of each client's variables only CLIENT_NAMES (the filter is in the shell)", () => {
+  expect(HERDR_CLIENT_SH).toContain(`e='${CLIENT_NAMES.join('|')}'`)
 })
 
 test('/iui setup is offered in iTerm2 on a Mac and in herdr (macOS or Linux), with pictures off, not in ssh, tmux, screen or a background session', () => {
@@ -563,7 +578,9 @@ test("herdr's light check: the pick on the clients of the last scan, else a full
   expect(herdrTickPick({ ...base, scanFront: null, tick: tickOf(null, { ttys012: 50, ttys013: 40 }) })).toBeNull()
   // A tty named with /dev/ (an older scan) is found too.
   expect(herdrTickPick({ ...base, clients: [{ ...kitty, tty: '/dev/ttys021' }], was: kitty, scanFront: null, tick: tickOf(null, { ttys021: 9 }) })?.pick?.client.atime).toBe(9)
-  // No client at the scan: nothing to follow, and no scan before HERDR_SCAN_MS (unless a new terminal is in front).
+  // No client at the scan (a detached pane): nothing to follow, and no scan before HERDR_SCAN_MS, whatever app is in front.
   expect(herdrTickPick({ clients: [], was: null, scanFront: null, ageMs: 1000, tick: tickOf(null, {}) })).toEqual({ clients: [], pick: null })
-  expect(herdrTickPick({ clients: [], was: null, scanFront: null, ageMs: 1000, tick: tickOf('com.mitchellh.ghostty', {}) })).toBeNull()
+  expect(herdrTickPick({ clients: [], was: null, scanFront: null, ageMs: 1000, tick: tickOf('com.mitchellh.ghostty', {}) })).toEqual({ clients: [], pick: null })
+  expect(herdrTickPick({ clients: [], was: null, scanFront: 'com.apple.Safari', ageMs: 1000, tick: tickOf('net.kovidgoyal.kitty', {}) })).toEqual({ clients: [], pick: null })
+  expect(herdrTickPick({ clients: [], was: null, scanFront: null, ageMs: HERDR_SCAN_MS, tick: tickOf(null, {}) })).toBeNull()
 })

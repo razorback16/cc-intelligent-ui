@@ -7,7 +7,7 @@ import type { IuiTheme } from '../../types'
 import { CLIP_WAKE_MS, HERDR_POLL_MS, HERDR_SCAN_MS, HOST_CHECK_MS, HOST_POLL_MS, MODES, OSC11_QUIET_MS } from './settings'
 import { S } from './state'
 import { beginEpoch } from './epoch'
-import { keptOsc11, luminanceOf, modeOfColorFgBg, modeOfLuminance, modeOfMacAppearance, parseOsc11, resolveMode, schemeOfPortal, type HostMode } from './mode'
+import { keptOsc11, luminanceOf, OSC11_TRIES, modeOfColorFgBg, modeOfLuminance, modeOfMacAppearance, parseOsc11, resolveMode, schemeOfPortal, type HostMode } from './mode'
 import {
   cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, familyOfFc, GHOSTTY_DEFAULT_FONT, ghosttyBackgroundOf, ghosttyFontsOf, ghosttyHasColors,
   ghosttyThemePaths, ghosttyThemesOf,
@@ -204,14 +204,20 @@ export const HEADERS_SH = `for f in "$@"; do head -c 24 "$f" | od -An -v -tx1; e
 // keeps the clients whose socket peer is one of this server's sockets (no
 // lsof, or no peer column as on Linux: all stay). On macOS it prints first
 // `front` and the bundle id of the app in front (lsappinfo; no line when
-// that can't be read). Then for each client: `pid`, `atime` (its tty's
-// access time, a key read there; macOS: with a fraction), `tty`, `cmd` (its
-// command) and `app` (its nearest ancestor with no tty: the terminal app)
-// lines, then `env` and the client's variables (Linux:
-// /proc/<pid>/environ, NUL-separated; macOS: `ps eww`, its command then the
-// variables). pickHerdrClient chooses one. Nothing (exit 0) when none is found.
+// that can't be read), also when no client is found. Then for each client:
+// `pid`, `atime` (its tty's access time, a key read there; macOS: with a
+// fraction), `tty`, `cmd` (its command) and `app` (its nearest ancestor
+// with no tty: the terminal app) lines, then `env` and of the client's
+// variables only CLIENT_NAMES (Linux: from /proc/<pid>/environ,
+// NUL-separated; macOS: from `ps eww`, its command then the variables, cut
+// as envOfText does). pickHerdrClient chooses one.
 export const HERDR_CLIENT_SH = `s=$$
 u=$(uname -s)
+e='COLORFGBG|GHOSTTY_BIN_DIR|GHOSTTY_RESOURCES_DIR|ITERM_PROFILE|KITTY_CONFIG_DIRECTORY|RIO_CONFIG_HOME|CMUX_SOCKET_PATH|CMUX_SURFACE_ID|CMUX_WORKSPACE_ID|ITERM_SESSION_ID|KITTY_INSTALLATION_DIR|KITTY_PID|KITTY_WINDOW_ID|LC_TERMINAL|TERM|TERM_PROGRAM'
+if [ "$u" = Darwin ] && command -v lsappinfo >/dev/null 2>&1; then
+  f=$(lsappinfo info -only bundleid "$(lsappinfo front 2>/dev/null)" 2>/dev/null | sed -n 's/^"CFBundleIdentifier"="\\(.*\\)"$/\\1/p')
+  [ -n "$f" ] && printf 'front %s\\n' "$f"
+fi
 case $u in
   Darwin|*BSD) t=$(ps -A -o pid= -o ppid= -o uid= -o tdev= -o command= 2>/dev/null) || exit 0
     f='%Fa'; case $(stat -f %Fa /dev/null 2>/dev/null) in [0-9]*.[0-9]*) ;; *) f='%a' ;; esac
@@ -241,13 +247,14 @@ if [ "\${n:-0}" -gt 1 ]; then
     case $k in *peers*) l=$({ printf '%s\\n@\\n' "$k"; printf '%s\\n' "$l"; } | awk -F '\\t' 'f == 0 { if ($0 == "@") f = 1; else m[$0] = 1; next } $3 in m') ;; esac
   fi
 fi
-if [ "$u" = Darwin ] && command -v lsappinfo >/dev/null 2>&1; then
-  f=$(lsappinfo info -only bundleid "$(lsappinfo front 2>/dev/null)" 2>/dev/null | sed -n 's/^"CFBundleIdentifier"="\\(.*\\)"$/\\1/p')
-  [ -n "$f" ] && printf 'front %s\\n' "$f"
-fi
 printf '%s\\n' "$l" | cut -f3 | while read -r p; do
   printf '%s\\n' "$l" | awk -F '\\t' -v p="$p" '$3 == p { printf "pid %s\\natime %s\\ntty %s\\ncmd %s\\napp %s\\nenv\\n", $3, $2, $4, $5, $6 }'
-  if [ -r "/proc/$p/environ" ]; then cat "/proc/$p/environ"; echo; else ps eww -o command= -p "$p"; fi
+  if [ -r "/proc/$p/environ" ]; then tr '\\0' '\\n' < "/proc/$p/environ" | grep -E "^($e)=" | tr '\\n' '\\0'; echo
+  else ps eww -o command= -p "$p" | awk -v c="$(printf '%s\\n' "$l" | awk -F '\\t' -v p="$p" '$3 == p { print $5 }')" -v k="^($e)=" '
+    { x = $0; if (x == c || index(x, c " ") == 1) x = substr(x, length(c) + 1); else if (match(x, / [A-Za-z_][A-Za-z0-9_]*=/)) x = substr(x, RSTART); else x = ""
+      o = c; while (x != "") { x = substr(x, 2); w = x; x = ""; if (match(w, / [A-Za-z_][A-Za-z0-9_]*=/)) { x = substr(w, RSTART); w = substr(w, 1, RSTART - 1) }
+        if (w ~ k) o = o " " w }
+      print o }'; fi
 done
 exit 0`
 // herdr's light check, each HERDR_POLL_MS: argument 1 is the OS (uname -s),
@@ -456,8 +463,8 @@ export async function checkHerdrClient($: EngineInterface): Promise<boolean> {
   let tick: HerdrTick | null = null
   if (ageMs !== null && ageMs < HERDR_SCAN_MS) {
     const ttys = S.herdrClients.map(c => `/dev/${ttyNameOf(c.tty)}`)
-    // Nothing to read (no client, no app in front off macOS, as a remote pane): no process.
-    const got = ttys.length || S.hostOs === 'Darwin' ? await exec($, ['sh', '-c', HERDR_TICK_SH, 'sh', S.hostOs, ...ttys], { timeoutMs: HOST_CHECK_MS }).catch(() => null) : { exitCode: 0, stdout: '' }
+    // No client (a detached or remote pane): nothing to read, no process.
+    const got = ttys.length ? await exec($, ['sh', '-c', HERDR_TICK_SH, 'sh', S.hostOs, ...ttys], { timeoutMs: HOST_CHECK_MS }).catch(() => null) : { exitCode: 0, stdout: '' }
     tick = got?.exitCode === 0 ? herdrTickOf(got.stdout) : null
   }
   const light = herdrTickPick({ clients: S.herdrClients, tick, was: S.herdrClient, scanFront: S.herdrScanFront, ageMs })
@@ -517,24 +524,42 @@ async function configFontOf($: EngineInterface, isMac: boolean): Promise<string>
 }
 
 // The mode for auto now, or null when nothing can be read (keep the last
-// one): 1. the terminal's OSC 11 answer (off, see USE_OSC11; on under herdr,
-// local or remote: its pane answers with the background of the terminal in
-// front, and a missed answer keeps the last one a while, keptOsc11); 2. the
-// terminal's own settings (iTerm2's profile, Ghostty's, kitty's or Rio's
-// config); 3. COLORFGBG at start; 4. the
-// OS appearance; 5. dark (resolveMode). The terminal comes before the OS: a
-// dark terminal on a light Mac is dark. Over ssh, only COLORFGBG (when ssh
-// sends it): the configs and the OS here are the remote computer's.
-export async function readHostMode($: EngineInterface): Promise<HostMode | null> {
+// one): 0. under herdr, local or remote, its pane's OSC 11 answer (the
+// background of the terminal in front), asked only with `ask` (osc11Due)
+// and kept while the sources below do not change (keptOsc11); 1. the
+// terminal's OSC 11 answer (off, see USE_OSC11); 2. the terminal's own
+// settings (iTerm2's profile, Ghostty's, kitty's or Rio's config); 3.
+// COLORFGBG at start; 4. the OS appearance; 5. dark (resolveMode). The
+// terminal comes before the OS: a dark terminal on a light Mac is dark.
+// Over ssh, only COLORFGBG (when ssh sends it): the configs and the OS
+// here are the remote computer's.
+export async function readHostMode($: EngineInterface, ask = false): Promise<HostMode | null> {
+  if (!S.isHerdr) return readOwnMode($)
+  let answer: HostMode | null | undefined
+  if (ask) {
+    S.osc11Tries = Math.max(0, S.osc11Tries - 1)
+    const bg = parseOsc11((await probeOsc11($).catch(() => null))?.reply ?? '')
+    answer = bg ? { mode: modeOfLuminance(luminanceOf(bg)), source: 'herdr', detail: 'OSC 11 background of the terminal in front' } : null
+    if (answer) S.osc11Tries = 0
+  }
+  const { kept, use } = keptOsc11(S.osc11Kept, await readOwnMode($).catch(() => null), answer)
+  S.osc11Kept = kept
+  return use
+}
+
+// Under herdr, an OSC 11 probe is due: tries are left (the start or a new
+// client, with auto), the mod draws herdr pictures and is on, and no key
+// came in the prompt box for OSC11_QUIET_MS.
+export async function osc11Due($: EngineInterface, off = S.isOff): Promise<boolean> {
+  if (S.osc11Tries <= 0 || !S.isHerdr || !S.herdrDraws || off || S.setting !== 'auto') return false
+  return (await nowMs($).catch(() => Date.now())) - S.keyAt >= OSC11_QUIET_MS
+}
+
+// Sources 1 to 5 of readHostMode.
+async function readOwnMode($: EngineInterface): Promise<HostMode | null> {
   if (USE_OSC11) {
     const bg = parseOsc11((await probeOsc11($))?.reply ?? '')
     if (bg) return { mode: modeOfLuminance(luminanceOf(bg)), source: 'terminal', detail: 'OSC 11 background' }
-  } else if (S.isHerdr) {
-    const bg = parseOsc11((await probeOsc11($).catch(() => null))?.reply ?? '')
-    const answer: HostMode | null = bg ? { mode: modeOfLuminance(luminanceOf(bg)), source: 'herdr', detail: 'OSC 11 background of the terminal in front' } : null
-    const { kept, use } = keptOsc11(S.osc11Kept, answer)
-    S.osc11Kept = kept
-    if (use) return use
   }
   if (S.isRemote) {
     const mode = modeOfColorFgBg(S.colorFgBg)
@@ -758,7 +783,8 @@ async function readLinuxScheme($: EngineInterface): Promise<LinuxScheme | null> 
 // are read again), then with auto the mode. A changed mode, font or flip
 // mode (isFlipHere: iTerm2 in or out) redraws. Under herdr the mode is read
 // each HOST_POLL_MS (every third poll), at once for another terminal, and
-// with `modeNow`.
+// with `modeNow`. No timed OSC 11 probe: only one that osc11Due allows
+// (the start or a new client), never for `modeNow` (a dialog can be open).
 export async function pollHost($: EngineInterface, modeNow = false) {
   const herdr = herdrPolled()
   if (S.checking || (S.setting !== 'auto' && !herdr)) return
@@ -767,13 +793,16 @@ export async function pollHost($: EngineInterface, modeNow = false) {
   const flipWas = isFlipHere()
   try {
     const moved = herdr && (await checkHerdrClient($).catch(() => false))
-    if (moved) await setOuter($)
-    const due = !herdr || modeNow || moved || ++S.hostTicks >= HOST_POLL_MS / HERDR_POLL_MS
-    // Under herdr a timed read asks the tty (OSC 11): not while the mod is off,
-    // nor just after a key in the prompt (it stays due: a later poll reads).
-    const asks = !S.isHerdr || modeNow || moved || (!S.isOff && (await nowMs($).catch(() => Date.now())) - S.keyAt >= OSC11_QUIET_MS)
-    if (due && asks) S.hostTicks = 0
-    if (S.setting === 'auto' && due && asks) S.host = (await readHostMode($).catch(() => null)) ?? S.host
+    if (moved) {
+      await setOuter($)
+      // The answer was the terminal of before: a new client is asked again.
+      S.osc11Kept = null
+      S.osc11Tries = S.setting === 'auto' ? OSC11_TRIES : 0
+    }
+    const ask = herdr && !modeNow && (await osc11Due($))
+    const due = !herdr || modeNow || moved || ask || ++S.hostTicks >= HOST_POLL_MS / HERDR_POLL_MS
+    if (due) S.hostTicks = 0
+    if (S.setting === 'auto' && due) S.host = (await readHostMode($, ask).catch(() => null)) ?? S.host
     if (moved) refonted = await refont($).catch(() => false)
   } finally {
     S.checking = false

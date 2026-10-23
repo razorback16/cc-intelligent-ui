@@ -186,7 +186,7 @@ export const S = {
   // none found, so the server's variables count) and how it was chosen, the
   // terminal it runs in ('' outside herdr or not known; setOuter), all set
   // in setUp and kept by the poll; and the last OSC 11 answer of its pane
-  // (keptOsc11).
+  // (keptOsc11) and the probes still allowed (OSC11_TRIES: the start or a new client).
   isHerdr: false,
   herdrVersion: '',
   herdrClient: null as HerdrClient | null,
@@ -199,6 +199,7 @@ export const S = {
   // Polls under herdr since the last mode read (it runs every HOST_POLL_MS).
   hostTicks: 0,
   osc11Kept: null as Osc11Kept,
+  osc11Tries: 0,
   // A font folder for Typst (TYPST_FONT_PATHS): the font a terminal carries
   // in its program (Ghostty's, Rio's), when it draws it. '' for none.
   fontPaths: '',
