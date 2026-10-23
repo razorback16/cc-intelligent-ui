@@ -14,71 +14,42 @@ Intelligent UI draws each answer from Claude as a typeset picture, with [Typst](
 
 ## Install
 
-In a shell, on macOS or Linux:
+On macOS or Linux:
 
 ```
 curl -fsSL https://intelligentui.art/install.sh | bash
 ```
 
-Then restart Claude Code, or type `/reload-plugins` in a session. To update, run the command again. You can [read the script](site/install.sh) before you run it.
+It installs Typst if needed, installs the mod and turns on auto-update. Then restart Claude Code. Run it again to update. [What the script does](docs/install.md#the-install-script).
 
-The script:
+**By hand:** install [Typst](https://typst.app) 0.15 (`brew install typst`), then in Claude Code type `/plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui`, and turn on auto-update in `/plugin`. [Install guide](docs/install.md).
 
-1. Checks for macOS or Linux (arm64 or x86_64) and Claude Code. If Claude Code is missing, it stops and changes nothing.
-2. Installs Typst 0.15.1 to `~/.local/bin` if you do not have Typst 0.15 or later. It downloads the official release from GitHub and checks its SHA-256. It never uses `sudo`.
-3. Installs or updates the mod from the `razorback16` marketplace, with the `claude plugin` commands.
-4. Turns on auto-update for the marketplace, so you always get new versions. If you turned it off before, it stays off.
-5. Adds the `/iui setup` line to your shell's start file, if iTerm2 or herdr is installed. These terminals need it to show pictures.
+Needs Claude Code 2.1.298 or later. Works best in fullscreen mode (`/tui fullscreen`).
 
-It shows each change and how to undo it, and keeps a backup of each file that it edits. To skip a step, set `IUI_NO_TYPST=1`, `IUI_NO_AUTO_UPDATE=1` or `IUI_NO_SHELL_SETUP=1`, for example `curl -fsSL https://intelligentui.art/install.sh | IUI_NO_AUTO_UPDATE=1 bash`. For the details and how to uninstall, refer to [The install script](docs/install.md#the-install-script).
+## Terminals
 
-### Install by hand
+| Terminal | Pictures |
+|---|---|
+| kitty 0.28+, Ghostty, cmux | Yes |
+| iTerm2 3.6+, herdr | Yes, after `/iui setup` (the install script does it) |
+| Rio 0.5.27+ | Yes, with `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` (not tested) |
+| ssh | Yes, from kitty or Ghostty |
+| Warp, WezTerm | Not yet (waiting on [warp#16312](https://github.com/warpdotdev/warp/pull/16312), [wezterm#7924](https://github.com/wezterm/wezterm/pull/7924)) |
+| tmux, screen, Terminal.app, Alacritty, VS Code, others | No: you see normal text |
 
-1. Install Typst 0.15 or later: `brew install typst` on macOS. On Linux, refer to [Install Typst on Linux](docs/install.md#install-typst-on-linux).
-2. In Claude Code, type:
-
-   ```
-   /plugin install cc-intelligent-ui --marketplace razorback16/cc-intelligent-ui
-   ```
-
-   It works at once, with no restart.
-3. Turn on auto-update: type `/plugin`, go to **Marketplaces**, select `razorback16`, then select **Enable auto-update**.
-4. In iTerm2 or herdr, answer yes when the mod asks to add its line to your shell's start file (or run `/iui setup`).
-
-### Fullscreen, updates and terminals
-
-Intelligent UI works best in fullscreen mode (recommended). To use it, run `/tui fullscreen` in Claude Code.
-
-For other ways to update, refer to [Update](docs/install.md#update). The mod also shows a notice when a new version is available (`/iui updates off` stops it).
-
-You need Claude Code 2.1.298 or later, [Typst](https://typst.app) 0.15, and macOS or Linux (X11 or Wayland). The pictures show only in some terminals:
-
-| Terminal | Pictures | What to do |
-|---|---|---|
-| kitty 0.28+, Ghostty, cmux (macOS) | Yes | Nothing |
-| iTerm2 3.6+ (macOS) | Yes | Run `/iui setup` one time |
-| herdr, in kitty, Ghostty or iTerm2 | Yes | Run `/iui setup` one time |
-| Rio 0.5.27+ | Yes (not tested) | Set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` |
-| ssh | Yes, from kitty or Ghostty | Refer to [Install](docs/install.md#terminals) |
-| tmux, screen | No | — |
-| Warp | Not yet | Support comes when [warpdotdev/warp#16312](https://github.com/warpdotdev/warp/pull/16312) is merged |
-| WezTerm | Not yet | Support comes when [wezterm/wezterm#7924](https://github.com/wezterm/wezterm/pull/7924) is merged |
-| Konsole, Terminal.app, Alacritty, VS Code, Windows Terminal, GNOME Terminal, others | No | — |
-
-In other terminals, the mod shows the normal text. Refer to [Install](docs/install.md#terminals) for all the details, and run `/iui details` to see why pictures do or do not show.
+`/iui details` tells you why pictures do or do not show. [All terminal details](docs/install.md#terminals).
 
 ![Claude explains why an API request is slow: a timing chart shows the DB query takes 310 of 450 ms, with Amdahl's law and a table of fixes, in a dark and a light terminal](outcomes/out/0-hero-2-latency.png)
 
-## Why
+## Features
 
-- **Rendered Markdown.** Headings, tables, task lists, block quotes and code with syntax colours, in your terminal's own font.
-- **LaTeX math.** Inline `$…$` and display `$$…$$` math, typeset.
-- **Live diagrams, charts and plots.** Claude writes Typst with CeTZ, cetz-plot and fletcher. The drawings use your theme's colours and work offline. For a complex drawing, Claude loads the bundled `intelligent-ui` skill, with the full API and a compile check.
-- **Images and files.** Images in an answer, images that Claude sends, Markdown files that Claude sends, and images that you paste show in the transcript. Images that you paste also show above the prompt box before you send. Refer to [Preview of pasted images](docs/usage.md#preview-of-pasted-images).
-- **Copy text from pictures.** In fullscreen mode, drag over a picture with the mouse, as you do over normal text. The mod highlights the selected text and copies it when you release the button. Refer to [Copy text from a picture](docs/usage.md#copy-text-from-a-picture).
-- **Links you can click.** The links, file paths and commands of an answer show in rows under its picture. A cmd+click on a link opens it. A click on a command copies it.
-- **Plans you can read.** In plan mode, the plan shows rendered, with an approve, edit or reject question under it.
-- **Themes that follow light and dark.** Claude Code's own colours by default, or VS Code's Markdown preview. You can make your own.
+- **Rendered Markdown:** headings, tables, task lists, quotes and highlighted code, in your terminal's font.
+- **LaTeX math:** inline and display, typeset.
+- **Diagrams, charts and plots:** Claude draws them live with Typst, in your theme's colours, offline.
+- **Images and files:** images in answers, images and Markdown files that Claude sends, and a preview of images you paste, above the prompt box.
+- **Copy from pictures:** in fullscreen, drag over a picture to select and copy its text. Click a link, path or command to copy it.
+- **Readable plans:** plan mode shows the plan rendered, with approve, edit and reject.
+- **Light and dark themes:** Claude Code's colours or VS Code's, or your own.
 
 ## See it
 
@@ -107,41 +78,22 @@ More in the [gallery](docs/gallery.md): plots, fractals and a tour of all the Ma
 
 | Command | What it does |
 |---|---|
-| `/iui` | Shows the state and a problem that keeps pictures away |
-| `/iui on` / `off` | Turns the pictures on or off |
-| `/iui theme <name>` | Changes the theme: `claude-code`, `vscode-modern`, `vscode` or your own |
-| `/iui size <80–200>` | Text size in percent of your terminal text |
-| `/iui grid on` / `off` | Puts each line of text on the terminal rows, so that a mouse selection covers the text (on by default) |
-| `/iui select on` / `off` | Claude Code 2.1.298+, fullscreen: the mod selects and copies picture text with the mouse (on by default) |
-| `/iui updates on` / `off` | Turns the daily check for a new version on or off (on by default) |
-| `/iui details` | Shows the terminal, font, mode and Typst that the mod found |
-| `/iui setup` | iTerm2 (macOS) and herdr: adds the shell line that turns pictures on |
-| `/iui grab` | Copies the text under your last mouse selection of pictures |
-| `/iui dump` | Shows how the mod read the last clipboard with picture cells (for a bug report) |
+| `/iui` | State, and what keeps pictures away |
+| `/iui on` / `off` | Pictures on or off |
+| `/iui theme <name>` | `claude-code`, `vscode-modern`, `vscode` or your own |
+| `/iui size <80–200>` | Text size, in percent |
+| `/iui setup` | Turns pictures on in iTerm2 and herdr |
+| `/iui grab` | Copies the text of your last selection of pictures |
 
 All commands are in [Usage](docs/usage.md).
 
-## Privacy and access
+## Privacy
 
-The mod sends nothing about you or your sessions anywhere.
-
-- **Network:** one GET request each day at most, to `raw.githubusercontent.com`, for the public `plugin.json` of this mod. It only tells you about a new version. `/iui updates off` stops it. It also stops when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_UPDATES` or `DISABLE_AUTOUPDATER` is set.
-- **Clipboard, read:** a small `perl` process watches the clipboard while the mod is on and has drawn a picture (not over ssh). On macOS it reads only the change counter; when the counter changes, the mod reads the text once with a short `perl` script (PerlObjCBridge). On Linux a notifier (`wl-paste --watch`, `clipnotify` or GTK 3 from `python3`) tells it of each change, and it then reads the text with `wl-paste`, `xclip` or GTK. `/iui grab` with no mouse selection also reads the clipboard once. The text is only checked for picture cells (then a toast names `/iui grab`); it is kept in memory only and sent nowhere (`/iui dump` writes the last clipboard with picture cells to `copy-debug.json` in the cache folder). A password manager's copy is never read: on macOS a copy with a concealed or transient type, on Linux a copy that offers the `x-kde-passwordManagerHint` target, and on Wayland also a copy marked sensitive. (On Wayland, `wl-paste --watch` hands each new copy to `cat`, which drops it.)
-- **Clipboard, written:** only at these times: when you release a picture selection, when you click a link, a file path, a command or a copy button in a picture, on `/iui grab`, when you press the command button in a link row (in fullscreen with `/iui select off`, where Claude Code gets the click), and when the mod changes a `$.ui.copy` that has picture cells to its text.
-- **Files:** a private cache folder in `$TMPDIR` (`cc-intelligent-ui-<uid>`, `/tmp` when `TMPDIR` is not set; mode 700, its folders deleted after 2 days). Each compile makes a folder of its own in it (the Typst root, see below) and deletes it after the compile. Also `~/.cache/cc-intelligent-ui/designs` (files deleted after 180 days) and `~/.cache/cc-intelligent-ui/fonts` (fonts copied out of a terminal app, such as Ghostty's JetBrains Mono; `$XDG_CACHE_HOME` in place of `~/.cache` when it is set). The previews of pasted images are made in the cache folder too, from the image files that Claude Code writes when you paste. `/iui setup` (iTerm2 on macOS, and herdr) changes your shell start file, only when you run it or agree to its question. The install script adds the same block when iTerm2 or herdr is there (`IUI_NO_SHELL_SETUP=1` stops it).
-- **Processes:** `typst`, the `perl` watcher, and short helper commands such as `perl`, `sh`, `osascript`, `defaults`, `plutil`, `fc-list` and `fc-match`. In herdr, only while the mod is on and pictures show (from the start), a check each second finds the herdr client that you use: `stat` of the clients' terminal devices (the time of the last key), and on macOS `lsappinfo` (the app in front); with no client attached, no check each second. Each 10 s, and when the check each second finds a change, a full check: `ps` (the list of processes), `lsof` (with more than one herdr server), and the variables of your own herdr clients (Linux: `/proc/<pid>/environ`; macOS: `ps eww`). The shell of this check keeps only `TERM`, `TERM_PROGRAM`, `COLORFGBG`, `LC_TERMINAL`, `ITERM_PROFILE`, `ITERM_SESSION_ID`, `GHOSTTY_BIN_DIR`, `GHOSTTY_RESOURCES_DIR`, `KITTY_CONFIG_DIRECTORY`, `KITTY_INSTALLATION_DIR`, `KITTY_PID`, `KITTY_WINDOW_ID`, `CMUX_SOCKET_PATH`, `CMUX_SURFACE_ID`, `CMUX_WORKSPACE_ID` and `RIO_CONFIG_HOME`; the mod (and other mods' hooks) get no other variable. It writes none of this anywhere. With the `auto` theme, a `perl` asks herdr's pane for its background (OSC 11) at the start and when you change to a different herdr client, not on a timer. On Linux also `wl-paste`, `xclip`, `clipnotify` or `python3 -I` (GTK 3; isolated, so it loads no code from the project folder) for the clipboard.
-- **Typst:** each compile of an answer or a plan runs with a narrow root: a new folder with the mod's template, the theme and the images that the text names. So the code in an answer cannot read other files on your computer. The skill's `check.sh` compiles the same way, and so does the preview of a pasted image (a folder with only its template and the pasted image).
+Nothing about you or your sessions leaves your computer. The mod makes one request a day at most, for its own public version number (`/iui updates off` stops it). It reads the clipboard only to help a copy or to find a pasted image path, skips password manager copies, and writes it only when you copy. Typst code in an answer cannot read your files. [Full details](docs/privacy.md).
 
 ## Docs
 
-- [Install](docs/install.md): requirements, terminal support and updates
-- [Usage](docs/usage.md): what it draws, the skill, commands, copy, plan approval
-- [Themes](docs/themes.md): built-in themes and your own
-- [How it works](docs/how-it-works.md): the render steps and light or dark mode
-- [Limitations](docs/limitations.md): copy, search, timing and other limits
-- [Development](docs/development.md): build, test and module layout
-- [Gallery](docs/gallery.md): all the sample answers
-- [Changelog](CHANGELOG.md): what changed in each release
+[Install](docs/install.md) · [Usage](docs/usage.md) · [Themes](docs/themes.md) · [How it works](docs/how-it-works.md) · [Limitations](docs/limitations.md) · [Privacy](docs/privacy.md) · [Development](docs/development.md) · [Gallery](docs/gallery.md) · [Changelog](CHANGELOG.md)
 
 ## Disclaimer
 
