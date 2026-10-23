@@ -17,10 +17,12 @@ import { clockAfter, envGet, fsExists, fsList, fsRead, fsWrite, processRun, spaw
 // The typst command and its environment. Network off (see NO_NETWORK) and a
 // package cache of our own, so only the vendored packages load, and the
 // fonts of S.fontPaths (Ghostty's own font). `fonts`:
-// the lean font folder (fonts.ts) in place of all system fonts.
+// the lean font folder (fonts.ts) in place of all system fonts. `run`: the
+// root that STAGE_SH made, so the answer's code reads no other file.
 export function typstCall(o: {
   typst: string
   root: string
+  run: string
   cache: string
   ppi: number
   inputs: Readonly<Record<string, string | number>>
@@ -29,17 +31,143 @@ export function typstCall(o: {
 }): { argv: string[]; env: Record<string, string> } {
   const argv = [
     o.typst, 'compile',
-    '--root', '/',
+    '--root', o.run,
     '--package-path', `${o.root}/render/packages`,
     ...fontArgs(o.fonts),
     '--format', 'png',
     '--diagnostic-format', 'short',
     '--ppi', o.ppi.toFixed(4),
     ...Object.entries(o.inputs).flatMap(([k, v]) => ['--input', `${k}=${v}`]),
-    `${o.root}/render/md.typ`,
+    templateIn(o.run, o.root),
     o.out,
   ]
   return { argv, env: noNetworkEnv(o.cache) }
+}
+
+// ---- The root of a compile: only the files the mod puts there -------------
+// md.typ evals the answer's ```typst blocks (and math), and Typst lets code
+// read any file under its root. So a compile and a probe of answer text run
+// with a root of their own: a new private folder in the key folder, with
+// each file the template needs at its own path (so the inputs and doc.json
+// keep their paths). STAGE_SH makes it, from $1 the folder, $2 the plugin
+// root, $3 the doc JSON's path (its text on stdin), $4 the theme folder and
+// then the allowed images (all paths as rootPathOf gives them):
+// - render/: md.typ copied (Typst wants its main file inside the root) and
+//   links to the rest of the plugin's render folder;
+// - the doc JSON, a file of its own (a compile of the same key at the same
+//   time has its own folder);
+// - a link to the theme folder (a built-in one is in render/ already);
+// - a link to each image (and each image its SVG links to) that is a file
+//   with an image name, also after its links (so a link named .png to
+//   another file is not one). An image under a linked folder is there
+//   already, and no folder is made through a link.
+// Typst follows the links; any other path is not found, and `..` can not
+// leave the root.
+export const STAGE_SH = [
+  'umask 077',
+  'r=$1 p=$2 d=$3 t=$4',
+  'shift 4',
+  'mkdir "$r" && mkdir -p "$r$p/render" "$r${d%/*}" || exit 1',
+  'ln -s "$p"/render/* "$r$p/render/" && rm "$r$p/render/md.typ" && cp "$p/render/md.typ" "$r$p/render/md.typ" && cat > "$r$d" || exit 1',
+  'case $t in',
+  '  "$p/render/"*) ;;',
+  '  /?*) if [ -d "$t" ] && [ ! -e "$r$t" ]; then mkdir -p "$r${t%/*}" && ln -s "$t" "$r$t" || exit 1; fi ;;',
+  'esac',
+  'for f; do',
+  '  case $f in',
+  '    *//*|*/./*|*/../*|*/.|*/..|"$p/render/"*|"$t/"*) continue ;;',
+  '    /?*) ;;',
+  '    *) continue ;;',
+  '  esac',
+  '  g=$f n=0',
+  '  while [ -L "$g" ] && [ $n -lt 40 ]; do',
+  '    l=$(readlink "$g") || break',
+  '    case $l in /*) g=$l ;; *) g=${g%/*}/$l ;; esac',
+  '    n=$((n + 1))',
+  '  done',
+  '  [ -L "$g" ] && continue',
+  '  case $(printf %s "${g##*/}" | tr A-Z a-z) in',
+  '    *.png|*.jpg|*.jpeg|*.gif|*.svg|*.webp) [ -f "$g" ] && [ ! -e "$r$f" ] && mkdir -p "$r${f%/*}" && ln -s "$g" "$r$f" ;;',
+  '  esac',
+  'done',
+  'exit 0',
+].join('\n')
+
+// A path as Typst reads it in its root: `.`, `..` and empty parts resolved
+// by name; null when `..` goes above the root.
+export function rootPathOf(path: string): string | null {
+  const parts: string[] = []
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue
+    if (part !== '..') parts.push(part)
+    else if (parts.pop() === undefined) return null
+  }
+  return `/${parts.join('/')}`
+}
+
+// The template's main file in a run folder.
+export const templateIn = (run: string, root: string) => `${run}${rootPathOf(root) ?? ''}/render/md.typ`
+
+// The doc JSON the template reads: the base folder, the segments and the
+// allow-list of images (path and full path of each, existingImages).
+export type Doc = { base: string; segments: readonly string[]; images: readonly string[] }
+
+// The full paths of a doc's allowed images (the odd entries), as in the root.
+export const imageFullsOf = (images: readonly string[]) =>
+  images.filter((_, i) => i % 2 === 1).map(rootPathOf).filter((p): p is string => !!p)
+
+// The arguments of STAGE_SH for a run folder: the images by their full
+// paths (and the images their SVGs link to), each once.
+export function stageArgs(run: string, root: string, docPath: string, themeDir: string, images: readonly string[], linked: readonly string[] = []): string[] {
+  return [run, rootPathOf(root) ?? '', rootPathOf(docPath) ?? '', rootPathOf(themeDir) ?? '', ...new Set([...imageFullsOf(images), ...linked])]
+}
+
+const IMAGE_NAME = /\.(png|jpe?g|gif|svg|webp)$/i
+
+// The images an SVG at `full` links to by a relative path (Typst loads them
+// from the SVG's folder in the root; it refuses absolute ones), as paths in
+// the root.
+export function svgLinksOf(svg: string, full: string): string[] {
+  const dir = full.replace(/\/[^/]*$/, '')
+  const found: string[] = []
+  for (const m of svg.matchAll(/\bhref\s*=\s*(["'])([^"']*)\1/g)) {
+    const href = m[2]!.trim()
+    if (!href || href.startsWith('#') || href.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(href)) continue
+    const path = rootPathOf(`${dir}/${href}`)
+    if (path && IMAGE_NAME.test(path)) found.push(path)
+  }
+  return found
+}
+
+// The images the allowed SVGs of `images` link to.
+async function svgLinks($: EngineInterface, images: readonly string[]): Promise<string[]> {
+  const found: string[] = []
+  for (const full of new Set(imageFullsOf(images).filter(p => /\.svg$/i.test(p)))) {
+    const svg = await fsRead($, full).catch(() => '')
+    if (typeof svg === 'string') found.push(...svgLinksOf(svg, full))
+  }
+  return found
+}
+
+let runs = 0
+// A new run folder's name in key folder `dir` (unique in this load, and
+// random across loads and sessions).
+const runFolderIn = (dir: string) => `${dir}/r-${(++runs).toString(36)}${Math.random().toString(36).slice(2, 10)}`
+
+// Runs `use` with a root of its own for `doc` (STAGE_SH), then removes it.
+// When the root can not be made, `use` still runs: Typst then finds no
+// template there and fails (never a wider root); the folder is left to the
+// 2-day sweep (it may be another run's, when its name was taken).
+export async function inRoot<T>($: EngineInterface, job: Job, dir: string, doc: Doc, use: (run: string) => Promise<T>): Promise<T> {
+  const run = runFolderIn(dir)
+  const args = stageArgs(run, job.env.root, `${dir}/doc.json`, job.themeDir, doc.images, await svgLinks($, doc.images))
+  const made = await processRun($, ['sh', '-c', STAGE_SH, 'sh', ...args], { stdin: JSON.stringify(doc), timeoutMs: 10000 }).catch(() => null)
+  if (made?.exitCode !== 0) await logDebug($, job.env.cache, `the root ${run} could not be made: ${made?.stderr ?? 'sh did not run'}`)
+  try {
+    return await use(run)
+  } finally {
+    if (made?.exitCode === 0) void Promise.resolve(processRun($, ['rm', '-rf', run], { timeoutMs: 10000 })).catch(() => undefined)
+  }
 }
 
 // The arguments that load only the fonts of a lean folder (and Typst's own).
@@ -49,7 +177,8 @@ export const fontArgs = (fonts?: string) => (fonts ? ['--ignore-system-fonts', '
 // that fits `box` (in pixels), never larger than its own pixel size: at 72
 // ppi, 1 pt is 1 pixel. For a PDF, `page` is the page (it fits the box,
 // larger too), and the errors are in the human format: only it has the
-// hint with the page count of a page that does not exist.
+// hint with the page count of a page that does not exist. It runs no
+// answer code, so it keeps the root at / (it only reads the file).
 export function convertCall(o: {
   typst: string
   root: string
@@ -366,28 +495,29 @@ async function runFonts($: EngineInterface, job: Job, fonts: string, run: (fonts
   return run()
 }
 
-export async function runTypst($: EngineInterface, job: Job, segments: readonly string[], dir: string, tag: string, isSafe: boolean, signal?: AbortSignal): Promise<Ran> {
-  const { inputs, ppi } = typstInputs(job, segments, dir, isSafe)
-  return runFonts($, job, await leanFor($, job, segments), fonts => {
-    const { argv, env: vars } = typstCall({ typst: job.env.typst!, root: job.env.root, cache: job.env.cache, ppi, inputs, out: `${dir}/${tag}-{0p}.png`, ...(fonts ? { fonts } : {}) })
+export async function runTypst($: EngineInterface, job: Job, doc: Doc, dir: string, tag: string, isSafe: boolean, signal?: AbortSignal): Promise<Ran> {
+  const { inputs, ppi } = typstInputs(job, doc.segments, dir, isSafe)
+  const fonts = await leanFor($, job, doc.segments)
+  return inRoot($, job, dir, doc, run => runFonts($, job, fonts, fonts => {
+    const { argv, env: vars } = typstCall({ typst: job.env.typst!, root: job.env.root, run, cache: job.env.cache, ppi, inputs, out: `${dir}/${tag}-{0p}.png`, ...(fonts ? { fonts } : {}) })
     return runKillable($, argv, { env: vars, timeoutMs: COMPILE_TIMEOUT_MS, ...(signal ? { signal } : {}) })
-  })
+  }))
 }
 
 // ---- The probe: where the words are ---------------------------------------
 
 // `typst query` of the template's <mdpos> marks with probe=1: the PNG
-// compile's own inputs (and `page`), root, package path, fonts and env (no
-// ppi, format or out).
-export function probeCall(o: { typst: string; root: string; cache: string; inputs: Readonly<Record<string, string | number>>; fonts?: string }): { argv: string[]; env: Record<string, string> } {
+// compile's own inputs (and `page`), root (a run folder of its own), package
+// path, fonts and env (no ppi, format or out).
+export function probeCall(o: { typst: string; root: string; run: string; cache: string; inputs: Readonly<Record<string, string | number>>; fonts?: string }): { argv: string[]; env: Record<string, string> } {
   const argv = [
     o.typst, 'query',
-    '--root', '/',
+    '--root', o.run,
     '--package-path', `${o.root}/render/packages`,
     ...fontArgs(o.fonts),
     '--diagnostic-format', 'short',
     ...Object.entries({ ...o.inputs, probe: 1 }).flatMap(([k, v]) => ['--input', `${k}=${v}`]),
-    `${o.root}/render/md.typ`,
+    templateIn(o.run, o.root),
     '<mdpos>',
     '--field', 'value',
   ]
@@ -406,19 +536,23 @@ export const isSafePage = (file: string) => /\/[bd]-\d+\.png$/.test(file)
 export async function probePage(
   $: EngineInterface, job: Job, dir: string, o: { page: number; pages: number; isSafe: boolean },
 ): Promise<Positions | null> {
-  let segments: unknown
+  let kept: Partial<Doc> | null = null
   try {
-    segments = (JSON.parse((await fsRead($, `${dir}/doc.json`)) as string) as { segments?: unknown }).segments
+    kept = JSON.parse((await fsRead($, `${dir}/doc.json`)) as string) as Partial<Doc>
   } catch {
     return null
   }
+  const segments = kept?.segments
   if (!Array.isArray(segments) || segments.length !== o.pages || !job.env.typst) return null
   const typst = job.env.typst
-  const { inputs, ppi } = typstInputs(job, segments as string[], dir, o.isSafe)
-  const ran = await runFonts($, job, await leanFor($, job, segments as string[]), fonts => {
-    const { argv, env } = probeCall({ typst, root: job.env.root, cache: job.env.cache, inputs: { ...inputs, page: o.page + 1 }, ...(fonts ? { fonts } : {}) })
+  const images = Array.isArray(kept!.images) ? kept!.images.filter((p): p is string => typeof p === 'string') : []
+  const doc: Doc = { base: typeof kept!.base === 'string' ? kept!.base : '', segments, images }
+  const { inputs, ppi } = typstInputs(job, segments, dir, o.isSafe)
+  const fonts = await leanFor($, job, segments)
+  const ran = await inRoot($, job, dir, doc, run => runFonts($, job, fonts, fonts => {
+    const { argv, env } = probeCall({ typst, root: job.env.root, run, cache: job.env.cache, inputs: { ...inputs, page: o.page + 1 }, ...(fonts ? { fonts } : {}) })
     return runKillable($, argv, { env, timeoutMs: COMPILE_TIMEOUT_MS })
-  })
+  }))
   if (ran.exitCode !== 0) {
     await logDebug($, job.env.cache, `probe ${dir} page ${o.page + 1} failed:\n${ran.stderr}`)
     return null
@@ -474,7 +608,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
 
   let tag = 'a'
   let isSafe = false
-  let ran = await runTypst($, job, segments, dir, tag, false, signal)
+  let ran = await runTypst($, job, { base, segments, images }, dir, tag, false, signal)
   let note: string | undefined
   if (ran.isCancelled) return 'cancelled'
   if (ran.exitCode !== 0) {
@@ -484,7 +618,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     note = firstLine(ran.stderr.split('\n').find(l => /error:/i.test(l)) ?? ran.stderr).replace(/^.*error:\s*/i, '')
     tag = 'b'
     isSafe = true
-    ran = await runTypst($, job, segments, dir, tag, true, signal)
+    ran = await runTypst($, job, { base, segments, images }, dir, tag, true, signal)
     if (ran.isCancelled) return 'cancelled'
     if (ran.exitCode !== 0) {
       await logDebug($, job.env.cache, `compile ${job.key} with safe=1 failed:\n${ran.stderr}`)
@@ -502,7 +636,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     if (cut.length > segments.length) {
       if (signal?.aborted) return 'cancelled'
       await fsWrite($, `${dir}/doc.json`, JSON.stringify({ base, segments: cut, images }))
-      const again = await runTypst($, job, cut, dir, isSafe ? 'd' : 'c', isSafe, signal)
+      const again = await runTypst($, job, { base, segments: cut, images }, dir, isSafe ? 'd' : 'c', isSafe, signal)
       if (again.isCancelled) return 'cancelled'
       const split = again.exitCode === 0 ? await pagesOfRun($, job, dir, isSafe ? 'd' : 'c', cut) : null
       if (split) {

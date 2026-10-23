@@ -460,7 +460,7 @@ test('the terminal font is read from iTerm2 and Ghostty settings', () => {
 })
 
 test('typst also reads the font folder of the font that Ghostty carries, when there is one', () => {
-  const call = () => typstCall({ typst: 't', root: '/mod', cache: '/tmp/c', ppi: 144, inputs: {}, out: '/tmp/o.png' })
+  const call = () => typstCall({ typst: 't', root: '/mod', run: '/tmp/c/k/r-1', cache: '/tmp/c', ppi: 144, inputs: {}, out: '/tmp/o.png' })
   expect(call().env.TYPST_FONT_PATHS).toBe(undefined)
   S.fontPaths = '/home/u/.cache/cc-intelligent-ui/fonts/ghostty-1'
   try {
@@ -472,7 +472,7 @@ test('typst also reads the font folder of the font that Ghostty carries, when th
 
 test('typst runs with the network off and its own package cache', () => {
   const { argv, env } = typstCall({
-    typst: '/opt/homebrew/bin/typst', root: '/mod', cache: '/tmp/c', ppi: 210.5,
+    typst: '/opt/homebrew/bin/typst', root: '/mod', run: '/tmp/c/k/r-1', cache: '/tmp/c', ppi: 210.5,
     inputs: { theme: 'dark', width: 698.4, 'term-font': 'MesloLGS NF', doc: '/tmp/c/k/doc.json' },
     out: '/tmp/c/k/a-{0p}.png',
   })
@@ -481,7 +481,9 @@ test('typst runs with the network off and its own package cache', () => {
   expect(argv[argv.indexOf('--package-path') + 1]).toBe('/mod/render/packages')
   expect(argv[argv.indexOf('--ppi') + 1]).toBe('210.5000')
   expect(argv.includes('term-font=MesloLGS NF')).toBe(true)
-  expect(argv.slice(-2)).toEqual(['/mod/render/md.typ', '/tmp/c/k/a-{0p}.png'])
+  // The root is the run folder; the template is its copy there.
+  expect(argv[argv.indexOf('--root') + 1]).toBe('/tmp/c/k/r-1')
+  expect(argv.slice(-2)).toEqual(['/tmp/c/k/r-1/mod/render/md.typ', '/tmp/c/k/a-{0p}.png'])
   expect(env.HTTPS_PROXY).toBe('http://127.0.0.1:9')
   expect(env.HTTP_PROXY).toBe('http://127.0.0.1:9')
   expect(env.ALL_PROXY).toBe('http://127.0.0.1:9')

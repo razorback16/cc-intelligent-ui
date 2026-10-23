@@ -27,6 +27,7 @@ Intelligent UI draws each answer as a picture with the template `render/md.typ`.
 - Text already has `theme.fg` and the body font. Strokes do not: the default stroke is black, which is invisible on a dark theme. Pass a theme colour to every stroke, axis, tick, legend and mark.
 - Fill shapes with a theme colour `.transparentize(80%)`. Colour data series with `theme.palette` in order. Use `theme.muted` for secondary text.
 - `#page`, `#pagebreak` and `#set page` are errors. A column break is dropped.
+- A block can not read files: `read`, `image`, `json`, `csv`, `include` and `import` of a file path are errors. Packages (`@preview/...`) still import. Put the data in the block.
 - One block that fails makes the whole answer compile again in safe mode: then every typst block and all math of that answer show as code. So one bad block spoils the full answer.
 
 ## Workflow for a complex drawing
@@ -84,7 +85,7 @@ ${CLAUDE_SKILL_DIR}/scripts/check.sh [--theme NAME] [--mode dark|light|both] [--
 - Exit 0 only when all modes compile; 1 on a compile error; 2 on bad use or no Typst 0.15. Font warnings ("unknown font family") are noise.
 - Width, height and row grid are your last values from the mod's design cache, else 900 × 320 pt. The terminal font is not used, so the text width can differ a little.
 - Diagnostics give lines of FILE and 0-based columns, as Typst prints them. Typst stops at the first error of a block, so run the script again after each fix.
-- A `.md` file compiles as one page. The mod can split a long answer into more pages.
+- A `.md` file compiles as one page. The mod can split a long answer into more pages. Its Markdown images show as their alt text here (the mod draws them).
 - The PNGs are drawn on the theme's background colour, so you can read them with the Read tool (the mod's own PNGs are transparent).
 - It also accepts `--opt=value`, `-h`, and a folder path for `--theme`.
 - A compile with exit 0 can still be wrong. Always look at the PNGs.
