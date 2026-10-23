@@ -122,6 +122,23 @@ export function splitSegments(md: string, columns: number, budget = SEGMENT_ROWS
   return texts.map(t => `${t}\n\n${defs.filter(d => !t.includes(d)).join('\n')}`.trimEnd())
 }
 
+// The blocks at each break between segments, for the gap the template puts
+// there: the last block above the break and the first below it (a fence as
+// a short one of its kind, a typst fence with no code; link definitions are
+// no block). Null for the first segment and where a side has no block.
+export function seamsOf(segments: readonly string[]): ([string, string] | null)[] {
+  const short = (block: Block) => {
+    const { fence } = block
+    if (!fence) return block.lines.join('\n')
+    return [block.lines[0]!, ...(isTypstInfo(fence.info) ? [] : ['x']), fence.mark].join('\n')
+  }
+  const ends = segments.map(seg => blocksOf(seg).filter(b => b.fence || !b.lines.every(line => LINK_DEF.test(line))))
+  return ends.map((blocks, i) => {
+    const above = ends[i - 1]?.at(-1)
+    return above && blocks.length ? [short(above), short(blocks[0]!)] : null
+  })
+}
+
 // A segment whose page came out taller than an Image can be, cut in two by
 // the same rules (at half its rows); one piece when it can not be cut.
 export function splitInTwo(md: string, columns: number, size = 100, roomRows = DRAWING_ROWS): string[] {

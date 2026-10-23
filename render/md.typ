@@ -34,7 +34,11 @@
 // (never larger than f); a tall block is never made smaller (the page grows).
 //
 // doc JSON: { "base": "/dir/for/relative/images", "segments": ["md", ...],
-//             "images": ["/abs/path.png", ...] (optional allow-list) }
+//             "images": ["/abs/path.png", ...] (optional allow-list),
+//             "seams": [null, ["md above", "md below"], ...] (optional) }
+// seams: for each segment after the first, the block above its break (the
+// last of the segment before) and its own first block. The page starts with
+// the gap these two blocks have in one flow (pages are drawn with no gap).
 //
 // safe=1: the retry mode after a failed compile. `typst` fences are shown as
 // code (no eval), math is shown as code (no mitex), images are alt boxes.
@@ -107,6 +111,8 @@
 #let segments = doc.at("segments", default: ())
 #if type(segments) == str { segments = (segments,) }
 #if segments.len() == 0 { segments = ("",) }
+#let seams = doc.at("seams", default: none)
+#if type(seams) != array { seams = () }
 
 // ---------- theme ----------
 // Colours, fonts and element sizes come from the active theme
@@ -1227,17 +1233,36 @@
 // footnote entries, which a page lays out, have them too.
 #show: body => if on-grid { grid-rules(body) } else { body }
 
+// The two blocks of a seam as one flow less each alone: the gap between
+// them (needs context). Its own label prefix, so no label is used twice.
+#let seam-gap(seam) = {
+  let h(md) = {
+    let body = render-md(md, "seam")
+    measure(block(width: content-w, if on-grid { heading-gaps(body) } else { body })).height
+  }
+  let (above, below) = seam.map(str)
+  h(above + "\n\n" + below) - h(above) - h(below)
+}
+
 #for (i, seg) in segments.enumerate() {
   if only > 0 and i + 1 != only { continue }
   let md = if type(seg) == str { seg } else { str(seg) }
+  let seam = seams.at(i, default: none)
+  let seam = if i > 0 and type(seam) == array and seam.len() == 2 { seam } else { none }
   let body = render-md(md, i)
-  if on-grid { body = heading-gaps(body, page: true) }
+  // A page that continues the text has no heading row taken away at its top
+  // (its gap above, from the seam, is the flow's).
+  if on-grid { body = heading-gaps(body, page: seam == none) }
   if notes-before > 0 { body = { counter(footnote).update(notes-before); body } }
   // Pad the bottom so the page is a whole number of terminal rows.
   context {
     // On the grid, every page starts on a row (no top margin), or half a
     // row lower when the flow has the half-row phase (grid-rules).
-    let top = if on-grid { if flow-half() { row / 2 } else { 0pt } } else if i == 0 { first-top } else { margin-y }
+    let half = on-grid and flow-half()
+    let top = if on-grid { if half { row / 2 } else { 0pt } } else if i == 0 { first-top } else if seam != none { 0pt } else { margin-y }
+    // A page that continues the text: the seam's gap above its first block,
+    // less the half rows of this page's top and of the page above's bottom.
+    let body = if seam == none { body } else { v(seam-gap(seam) - if half { row } else { 0pt }); body }
     // No bottom margin: text is measured to its descenders, so the last line
     // ends the page and the next row is the engine's own gap.
     let total = top + measure(block(width: content-w, body)).height

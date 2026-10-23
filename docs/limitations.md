@@ -49,6 +49,7 @@
   - When a line of body text uses 2 rows, the rules of a table, display math, an image, a Typst drawing and a horizontal rule are half a row down. The text stays in the middle of the rows.
   - A level-4 to level-6 heading at 100% (and a level-3 or level-4 heading at approximately 117%) has the same gap above it and below it (1 row), because the two gaps are nearest to 1 row.
   - If inline math makes the first line of an answer taller, the reply bullet can be one row above the text.
+- **Without the row grid** (`/iui grid off`), the space between two blocks where a long answer goes to its next page can be up to one row larger than in one page, because each page is a number of full rows.
 - **Search does not find text in a picture.**
 - **While Claude writes**, Claude Code shows its own text of the block (raw Markdown, for example `$…$` math as text), because Claude Code gives a mod the text of a block only when the block is complete. Then the block is blank until its picture is ready: approximately 0.03–0.07 s for plain text (refer to [The lean font set](how-it-works.md#the-lean-font-set)), 0.15–0.6 s for other text, and 2–3 s for a large Typst drawing. If the picture is not ready 2 s after the block is complete, the normal text shows until the picture is ready. If the compile fails, the normal text stays. An earlier answer that is not in the cache (for example, after a resume) is blank for up to 1 s, then shows as text until its picture is ready.
 - **Short summaries** between tool calls stay as text.

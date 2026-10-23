@@ -4,7 +4,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { COMPILE_TIMEOUT_MS, MAX_IMAGE_ROWS, NO_NETWORK, TOUCH_FLUSH_MS, TYPST_FALLBACKS } from './settings'
 import { DEFAULT_METRICS, fauxBoldOf, S, type Cell, type FontMetrics, type Job, type LeanFonts, type Metrics, type Page, type Result } from './state'
-import { firstLine, imagePathOf, localImages, plainOf, splitInTwo, splitSegments } from './markdown'
+import { firstLine, imagePathOf, localImages, plainOf, seamsOf, splitInTwo, splitSegments } from './markdown'
 import { segmentBudget } from './terminal'
 import { fontFit, placeFirstLine, sizing } from './draw'
 import { DEFAULT_GRID, gridOf } from './grid'
@@ -451,6 +451,11 @@ async function pagesOfRun($: EngineInterface, job: Job, dir: string, tag: string
   }))
 }
 
+// The doc JSON of a compile: with the seams (the gaps at the breaks) when
+// there is more than one segment.
+const docOf = (base: string, segments: readonly string[], images: readonly string[]) =>
+  JSON.stringify({ base, segments, images, ...(segments.length > 1 ? { seams: seamsOf(segments) } : {}) })
+
 // Compiles a job's text to its pages (kept in its key folder). `signal`
 // stops it: a run killed by it, or a retry not begun, is 'cancelled' (not a
 // result: nothing is kept).
@@ -471,7 +476,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
   let segments = splitSegments(job.text, job.columns, segmentBudget(job.env, job.columns, job.cell), job.size, roomRows)
   const base = job.base ?? job.env.cwd
   const images = await existingImages($, segments, base)
-  await fsWrite($, `${dir}/doc.json`, JSON.stringify({ base, segments, images }))
+  await fsWrite($, `${dir}/doc.json`, docOf(base, segments, images))
 
   let tag = 'a'
   let isSafe = false
@@ -502,7 +507,7 @@ export async function compile($: EngineInterface, job: Job, signal?: AbortSignal
     const cut = segments.flatMap((seg, i) => (pages![i]!.rows > MAX_IMAGE_ROWS ? splitInTwo(seg, job.columns, job.size, roomRows) : [seg]))
     if (cut.length > segments.length) {
       if (signal?.aborted) return 'cancelled'
-      await fsWrite($, `${dir}/doc.json`, JSON.stringify({ base, segments: cut, images }))
+      await fsWrite($, `${dir}/doc.json`, docOf(base, cut, images))
       const again = await runTypst($, job, cut, dir, isSafe ? 'd' : 'c', isSafe, signal)
       if (again.isCancelled) return 'cancelled'
       const split = again.exitCode === 0 ? await pagesOfRun($, job, dir, isSafe ? 'd' : 'c', cut) : null

@@ -214,7 +214,7 @@ test('a diagram keeps its design only after its final text compiled, never while
 })
 
 test('a page over 255 rows: its segment is cut in two and compiled once more', async ($, on) => {
-  const { clock, counts } = world(on, { tall: true })
+  const { clock, counts, files } = world(on, { tall: true })
   on('ui.render', () => ENGINE as any)
   await $.command.run({ command: 'iui', args: '' } as any)
   const text = Array.from({ length: 12 }, (_, i) => `Paragraph ${i} ${'word '.repeat(40)}`.trim()).join('\n\n')
@@ -222,6 +222,9 @@ test('a page over 255 rows: its segment is cut in two and compiled once more', a
   await clock.settle()
   await ui.redraw(props(text))
   expect(counts).toEqual([1, 2])
+  // The retry's doc has the seam at its break (the gap there).
+  const doc = JSON.parse([...files].find(([path]) => path.endsWith('/doc.json'))![1])
+  expect(doc.seams).toEqual([null, [doc.segments[0].split('\n\n').at(-1), doc.segments[1].split('\n\n')[0]]])
   const pages = images(await ui.drawn())
   expect(pages.length).toBe(2)
   expect(pages.map(p => p.props.source.file.replace(/^.*\//, ''))).toEqual(['c-1.png', 'c-2.png'])
