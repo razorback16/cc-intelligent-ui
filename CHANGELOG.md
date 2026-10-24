@@ -6,6 +6,8 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 ### New
 
+- **A click opens a link or a file.** With picture select, a plain click on a web link opens it in the browser (`open` on macOS, `xdg-open` on Linux). A plain click on a file path opens it in your editor, at the line and column of the path. Alt+click copies the link or path, as a click did before. A click on a command or a code block's copy button still copies, and a drag still selects text. If the open fails, the mod copies the target and the toast says so. Over ssh, a click copies. In iTerm2, Option+click goes to the terminal's own selection, so alt+click may not reach the mod there. Refer to [Click a link, a file or a command](docs/usage.md#click-a-link-a-file-or-a-command).
+- **`/iui editor`.** Sets the editor for file paths. `auto` (the default) uses the first editor on the PATH: `code`, `code-insiders`, `codium`, `cursor`, `windsurf`, `zed`, `zeditor`, `subl`, `idea`, `webstorm`, `pycharm`, `goland`, `clion`, `rider`; with none, the system default app. `/iui editor <name>` picks one, `/iui editor default` uses the system default app, and `/iui editor <command with {path} {line} {column}>` runs your own command (split on spaces, no shell). The setting is kept across sessions.
 - **A preview of pasted image paths.** When you paste the path of an image file (path text that you copied), Claude Code shows `[Image #N]` but writes no file until you send the prompt. The mod now reads the clipboard one time to find the file, and shows its preview. Absolute paths, `~/` paths, paths from the session folder, `file://` URLs, quoted paths and paths with escaped spaces work. It shows PNG, JPEG and WebP files (JPEG and WebP need Typst).
 
 ### Fixed

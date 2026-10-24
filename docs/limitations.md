@@ -22,7 +22,10 @@
 
 ## Clicks and links
 
-- **A click copies; it does not open.** The terminal does not send cmd+click to Claude Code, and on macOS ctrl+click is the secondary click.
+- **A click opens a link or a file; alt+click copies it.** A plain click on a web link opens the browser. A plain click on a file path opens your editor (see `/iui editor` in [Commands](usage.md#commands)). The terminal does not send cmd+click to Claude Code, and on macOS ctrl+click is the secondary click, so the mod does not use them.
+- **Alt+click can fail in iTerm2.** iTerm2 keeps Option+click for its own selection, so the click may not reach the mod. Drag over the text to copy it. A drag over link text copies the text, not the URL.
+- **Over ssh, a click copies.** A program would run on the remote computer, so the mod does not open anything.
+- **If the open fails, the mod copies the target.** The toast says so.
 - **Not every link is a target.** Code blocks are not targets: select the text. A file path is a target only if the file existed when the answer was drawn. Links to headings, and links in Typst drawings, math or images, are not targets. Until the mod knows the words of a page, hover shows nothing and a click waits.
 - **No link rows with picture select.** The dim rows of links, paths and commands under an answer do not show. Click them in the answer instead.
 - **Without picture select** (main screen, ssh, older Claude Code, `/iui select off`), a click in an answer does nothing. Use the link rows under it. A command row copies only in fullscreen mode. A `file://` link opens in the app that your terminal chooses.

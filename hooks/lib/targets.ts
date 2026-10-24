@@ -10,8 +10,10 @@ import { fileOf, trimUrl } from './links'
 import type { PageWords } from './probe'
 import type { SelRow } from './select'
 
+// A file's line and column: from its label's `:N` or `:N:M` (none: absent).
 export type Target =
-  | { kind: 'web'; href: string } | { kind: 'file'; path: string } | { kind: 'command'; text: string } | { kind: 'code'; text: string; lang?: string }
+  | { kind: 'web'; href: string } | { kind: 'file'; path: string; line?: number; column?: number }
+  | { kind: 'command'; text: string } | { kind: 'code'; text: string; lang?: string }
 // One target on one page: what it does, and its cells on that page (the cells whose centre test matches
 // textOfRun's rule: a word is in a cell when its box centre is in it; a target covers, on each of its rows,
 // the columns from its first word's left cell to its last word's right cell).
@@ -64,10 +66,15 @@ function boxRows(box: Button, page: Page): SelRow[] {
   return rows
 }
 
-// A file's target: the ShownLink of kind file with that label (it exists).
+// A file's target: the ShownLink of kind file with that label (it exists),
+// with the line and column of the label's `:N` or `:N:M`.
 function fileTarget(label: string, links: readonly ShownLink[]): Target | null {
   const link = links.find(l => l.kind === 'file' && l.label === label)
-  return link?.kind === 'file' ? { kind: 'file', path: link.path } : null
+  if (link?.kind !== 'file') return null
+  const at = /:(\d+)(?::(\d+))?$/.exec(label)
+  const line = at ? Number(at[1]) : 0
+  const column = at?.[2] ? Number(at[2]) : 0
+  return { kind: 'file', path: link.path, ...(line ? { line } : {}), ...(line && column ? { column } : {}) }
 }
 
 // The target of a bare token (words with no space between, not in a link or

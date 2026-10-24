@@ -15,6 +15,7 @@ import { forgetProbed, noteDrawn, noteDrawnAgain, noteOnScreen, wordsOf } from '
 import { clip, drawnAnswers, lastKey, results, type Job, type Result } from '../hooks/lib/state'
 import { forgetBlits, over, rgbOf, WRITE_PL } from '../hooks/lib/blit'
 import { forgetRedraws } from '../hooks/lib/select'
+import { DETACH_SH } from '../hooks/lib/open'
 import { chunk, concat, decodePng, deflatePiece, fromBase64, headOf, tailOf, toBase64 } from '../hooks/lib/png'
 import { LONG_MARKS, LONG_MD, LONG_PAGE, MATH_MARKS, MATH_MD, MATH_PAGE, SMALL_MARKS, SMALL_MD, SMALL_PAGE, SMALL_PPI, TARGETS_MARKS, TARGETS_MD, TARGETS_PAGE } from './copy-fixture'
 
@@ -631,7 +632,7 @@ function world(
   const watchers: Child[] = []
   const w = {
     clock, files, compiles, queries, kills, watchers, vars, envSets,
-    ran: [] as string[][], spawned: [] as string[][], reads: [] as string[],
+    ran: [] as string[][], spawned: [] as string[][], reads: [] as string[], opens: [] as string[][], openFails: false,
     clipboard: 'nothing yet', secret: false, readFails: false, count: 40, pastes: 0, copies: [] as string[], toasts: [] as string[], traces: [] as string[], logs: [] as string[],
     frames: [] as { path: string; old: string[]; png: Uint8Array }[], blits: [] as any[], writes: 0, selectionReads: 0,
     selection: undefined as { text: string; requestId?: string } | undefined,
@@ -731,6 +732,11 @@ function world(
     if (cmd.includes('command -v typst')) return ok('/usr/bin/typst\n')
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
     if (cmd.includes('od -An')) return ok(argv.filter(a => a.endsWith('.png')).map(() => `${HEAD}\n@\n`).join(''))
+    // A click's open, detached (no editor is on the PATH: the system app).
+    if (argv[0] === 'sh' && argv[2] === DETACH_SH && argv[4] === 'open') {
+      w.opens.push(argv.slice(4))
+      return ok('', w.openFails ? 1 : 0)
+    }
     if (argv[0] === '/usr/bin/perl' && argv[2] === READ_PL) {
       w.pastes++
       const { clipboard, secret } = w
@@ -1807,8 +1813,8 @@ async function drawTargets($: any, on: any, o: { env?: Record<string, string>; m
   return { w, ui }
 }
 const hover = (ui: any, x: number, y: number) => ui.pointer({ type: 'move', x, y, in: 'sel0' })
-const click = async (ui: any, x: number, y: number, o: { button?: 'left' | 'right'; ctrl?: true } = {}) => {
-  const ev = { x, y, button: o.button ?? 'left', ...(o.ctrl ? { ctrl: o.ctrl } : {}), in: 'sel0' }
+const click = async (ui: any, x: number, y: number, o: { button?: 'left' | 'right'; ctrl?: true; alt?: true } = {}) => {
+  const ev = { x, y, button: o.button ?? 'left', ...(o.ctrl ? { ctrl: o.ctrl } : {}), ...(o.alt ? { alt: o.alt } : {}), in: 'sel0' }
   await ui.pointer({ type: 'down', ...ev })
   await ui.pointer({ type: 'up', ...ev })
 }
@@ -1879,26 +1885,50 @@ test('picture select: a down takes the hover tint down, and no hover tints while
   expect(w.blits.length).toBe(blits)
 })
 
-test('picture select: a click copies a link, a file\'s path or a command; a click off them clears as before', async ($, on) => {
+test('picture select: a click opens a link or a file and copies a command; an alt+click copies; a click off them clears as before', async ($, on) => {
   const { w, ui } = await drawTargets($, on)
   await click(ui, 6, 3)
-  await settle(w)
-  await click(ui, 30, 3)
   await settle(w)
   await click(ui, 8, 6)
   await settle(w)
   await click(ui, 52, 4)
   await settle(w)
-  expect(w.copies).toEqual(['https://example.com', 'https://typst.app/docs/reference', '/w/src/a.ts', 'ls -la'])
-  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: copied the '))).toEqual([
-    'Intelligent UI: copied the link', 'Intelligent UI: copied the link', 'Intelligent UI: copied the path', 'Intelligent UI: copied the command',
+  expect(w.opens).toEqual([['open', 'https://example.com'], ['open', '/w/src/a.ts']])
+  expect(w.copies).toEqual(['ls -la'])
+  expect(w.toasts.filter(t => /^Intelligent UI: (opened|copied) /.test(t))).toEqual([
+    'Intelligent UI: opened the link', 'Intelligent UI: opened a.ts in the default app', 'Intelligent UI: copied the command',
   ])
-  // No target (a code block is none): nothing copied.
+  await click(ui, 6, 3, { alt: true })
+  await settle(w)
+  await click(ui, 30, 3, { alt: true })
+  await settle(w)
+  await click(ui, 8, 6, { alt: true })
+  await settle(w)
+  expect(w.opens.length).toBe(2)
+  expect(w.copies).toEqual(['ls -la', 'https://example.com', 'https://typst.app/docs/reference', '/w/src/a.ts'])
+  expect(w.toasts.filter(t => t.startsWith('Intelligent UI: copied the ')).slice(1)).toEqual([
+    'Intelligent UI: copied the link', 'Intelligent UI: copied the link', 'Intelligent UI: copied the path',
+  ])
+  // No target (a code block is none): nothing copied or opened.
   await click(ui, 1, 3)
   await click(ui, 60, 8)
   await click(ui, 5, 10)
   await settle(w)
   expect(w.copies.length).toBe(4)
+  expect(w.opens.length).toBe(2)
+})
+
+test('picture select: a link or a file that does not open is copied, and the toast says so', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  w.openFails = true
+  await click(ui, 6, 3)
+  await settle(w)
+  await click(ui, 8, 6)
+  await settle(w)
+  expect(w.opens.length).toBe(2)
+  expect(w.copies).toEqual(['https://example.com', '/w/src/a.ts'])
+  expect(w.toasts).toContain('Intelligent UI: could not open the link, so copied it')
+  expect(w.toasts).toContain('Intelligent UI: could not open the file, so copied its path')
 })
 
 test('picture select: a click whose page still reads its words copies nothing after a newer click on a ready page', async ($, on) => {
@@ -1908,7 +1938,7 @@ test('picture select: a click whose page still reads its words copies nothing af
   // A second drawing (one more line: its own folder), its words held.
   w.hold()
   const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
-  await click(slow, 6, 3)
+  await click(slow, 6, 3, { alt: true })
   await settle(w)
   await click(ui, 52, 4)
   await settle(w)
@@ -1960,15 +1990,18 @@ test("picture select: a click on a code block's copy button copies its whole cod
   expect(w.copies).toEqual(['echo hello\nls -la', 'ls -la'])
 })
 
-test('picture select: a ctrl+click copies as a plain click does; a right click is dropped', async ($, on) => {
+test('picture select: a ctrl+click opens as a plain click does; a right click is dropped', async ($, on) => {
   const { w, ui } = await drawTargets($, on)
   await click(ui, 6, 3, { button: 'right' })
   await click(ui, 6, 3, { button: 'right', ctrl: true })
+  await click(ui, 6, 3, { button: 'right', alt: true })
   await settle(w)
   expect(w.copies).toEqual([])
+  expect(w.opens).toEqual([])
   await click(ui, 6, 3, { ctrl: true })
   await settle(w)
-  expect(w.copies).toEqual(['https://example.com'])
+  expect(w.opens).toEqual([['open', 'https://example.com']])
+  expect(w.copies).toEqual([])
 })
 
 test('picture select: after a click on a target its tint shows again; a leave then takes it down', async ($, on) => {
@@ -2009,7 +2042,10 @@ test('picture select: with IUI_DEBUG, a click writes its target; a hover its tar
   await click(ui, 1, 3)
   await settle(w)
   expect(w.traces.some(t => t.includes('select: hover ans-1 page 0 target 0 (web) rows 3:4-11'))).toBe(true)
-  expect(w.traces.some(t => t.includes('select: click ans-1 page 0 at 6,3 target web'))).toBe(true)
+  await click(ui, 6, 3, { alt: true })
+  await settle(w)
+  expect(w.traces.some(t => t.includes('select: click ans-1 page 0 at 6,3 target web open'))).toBe(true)
+  expect(w.traces.some(t => t.includes('select: click ans-1 page 0 at 6,3 target web copy'))).toBe(true)
   expect(w.traces.some(t => t.includes('select: click ans-1 page 0 at 1,3 target none'))).toBe(true)
 })
 
@@ -2076,7 +2112,7 @@ test('picture select: a click whose words are still read copies nothing after a 
   const { w } = await drawTargets($, on, { noBridge: true })
   w.hold()
   const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
-  await click(slow, 6, 3)
+  await click(slow, 6, 3, { alt: true })
   await settle(w)
   expect(w.copies).toEqual([])
   w.selection = { text: 'native text', requestId: 'ans-0' }
@@ -2086,7 +2122,7 @@ test('picture select: a click whose words are still read copies nothing after a 
   expect(w.copies).toEqual([])
   expect(w.clipboard).toBe('native text')
   // A native selection made before the click does not stop it.
-  await click(slow, 6, 3)
+  await click(slow, 6, 3, { alt: true })
   await settle(w)
   expect(w.copies).toEqual(['https://example.com'])
 })
@@ -2095,7 +2131,7 @@ test('picture select: a click whose words are still read copies nothing after a 
   const { w } = await drawTargets($, on)
   w.hold()
   const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
-  await click(slow, 6, 3)
+  await click(slow, 6, 3, { alt: true })
   await settle(w)
   w.foreign('copied in another app')
   await settle(w)
@@ -2106,7 +2142,7 @@ test('picture select: a click whose words are still read copies nothing after a 
   // A password manager's copy: never read (exit 3), and a newer copy still.
   w.hold()
   const slower = await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nTwo more lines.\n\nHere.`)
-  await click(slower, 6, 3)
+  await click(slower, 6, 3, { alt: true })
   await settle(w)
   w.concealed('hunter2')
   await settle(w)
@@ -2123,7 +2159,7 @@ test('a $.ui.copy of picture cells whose words are still read is refused after a
   await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
   const cp = $.command.run({ command: 'cp', args: [cells(1, 0, 97), cells(2, 0, 97), cells(3, 0, 21)].join('\n') } as any)
   await settle(w)
-  await click(ui, 6, 3)
+  await click(ui, 6, 3, { alt: true })
   await settle(w)
   expect(w.copies).toEqual(['https://example.com'])
   w.release()
@@ -2137,7 +2173,7 @@ test('another plugin\'s $.ui.copy cancels a click whose words are still read; it
   const { w } = await drawTargets($, on)
   w.hold()
   const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
-  await click(slow, 6, 3)
+  await click(slow, 6, 3, { alt: true })
   await settle(w)
   await $.command.run({ command: 'cp', args: 'plain text' } as any)
   await settle(w)
@@ -2150,7 +2186,7 @@ test('another plugin\'s $.ui.copy cancels a click whose words are still read; it
   await $.command.run({ command: 'cp', args: 'more text' } as any)
   w.hold()
   const slower = await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nTwo more lines.\n\nHere.`)
-  await click(slower, 6, 3)
+  await click(slower, 6, 3, { alt: true })
   await settle(w)
   w.releaseReads()
   await settle(w)
@@ -2164,7 +2200,7 @@ test('/iui grab that copies nothing (no selection, no picture cells) does not ca
   const { w } = await drawTargets($, on)
   w.hold()
   const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
-  await click(slow, 6, 3)
+  await click(slow, 6, 3, { alt: true })
   await settle(w)
   // The same text the clipboard had: no change seen.
   const said = await grab($)
@@ -2181,7 +2217,7 @@ test('a click on no target copies nothing and cancels no click whose words are s
   await settle(w)
   w.hold()
   const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
-  await click(slow, 6, 3)
+  await click(slow, 6, 3, { alt: true })
   await settle(w)
   // Plain text of the ready page: no target.
   await click(ui, 1, 3)
@@ -2215,7 +2251,7 @@ test('two clicks whose words are still read: only the newer one copies, also whe
   w.hold()
   const older = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
   const newer = await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nAnother line.`)
-  await click(older, 6, 3)
+  await click(older, 6, 3, { alt: true })
   await click(newer, 52, 4)
   await settle(w)
   w.release()
@@ -2230,7 +2266,7 @@ test('an older click whose words are still read copies when the newer click find
   w.hold()
   const older = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
   const newer = await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nAnother line.`)
-  await click(older, 6, 3)
+  await click(older, 6, 3, { alt: true })
   await click(newer, 1, 3)
   await settle(w)
   w.release()
@@ -2242,7 +2278,7 @@ test('a clipboard read that fails (an error, the 2 s timeout) is no copy from ou
   const { w } = await drawTargets($, on)
   w.hold()
   const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
-  await click(slow, 6, 3)
+  await click(slow, 6, 3, { alt: true })
   await settle(w)
   const pastes = w.pastes
   w.readFails = true
@@ -2263,7 +2299,7 @@ test('our own older write, read late by the watcher, does not cancel a newer cli
   w.holdReads()
   await click(ui, 52, 4)
   await settle(w)
-  await click(ui, 6, 3)
+  await click(ui, 6, 3, { alt: true })
   await settle(w)
   expect(w.copies).toEqual(['ls -la', 'https://example.com'])
   w.hold()
@@ -2332,7 +2368,7 @@ test('/iui grab that reads nothing (cells that fit no page) cancels no click who
   await settle(w)
   w.hold()
   const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
-  await click(slow, 6, 3)
+  await click(slow, 6, 3, { alt: true })
   await settle(w)
   expect(await grab($)).toContain('could not read them')
   w.release()
@@ -2349,7 +2385,7 @@ test('a /iui grab still reading copies nothing when a newer click will copy', as
   w.selection = { text: TCELLS }
   const g = grab($)
   await settle(w)
-  await click(older, 6, 3)
+  await click(older, 6, 3, { alt: true })
   await settle(w)
   w.release()
   await settle(w)
@@ -2366,7 +2402,7 @@ test('a $.ui.copy of picture cells still reading is refused when a newer click w
   await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nAnother line.`)
   const cp = $.command.run({ command: 'cp', args: TCELLS } as any)
   await settle(w)
-  await click(older, 6, 3)
+  await click(older, 6, 3, { alt: true })
   await settle(w)
   w.release()
   await settle(w)
@@ -2383,7 +2419,7 @@ test('a copy in another app made before a click, read late by the watcher, does 
   await settle(w)
   w.hold()
   const slow = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
-  await click(slow, 6, 3)
+  await click(slow, 6, 3, { alt: true })
   await settle(w)
   w.releaseReads()
   await settle(w)
@@ -2421,7 +2457,7 @@ test('three clicks: the oldest on a ready page copies at once; of two that still
   await click(ui, 52, 4)
   await settle(w)
   await click(mid, 1, 3)
-  await click(newest, 6, 3)
+  await click(newest, 6, 3, { alt: true })
   await settle(w)
   w.release()
   await settle(w)
@@ -2434,7 +2470,7 @@ test('three clicks that still read: the middle one with a target copies; the old
   const a = await drawAnswer($, w, 'ans-2', `${TARGETS_MD}\n\nOne more line.`)
   const b = await drawAnswer($, w, 'ans-3', `${TARGETS_MD}\n\nAnother line.`)
   const c = await drawAnswer($, w, 'ans-4', `${TARGETS_MD}\n\nThird line.`)
-  await click(a, 6, 3)
+  await click(a, 6, 3, { alt: true })
   await click(b, 52, 4)
   await click(c, 1, 3)
   await settle(w)
@@ -2454,7 +2490,7 @@ test('a /iui grab whose words come first waits for a newer click that still read
   const first = w.release
   w.hold()
   const newer = await drawAnswer($, w, 'ans-4', `${TARGETS_MD}\n\nThird line.`)
-  await click(newer, 6, 3)
+  await click(newer, 6, 3, { alt: true })
   await settle(w)
   first()
   await settle(w)
@@ -2475,7 +2511,7 @@ test('a $.ui.copy of picture cells whose words come first waits for a newer clic
   const first = w.release
   w.hold()
   const newer = await drawAnswer($, w, 'ans-4', `${TARGETS_MD}\n\nThird line.`)
-  await click(newer, 6, 3)
+  await click(newer, 6, 3, { alt: true })
   await settle(w)
   first()
   await settle(w)

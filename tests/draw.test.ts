@@ -380,7 +380,7 @@ const bulletRowOf = (tree: any) => boxes(tree).find(b => b.props.width === 2)?.p
 test('grid on is kept and begins an epoch: another key, compiled with grid=1 and top=0; grid off goes back to the key of before', async ($, on) => {
   const { clock, kept, compiles, logs } = world(on, { TERM: 'xterm-kitty', IUI_DEBUG: '1' }, HEAD, { grid: false })
   const ran = await $.command.run({ command: 'iui', args: '' } as any)
-  expect(ran.text).toContain('grid off.')
+  expect(ran.text).toContain('grid off, editor auto.')
   const ui = await $.ui.mount(message('g-1', 'Some **bold** text.'))
   await clock.settle()
   await ui.redraw(props('Some **bold** text.'))
@@ -402,7 +402,7 @@ test('grid on is kept and begins an epoch: another key, compiled with grid=1 and
   expect(compiles[1]!.top).toBe('0')
   expect(now.props.source.file).not.toBe(first.props.source.file)
   const status = await $.command.run({ command: 'iui', args: '' } as any)
-  expect(status.text).toContain('grid on.')
+  expect(status.text).toContain('grid on, editor auto.')
   const details = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(details.text).toContain('row grid on')
   // Off: the key of before, in memory, so nothing compiles.

@@ -47,6 +47,15 @@ test('a post keeps its region\'s size when it is whole cells; a bad one is dropp
   expect(postOf({ ...post(), size: null })).toEqual(post())
 })
 
+test('a clear keeps alt (the click copies); alt on another phase, or not true, is dropped', () => {
+  expect(postOf({ ...post({ phase: 'clear' }), alt: true })).toEqual(post({ phase: 'clear', alt: true }))
+  expect(postOf({ ...post({ phase: 'clear' }), alt: 1 })).toEqual(post({ phase: 'clear' }))
+  expect(postOf({ ...post({ phase: 'up' }), alt: true })).toEqual(post({ phase: 'up' }))
+  // A hover carries the alt+click it ends.
+  const clear = post({ phase: 'clear', seq: 4, alt: true })
+  expect(postOf({ ...post({ phase: 'hover', seq: 5 }), end: clear })?.end).toEqual(clear)
+})
+
 test('a hover and a leave are posts too; each keeps only an up or a clear as its end', () => {
   const up = post({ phase: 'up', seq: 4 })
   expect(postOf({ ...post({ phase: 'hover', seq: 5 }), end: up })).toEqual(post({ phase: 'hover', seq: 5, end: up }))

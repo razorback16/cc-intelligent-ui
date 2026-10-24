@@ -12,6 +12,7 @@ import { isItermIn } from './terminals'
 import { canDrawIn, isHerdrIn, isSet, needsSetup } from './terminal'
 import { claudeTmpOf } from './images'
 import { applyTheme } from './themes'
+import { parseEditor } from './open'
 import { registerCommand } from './command'
 import { osc11Due, readHerdrClient, readHostMode, setOuter, termFontOf, watchHost } from './host'
 import { readFrame, refontAfterStart, setFrame, watchFrame } from './frame'
@@ -125,6 +126,8 @@ export function setUp($: EngineInterface): Promise<Env> {
     if (!settingsSet.has('grid')) S.grid = grid
     const select = (await load($, 'select').catch(() => undefined)) !== false
     if (!settingsSet.has('select')) S.select = select
+    const editor = await load($, 'editor').catch(() => undefined)
+    if (!settingsSet.has('editor')) S.editor = typeof editor === 'string' && parseEditor(editor) ? editor : 'auto'
     // An engine with no version call is older than picture select.
     S.engine = await Promise.resolve().then(() => ver($)).then(v => v.base ?? v.version, () => '')
     if (enabled === false && !settingsSet.has('enabled')) {

@@ -54,7 +54,8 @@ import { onScreenOf, pastedNumbers, sentFiles } from './lib/images'
 import { drawPageField, pasteDir, pdfPagesOf, rowsAfter, sentOf, underRow, type Under } from './lib/pictures'
 import { drawPreviews, forgetPaths, keepPaths, pathPaste, pathsOf, previewRetry, previewsOf, previewsUnder, sameNumbers, type Preview } from './lib/composer'
 import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
-import { nowMs, write, surf, save, copy, uiSelection, toast, sid } from './lib/api'
+import { nowMs, write, surf, save, copy, uiSelection, toast, sid, exec } from './lib/api'
+import { detachedArgv, editorNow, OPEN_TIMEOUT_MS, openArgv, openedText, useName, type Use } from './lib/open'
 import {
   currentPlan, decidePlan, decisionOf, drawAskLine, drawPlanResult, drawPlanUse, isPlanQuestion, planFileOf, planInputOf, planOf,
   planShownOf, scheduleClear, type PlanVerdict,
@@ -655,10 +656,13 @@ function lightHover($: EngineInterface) {
   redrawSelection($)
 }
 
-// A click (a clear) on a target of the page copies its text (a link's URL,
-// a file's path, a command, a code block's code). The page's words are probed first when they
-// are not known; a newer copy while they are (or a new native selection): the newer one copies.
-// A click on no target copies nothing and cancels no other copy.
+// A click (a clear) on a target of the page opens a web link or a file
+// (openTarget); an alt+click, a command, a code block's copy button or a
+// click over ssh copies its text (a link's URL, a file's path, a command, a
+// code block's code). The page's words are probed first when they are not
+// known; a newer copy while they are (or a new native selection): the newer
+// one copies. A click on no target, or one that opens, copies nothing and
+// cancels no other copy.
 async function clickAt($: EngineInterface, d: Drawn & { job?: Job }, post: SelectPost, surface: RenderSurface) {
   const turn = takeTurn($)
   try {
@@ -669,8 +673,15 @@ async function clickAt($: EngineInterface, d: Drawn & { job?: Job }, post: Selec
       targets = knownTargets(d, post.page, links())
     }
     const target = targets?.[targetAt(targets, post.anchor.x, post.anchor.y)]?.target
-    if (S.debug) traceDebug($, `select: click ${d.id} page ${post.page} at ${post.anchor.x},${post.anchor.y} target ${target ? target.kind : 'none'}`)
+    const opens = !!target && (target.kind === 'web' || target.kind === 'file') && !post.alt && !S.isRemote
+    if (S.debug) traceDebug($, `select: click ${d.id} page ${post.page} at ${post.anchor.x},${post.anchor.y} target ${target ? target.kind : 'none'}${target ? (opens ? ' open' : ' copy') : ''}`)
     if (!target) return
+    if (opens) {
+      // An open writes no clipboard: the turn is not claimed.
+      turn.done()
+      await openTarget($, target, surface)
+      return
+    }
     const mine = await claim(turn)
     turn.done()
     if (!mine || !(await isNewest($, turn))) return
@@ -680,15 +691,30 @@ async function clickAt($: EngineInterface, d: Drawn & { job?: Job }, post: Selec
   }
 }
 
-// A target's text on the clipboard (clickAt), with its toast.
-async function copyTarget($: EngineInterface, target: Target, surface: RenderSurface) {
+// A web link or a file opened (clickAt), with its toast. One that does not
+// open (no program, an exit code not 0) is copied.
+async function openTarget($: EngineInterface, target: Target, surface: RenderSurface) {
+  const use: Use = target.kind === 'file' ? await editorNow($) : { kind: 'app' }
+  const argv = openArgv(target, { isMac: !!S.env?.isMac, use })
+  const got = argv ? await exec($, detachedArgv(argv), { timeoutMs: OPEN_TIMEOUT_MS }).catch(() => null) : null
+  if (S.debug) traceDebug($, `select: open ${argv?.join(' ') ?? 'none'} exit ${got ? got.exitCode : 'failed'}`)
+  if (got?.exitCode === 0) return void toast($, openedText(target, use))
+  claimNow($, nativeNow($))
+  await copyTarget($, target, surface, true)
+}
+
+// A target's text on the clipboard (clickAt), with its toast; `notOpened`:
+// it is copied as an open of it failed.
+async function copyTarget($: EngineInterface, target: Target, surface: RenderSurface, notOpened = false) {
   const text = target.kind === 'web' ? target.href : target.kind === 'file' ? target.path : target.text
   const name = target.kind === 'web' ? 'link' : target.kind === 'file' ? 'path' : target.kind === 'code' ? 'code' : 'command'
   // The clipboard change of this text is not read again.
   clip.wrote = text
   clip.seen = text
   const copied = await copyOwn($, { text, surface })
-  toast($, copied.isCopied ? `Intelligent UI: copied the ${name}` : `Intelligent UI: the copy failed: ${copied.reason}`)
+  const failed = notOpened ? `could not open the ${target.kind === 'web' ? 'link' : 'file'}` : ''
+  const done = failed ? `${failed}, so copied ${target.kind === 'web' ? 'it' : 'its path'}` : `copied the ${name}`
+  toast($, copied.isCopied ? `Intelligent UI: ${done}` : `Intelligent UI: ${failed ? `${failed}, and ` : ''}the copy failed: ${copied.reason}`)
 }
 
 // The text of a selection's cells, page by page, as a copy of those cells
@@ -923,6 +949,7 @@ export const register: Register = on => {
     await loadUpdates($)
     const mine = commandSuggestions(e.text, e.token, e.start, {
       themes: S.themeChoices, active: S.look?.name ?? DEFAULT_THEME, size: S.size, width: S.width, height: S.height, grid: S.grid, updates: S.updates, select: S.select,
+      editor: S.editor, onPath: S.onPath, autoEditor: S.autoEditor,
     })
     return mine.length ? { suggestions: [...got.suggestions, ...mine] } : got
   })
@@ -1000,6 +1027,18 @@ export const register: Register = on => {
       const head = asked.on === undefined ? 'Picture select is' : 'Picture select is now'
       return { text: `${head} ${selectText(S.select)}. When on, a mouse drag over a picture selects its text and copies it. Use /iui select on (the default), or /iui select off.` }
     }
+    if (asked.kind === 'editor') {
+      if (asked.editor === undefined) await setUp($).catch(() => null)
+      else {
+        S.editor = asked.editor
+        settingsSet.add('editor')
+        await $.store.set('editor', S.editor)
+      }
+      const use = await editorNow($)
+      const head = asked.editor === undefined ? 'The editor for file paths is' : 'The editor for file paths is now'
+      const missed = use.kind !== 'command' && use.missed ? ` ${use.missed} is not on the PATH, so a click uses ${useName(use)}.` : ''
+      return { text: `${head}: ${S.editor} (${useName(use)}).${missed} Use /iui editor auto (the default), /iui editor <name>, /iui editor default (the system app), or /iui editor <command with {path} {line} {column}>.` }
+    }
     if (asked.kind === 'updates') {
       await loadUpdates($)
       if (asked.on !== undefined) {
@@ -1055,7 +1094,7 @@ export const register: Register = on => {
     }
     // The short state: what is set, and only the problems that keep pictures away.
     const sized = (v: number | 'full' | 'half', unit: string) => (typeof v === 'number' ? `${v} ${unit}` : v)
-    const lines = [`Intelligent UI is ${state}: theme ${theme}, ${S.theme}, text ${S.size}%, width ${sized(S.width, 'columns')}, height ${sized(S.height, 'rows')}, grid ${S.grid ? 'on' : 'off'}.`]
+    const lines = [`Intelligent UI is ${state}: theme ${theme}, ${S.theme}, text ${S.size}%, width ${sized(S.width, 'columns')}, height ${sized(S.height, 'rows')}, grid ${S.grid ? 'on' : 'off'}, editor ${S.editor}.`]
     if (S.cacheProblem) lines.push(`No pictures: ${S.cacheProblem}. See /iui details.`)
     else if (S.setupNeeded) lines.push(`In ${S.isHerdr ? 'herdr' : 'iTerm2'}, run /iui setup once to show pictures.`)
     else if (!ready.canDraw) {
@@ -1067,7 +1106,7 @@ export const register: Register = on => {
     if (!ready.typst) lines.push(`Typst is not installed, so answers stay text. Install it: ${typstHintOf(ready.isMac)}`)
     const notice = updateNotice(await updateState($))
     if (notice) lines.push(notice)
-    lines.push('Change: /iui on | off | size | width | height | grid | select | updates | theme. More: /iui details')
+    lines.push('Change: /iui on | off | size | width | height | grid | select | editor | updates | theme. More: /iui details')
     return { text: bad + lines.join('\n') }
   }).catch(($, e, next) => next(e))
 

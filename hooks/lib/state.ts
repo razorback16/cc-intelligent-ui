@@ -161,6 +161,12 @@ export const S = {
   // Code's version ('' not known), read in setUp.
   select: true,
   engine: '',
+  // `/iui editor`: what a click on a file opens it in (open.ts: parseEditor),
+  // `auto` by default; the known editor `auto` found (null: not looked up
+  // yet; '': none); and the paths of programs on the PATH by name ('': none).
+  editor: 'auto',
+  autoEditor: null as string | null,
+  onPath: new Map<string, string>(),
   look: null as Look | null,
   // The usable themes the last scan found, for the typeahead.
   themeChoices: [] as ThemeInfo[],

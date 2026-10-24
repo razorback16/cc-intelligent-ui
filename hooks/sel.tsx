@@ -10,9 +10,9 @@
 import type { ClientModule, JsonValue } from 'claude-code'
 
 type Props = { id: string; page: number }
-// The drag (anchor, head, the button down), the cell of the last hover post
-// ('' none) and the last up or clear posted.
-type Drag = { ax: number; ay: number; hx: number; hy: number; isDown: boolean; over?: string; end?: JsonValue }
+// The drag (anchor, head, the button down, alt held at the down), the cell
+// of the last hover post ('' none) and the last up or clear posted.
+type Drag = { ax: number; ay: number; hx: number; hy: number; isDown: boolean; alt?: boolean; over?: string; end?: JsonValue }
 type Phase = 'down' | 'move' | 'up' | 'clear' | 'hover' | 'leave'
 
 // The posts' order, one count for every instance (the module is shared).
@@ -24,6 +24,8 @@ const Select: ClientModule<Props, Drag> = (props, surface) => {
     const size = { columns: surface.columns, rows: surface.rows }
     const data: Record<string, JsonValue> = { id: props.id, page: props.page, anchor: { x: d.ax, y: d.ay }, head: { x: d.hx, y: d.hy }, phase, seq: ++seq, size }
     if ((phase === 'hover' || phase === 'leave') && d.end) data.end = d.end
+    // An alt+click copies its target (a plain click opens it).
+    if (phase === 'clear' && d.alt) data.alt = true
     return data
   }
   // Posts the drag at `phase` and keeps it as the state; an up or a clear is kept with it (`end`).
@@ -36,7 +38,7 @@ const Select: ClientModule<Props, Drag> = (props, surface) => {
     const now = surface.state
     if (ev.type === 'down') {
       if (ev.button && ev.button !== 'left') return
-      post({ ax: ev.x, ay: ev.y, hx: ev.x, hy: ev.y, isDown: true }, 'down')
+      post({ ax: ev.x, ay: ev.y, hx: ev.x, hy: ev.y, isDown: true, ...(ev.alt ? { alt: true } : {}) }, 'down')
       return
     }
     if (!now?.isDown) {

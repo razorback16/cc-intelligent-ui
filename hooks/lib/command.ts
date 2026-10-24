@@ -8,13 +8,14 @@ import {
 } from './settings'
 import { isThemeName, type ThemeInfo } from './themes'
 import { cmd } from './api'
+import { EDITOR_NAMES, parseEditor } from './open'
 
 // `/iui` arguments: on, off, size <80-200>, width [40-400|full],
 // height [6-200|half|full], grid [on|off], select [on|off], updates
-// [on|off], details (all Intelligent UI found), grab (copy the text of the
+// [on|off], editor [auto|default|name|command], details (all Intelligent UI found), grab (copy the text of the
 // last mouse selection of pictures), dump (how the last clipboard with
 // picture cells was read), or nothing (show state). A `width`, `height`,
-// `grid`, `select` or `updates` with no value shows it.
+// `grid`, `select`, `editor` or `updates` with no value shows it.
 export type Command =
   | { kind: 'on' | 'off' | 'show' | 'details' | 'probe' | 'grab' | 'dump' }
   | { kind: 'size'; percent: number }
@@ -23,6 +24,7 @@ export type Command =
   | { kind: 'grid'; grid?: boolean }
   | { kind: 'updates'; on?: boolean }
   | { kind: 'select'; on?: boolean }
+  | { kind: 'editor'; editor?: string }
   | { kind: 'theme'; name?: string }
   | { kind: 'setup'; remove: boolean }
   | { kind: 'bad' }
@@ -60,6 +62,15 @@ export function parseCommand(args: string): Command {
   if (words[0] === 'grid' && words.length === 2 && (words[1] === 'on' || words[1] === 'off')) return { kind: 'grid', grid: words[1] === 'on' }
   if (words[0] === 'select' && words.length === 1) return { kind: 'select' }
   if (words[0] === 'select' && words.length === 2 && (words[1] === 'on' || words[1] === 'off')) return { kind: 'select', on: words[1] === 'on' }
+  if (words[0] === 'editor') {
+    // The value is the rest of the text (a command has spaces); `auto`, `default` and a known name are lower case, other words stay as typed.
+    const value = typed.slice(1).join(' ')
+    if (!value) return { kind: 'editor' }
+    const low = value.toLowerCase()
+    const one = typed.length === 2 && (low === 'auto' || low === 'default' || EDITOR_NAMES.includes(low)) ? low : value
+    if (parseEditor(one)) return { kind: 'editor', editor: one }
+    return { kind: 'bad' }
+  }
   if (words[0] === 'updates' && words.length === 1) return { kind: 'updates' }
   if (words[0] === 'updates' && words.length === 2 && (words[1] === 'on' || words[1] === 'off')) return { kind: 'updates', on: words[1] === 'on' }
   return { kind: 'bad' }
@@ -75,6 +86,7 @@ const SUBCOMMANDS = [
   { name: 'height', description: `the most rows an image or a Typst drawing takes, ${MIN_HEIGHT}-${MAX_HEIGHT}, half or full` },
   { name: 'grid', description: 'each line of text on whole terminal rows, on or off' },
   { name: 'select', description: 'select and copy picture text with the mouse, on or off' },
+  { name: 'editor', description: 'what a click on a file path opens it in: auto, default, an editor or a command' },
   { name: 'updates', description: 'look for a new version once a day, on or off' },
   { name: 'theme', description: 'list the themes, or switch to one' },
   { name: 'setup', description: 'iTerm2 and herdr: add the shell line that turns pictures on' },
@@ -101,7 +113,7 @@ const SELECTS = ['on', 'off'] as const
 export type Suggestion = { text: string; label?: string; description?: string }
 export function commandSuggestions(
   text: string, token: string, start: number,
-  o: { themes: readonly ThemeInfo[]; active: string; size: number; width?: Width; height?: Height; grid?: boolean; updates?: boolean; select?: boolean },
+  o: { themes: readonly ThemeInfo[]; active: string; size: number; width?: Width; height?: Height; grid?: boolean; updates?: boolean; select?: boolean; editor?: string; onPath?: ReadonlyMap<string, string>; autoEditor?: string | null },
 ): Suggestion[] {
   if (token === '/iui' && /^\s*$/.test(text.slice(0, start))) {
     return SUBCOMMANDS.map(c => ({ text: `/iui ${c.name}`, label: c.name, description: c.description }))
@@ -150,7 +162,19 @@ export function commandSuggestions(
   const selectRows = (prefix: string, lead: string) => SELECTS
     .filter(v => v.startsWith(prefix))
     .map(v => ({ text: `${lead}${v}`, label: v, description: v === select ? 'in use' : v === 'on' ? 'the default' : undefined }))
+  const editor = o.editor ?? 'auto'
+  const found = o.autoEditor ? `, found ${o.autoEditor}` : ''
+  const editorRows = (prefix: string, lead: string) => {
+    // The editors on the PATH first (known after the first lookup).
+    const names = [...EDITOR_NAMES].sort((a, b) => Number(!!o.onPath?.get(b)) - Number(!!o.onPath?.get(a)))
+    return [
+      { name: 'auto', description: `${editor === 'auto' ? 'in use, ' : ''}the default: the first editor on the PATH${found}` },
+      { name: 'default', description: `${editor === 'default' ? 'in use, ' : ''}the system app` },
+      ...names.map(name => ({ name, description: name === editor ? 'in use' : o.onPath?.get(name) ? 'on the PATH' : undefined })),
+    ].filter(r => r.name.startsWith(prefix)).map(r => ({ text: `${lead}${r.name}`, label: r.name, description: r.description }))
+  }
   if (before.length === 0) {
+    if (word === 'editor') return editorRows('', 'editor ')
     if (word === 'theme') return themeRows('', 'theme ')
     if (word === 'height') return heightRows('', 'height ')
     if (word === 'size') return sizeRows('', 'size ')
@@ -167,6 +191,7 @@ export function commandSuggestions(
   if (before.length === 1 && before[0] === 'grid') return gridRows(word, '')
   if (before.length === 1 && before[0] === 'updates') return updateRows(word, '')
   if (before.length === 1 && before[0] === 'select') return selectRows(word, '')
+  if (before.length === 1 && before[0] === 'editor') return editorRows(word, '')
   return []
 }
 
@@ -175,7 +200,7 @@ export function commandSuggestions(
 export async function registerCommand($: EngineInterface) {
   await cmd($, {
     name: 'iui',
-    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image or a Typst drawing takes), grid [on|off] (each line of text on whole terminal rows), select [on|off] (select and copy picture text with the mouse), updates [on|off] (look for a new version once a day), theme [name] (list or switch themes), grab (copy the text of the selected pictures, or of the picture cells on the clipboard), dump (copy diagnostics)",
-    argumentHint: '[on|off|size <percent>|width [columns|full]|height [rows|half|full]|grid [on|off]|select [on|off]|updates [on|off]|theme [name]|grab|dump]',
+    description: "Draw Claude's answers as rendered Markdown pictures: on, off, size <80-200> (text size in % of the terminal's), width [40-400|full] (the most columns a picture takes), height [6-200|half|full] (the most rows an image or a Typst drawing takes), grid [on|off] (each line of text on whole terminal rows), select [on|off] (select and copy picture text with the mouse), editor [auto|default|name|command] (what a click on a file path opens it in), updates [on|off] (look for a new version once a day), theme [name] (list or switch themes), grab (copy the text of the selected pictures, or of the picture cells on the clipboard), dump (copy diagnostics)",
+    argumentHint: '[on|off|size <percent>|width [columns|full]|height [rows|half|full]|grid [on|off]|select [on|off]|editor [auto|default|name|command]|updates [on|off]|theme [name]|grab|dump]',
   }).catch(() => undefined)
 }

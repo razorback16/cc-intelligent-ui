@@ -192,7 +192,7 @@ function world($: any, on: any, o: {
     if (argv[0] === 'kill') return ok('')
     if (/cc-intelligent-ui-/.test(cmd)) return ok('/c\nDarwin\n')
     if (cmd.includes('command -v typst')) return ok('/usr/bin/typst\n')
-    if (cmd.includes('command -v code')) return o.code ? ok('/usr/local/bin/code\n') : ok('', 1)
+    if (argv[0] === 'sh' && argv.at(-1) === 'code') return o.code ? ok('code /usr/local/bin/code\n') : ok('', 1)
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
     if (cmd.includes('od -An')) return ok(`${HEAD}\n@\n`)
     if (argv.includes(FILE)) {
@@ -756,7 +756,7 @@ function fake(o: {
   return { $, asked, options, during, runs, files }
 }
 const CODE = '/usr/bin/code'
-const hasCode = (argv: string[]) => (argv.join(' ').includes('command -v code') ? { exitCode: 0, stdout: `${CODE}\n` } : undefined)
+const hasCode = (argv: string[]) => (argv[0] === 'sh' && argv.at(-1) === 'code' ? { exitCode: 0, stdout: `code ${CODE}\n` } : undefined)
 const plain = (file = FILE) => ({ plan: PLAN, callPlan: PLAN, file, isMac: false, isRemote: false, onEdited: () => undefined })
 
 test('with no plan file there is no editor: the edit answer is feedback', async () => {
@@ -844,7 +844,7 @@ test('the code command: -lc fails, -c finds it, and the path is cached', async (
 })
 
 test('a code path that is not absolute is refused, and the refusal is cached', async () => {
-  const w = fake({ answers: [PLAN_AUTO, PLAN_AUTO], run: () => ({ exitCode: 0, stdout: 'code\n' }) })
+  const w = fake({ answers: [PLAN_AUTO, PLAN_AUTO], run: () => ({ exitCode: 0, stdout: 'code code\n' }) })
   await decidePlan(w.$, plain())
   expect(w.options[0]).not.toContain(PLAN_EDIT)
   expect(S.planCode).toBe('')
@@ -854,11 +854,11 @@ test('a code path that is not absolute is refused, and the refusal is cached', a
 })
 
 test('on Linux a GUI editor is looked for only with a display, and the result is cached', async () => {
-  const gedit = (argv: string[]) => (argv[2]?.includes('command -v "$c"') ? { exitCode: 0, stdout: 'gedit /usr/bin/gedit\n' } : undefined)
+  const gedit = (argv: string[]) => (argv[2]?.includes('gedit') ? { exitCode: 0, stdout: 'gedit /usr/bin/gedit\n' } : undefined)
   const none = fake({ answers: [PLAN_AUTO], run: gedit })
   await decidePlan(none.$, plain())
   expect(none.options[0]).not.toContain(PLAN_EDIT)
-  expect(none.runs.some(a => a[2]?.includes('command -v "$c"'))).toBe(false)
+  expect(none.runs.some(a => a[2]?.includes('gedit'))).toBe(false)
   expect(S.planGui).toEqual([])
   for (const name of ['DISPLAY', 'WAYLAND_DISPLAY']) {
     const w = fake({ answers: [PLAN_AUTO, PLAN_AUTO], run: gedit, env: { [name]: ':0' } })

@@ -84,6 +84,11 @@ Settings that you change are kept for later sessions.
 | `/iui height <6–200>` | Sets the most rows, never more than `full` |
 | `/iui grid` | Shows if the row grid is on or off |
 | `/iui grid on` / `off` | Puts each line of text on the terminal rows (on, the default), or uses the usual spacing (off). See [Selection and the row grid](#selection-and-the-row-grid) |
+| `/iui editor` | Shows the editor setting and the editor in use |
+| `/iui editor auto` | Uses the first editor on the PATH: `code`, `code-insiders`, `codium`, `cursor`, `windsurf`, `zed`, `zeditor`, `subl`, `idea`, `webstorm`, `pycharm`, `goland`, `clion`, `rider`. With none, it uses the system default app. The default. See [Click a link, a file or a command](#click-a-link-a-file-or-a-command) |
+| `/iui editor <name>` | Uses this editor (for example `/iui editor cursor`). If it is not on the PATH, the mod uses the `auto` choice and the toast says so |
+| `/iui editor default` | Always uses the system default app. It does not use the line number |
+| `/iui editor <command>` | Uses your own command. Use `{path}`, `{line}` and `{column}` in it, for example `/iui editor nvim-qt +{line} {path}`. The mod splits it on spaces and runs it with no shell |
 | `/iui select` | Shows if picture select is on or off |
 | `/iui select on` / `off` | Drag over an answer to copy its text (on, the default). With `off`, a drag is Claude Code's own selection, which skips pictures from Claude Code 2.1.305. See [Picture select](#picture-select-claude-code-21298-or-newer) |
 | `/iui updates` | Shows if the update check is on, and the newest version it found |
@@ -114,16 +119,26 @@ A selection can go on into the next page of the same answer. The copy is usually
 With picture select, the links, file paths, commands and code block copy buttons in an answer are live.
 
 - **Hover** over one and its cells turn blue. There is no hover highlight while a selection shows.
-- **Click** it (press and release on the same cell) to copy it:
+- **Click** a link or a file path (press and release on the same cell) to open it:
+
+  | Click on | What happens | Toast |
+  |---|---|---|
+  | A web link | Opens in the browser (`open` on macOS, `xdg-open` on Linux) | "opened the link" |
+  | A file path | Opens in your editor, at the line and column of the path (`hooks/lib/copy.ts:42`) | "opened copy.ts in code" (the file and the editor) |
+
+- **Alt+click** a link or a path to copy it, as a click did before. The toast says "copied the link" or "copied the path".
+- **Click** a command, or the copy button at the top right of a code block, to copy it:
 
   | Click on | Copies | Toast |
   |---|---|---|
-  | A web link | Its URL | "copied the link" |
-  | A file path | Its full path | "copied the path" |
   | A command | The full command | "copied the command" |
   | The copy button at the top right of a code block | All the code of the block | "copied the code" |
 
 - **Drag** from a link, path or command to select text as usual.
+- If the open fails, the mod copies the target and the toast says so.
+- Over ssh, a click copies, because a program would run on the remote computer.
+
+**Which editor.** `/iui editor` sets the editor for file paths. With `auto` (the default), the mod uses the first editor it finds on the PATH, in the order in [Commands](#commands). If it finds none, it uses the system default app. The setting is kept for later sessions.
 
 **What counts.** A web link is a Markdown link to an `http:`, `https:` or `mailto:` URL, or a bare URL. A file path is in the text or in inline code, and the file must exist (a relative path starts from the session's folder). A command is any other inline code, for example `` `git status` ``; for `` `! cmd` `` the click copies only `cmd`. A code block's text is not a target: use its copy button or select the text. Links to headings are not targets.
 

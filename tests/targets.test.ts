@@ -108,10 +108,18 @@ test('a bare path takes the punctuation around it off; a bare word that is a nam
   const links = [file('a/b.ts:12', '/w/a/b.ts')]
   // "(a/" "b.ts:12)," with no space between: one token.
   const items = [word(0, '(a/', 0, 0), word(1, 'b.ts:12),', 18, 0)]
-  expect(of(items, PAR, links).map(t => t.target)).toEqual([{ kind: 'file', path: '/w/a/b.ts' }])
+  expect(of(items, PAR, links).map(t => t.target)).toEqual([{ kind: 'file', path: '/w/a/b.ts', line: 12 }])
   expect(of([word(0, 'Node.js', 0, 0)], PAR, [file('Node.js', '/w/Node.js')])).toEqual([])
   // A space between: two tokens, neither a path.
   expect(of([word(0, 'a/', 0, 0), word(1, 'b.ts:12', 30, 0)], PAR, links)).toEqual([])
+})
+
+test("a file's line and column come from its label's `:N` or `:N:M`; none without one", () => {
+  const links = [file('a/b.ts:12:5', '/w/a/b.ts'), file('c.py:7', '/w/c.py'), file('d.md', '/w/d.md')]
+  const at = (code: string) => of([word(0, code, 0, 0, { code })], PAR, links).map(t => t.target)
+  expect(at('a/b.ts:12:5')).toEqual([{ kind: 'file', path: '/w/a/b.ts', line: 12, column: 5 }])
+  expect(at('c.py:7')).toEqual([{ kind: 'file', path: '/w/c.py', line: 7 }])
+  expect(at('d.md')).toEqual([{ kind: 'file', path: '/w/d.md' }])
 })
 
 test('the text of a code block is no target, also a shell block', () => {

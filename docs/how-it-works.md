@@ -51,7 +51,7 @@ Claude Code's selection copies picture cells as placeholder characters, not text
 - **Highlight.** The layout never changes. The mod swaps the page's picture with `$.ui.blit` (`hooks/lib/blit.ts`), one small kitty command with the same image id, at most once per 16 ms.
 - **PNG in JavaScript.** The hooks have no zlib, so `hooks/lib/png.ts` decodes the page and keeps a deflate piece for each row of cells, plain and tinted. A frame joins the pieces and builds new ones only for the first and last rows. `perl` writes the frame to a file that the terminal reads.
 - **Copy.** At `up`, the mod copies the words under the selected cells with `$.ui.copy`, and a toast says "copied N chars of text".
-- **Click targets** (`hooks/lib/targets.ts`). The probe also tags link URLs, inline code and each code block's copy button. Hover highlights the target; a click copies it.
+- **Click targets** (`hooks/lib/targets.ts`). The probe also tags link URLs, inline code and each code block's copy button. Hover highlights the target. A click opens a link or a file (alt+click copies it) and copies a command or code.
 - **Clearing.** A selection goes when you type in the prompt or make a Claude Code selection (checked every 250 ms while a selection shows).
 - **When it is on.** Fullscreen mode, Claude Code 2.1.298 or newer, not over ssh. If a `Client` fails, picture select is off until a reload. `/iui details` shows the state.
 

@@ -16,6 +16,7 @@ import { firstLine } from './markdown'
 import type { Drawing } from './answer'
 import { drawPages, type ShownLink } from './draw'
 import { delay, runCmd, getenv, cat, exec, send, abort, ask, uiResolve } from './api'
+import { pathsOf } from './open'
 
 // The question's chip and its two wordings.
 export const PLAN_HEADER = 'Plan'
@@ -176,17 +177,8 @@ export function guiEditorOf(stdout: string): string[] {
 // The `code` command's path ('' when none), looked up once per load.
 async function findCode($: EngineInterface): Promise<string> {
   if (S.planCode !== null) return S.planCode
-  let found = ''
-  for (const flag of ['-lc', '-c']) {
-    const got = await exec($, ['sh', flag, 'command -v code'], { timeoutMs: 5000 }).catch(() => null)
-    const path = got?.exitCode === 0 ? firstLine(got.stdout) : ''
-    if (path.startsWith('/')) {
-      found = path
-      break
-    }
-  }
-  S.planCode = found
-  return found
+  S.planCode = (await pathsOf($, ['code'])).get('code') ?? ''
+  return S.planCode
 }
 
 // On Linux with a display (X11 or Wayland), a GUI editor that waits

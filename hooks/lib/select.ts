@@ -25,8 +25,8 @@ export type SelectPhase = 'down' | 'move' | 'up' | 'clear' | 'hover' | 'leave'
 // rows as the Client has them (for the trace). A hover (the pointer with no
 // button down; anchor and head its cell) or a leave carries the up or clear
 // posted before it (`end`): a later post of one frame replaces an earlier
-// one.
-export type SelectPost = { id: string; page: number; anchor: Point; head: Point; phase: SelectPhase; seq: number; size?: Box; end?: SelectPost }
+// one. `alt`: a clear whose down had alt held (the click copies).
+export type SelectPost = { id: string; page: number; anchor: Point; head: Point; phase: SelectPhase; seq: number; size?: Box; alt?: boolean; end?: SelectPost }
 // The selection: anchor and head in the drawing's rows (the page tops
 // added), `isUp` once the button came up.
 export type Selection = { id: string; anchor: Point; head: Point; isUp: boolean }
@@ -163,7 +163,8 @@ export function postOf(data: unknown, isEnd = false): SelectPost | null {
   const size = d.size as Partial<Box> | null | undefined
   const known = size && isInt(size.columns) && isInt(size.rows) ? { size: { columns: size.columns, rows: size.rows } } : {}
   const end = !isEnd && (phase === 'hover' || phase === 'leave') && d.end ? postOf(d.end, true) : null
-  return { id: d.id, page: d.page, anchor, head, phase, seq: d.seq, ...known, ...(end ? { end } : {}) }
+  const alt = phase === 'clear' && d.alt === true ? { alt: true } : {}
+  return { id: d.id, page: d.page, anchor, head, phase, seq: d.seq, ...known, ...alt, ...(end ? { end } : {}) }
 }
 
 // The row each page starts at in its drawing (the pages one under the other).
