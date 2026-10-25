@@ -641,6 +641,10 @@ function world(
     hold() {
       w.gate = new Promise<void>(r => (w.release = r))
     },
+    openGate: null as Promise<void> | null, releaseOpens: () => {},
+    holdOpens() {
+      w.openGate = new Promise<void>(r => (w.releaseOpens = r))
+    },
     readGate: null as Promise<void> | null, releaseReads: () => {},
     holdReads() {
       w.readGate = new Promise<void>(r => (w.releaseReads = r))
@@ -735,6 +739,7 @@ function world(
     // A click's open, detached (no editor is on the PATH: the system app).
     if (argv[0] === 'sh' && argv[2] === DETACH_SH && argv[4] === 'open') {
       w.opens.push(argv.slice(4))
+      if (w.openGate) await w.openGate
       return ok('', w.openFails ? 1 : 0)
     }
     if (argv[0] === '/usr/bin/perl' && argv[2] === READ_PL) {
@@ -1929,6 +1934,24 @@ test('picture select: a link or a file that does not open is copied, and the toa
   expect(w.copies).toEqual(['https://example.com', '/w/src/a.ts'])
   expect(w.toasts).toContain('Intelligent UI: could not open the link, so copied it')
   expect(w.toasts).toContain('Intelligent UI: could not open the file, so copied its path')
+})
+
+test('picture select: a link whose open fails late is not copied over a newer copy', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  w.openFails = true
+  w.holdOpens()
+  await click(ui, 6, 3)
+  await settle(w)
+  expect(w.opens.length).toBe(1)
+  await click(ui, 11, 8)
+  await settle(w)
+  expect(w.copies).toEqual(['echo hello\nls -la'])
+  w.releaseOpens()
+  await settle(w)
+  expect(w.copies).toEqual(['echo hello\nls -la'])
+  expect(w.clipboard).toBe('echo hello\nls -la')
+  expect(w.toasts).toContain('Intelligent UI: could not open the link')
+  expect(w.toasts).not.toContain('Intelligent UI: could not open the link, so copied it')
 })
 
 test('picture select: a click whose page still reads its words copies nothing after a newer click on a ready page', async ($, on) => {

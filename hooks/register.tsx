@@ -679,7 +679,7 @@ async function clickAt($: EngineInterface, d: Drawn & { job?: Job }, post: Selec
     if (opens) {
       // An open writes no clipboard: the turn is not claimed.
       turn.done()
-      await openTarget($, target, surface)
+      await openTarget($, target, surface, turn)
       return
     }
     const mine = await claim(turn)
@@ -692,14 +692,17 @@ async function clickAt($: EngineInterface, d: Drawn & { job?: Job }, post: Selec
 }
 
 // A web link or a file opened (clickAt), with its toast. One that does not
-// open (no program, an exit code not 0) is copied.
-async function openTarget($: EngineInterface, target: Target, surface: RenderSurface) {
+// open (no program, an exit code not 0) is copied in the click's turn: a
+// newer copy (or a new native selection) while it opened keeps the clipboard.
+async function openTarget($: EngineInterface, target: Target, surface: RenderSurface, turn: Turn) {
   const use: Use = target.kind === 'file' ? await editorNow($) : { kind: 'app' }
   const argv = openArgv(target, { isMac: !!S.env?.isMac, use })
   const got = argv ? await exec($, detachedArgv(argv), { timeoutMs: OPEN_TIMEOUT_MS }).catch(() => null) : null
   if (S.debug) traceDebug($, `select: open ${argv?.join(' ') ?? 'none'} exit ${got ? got.exitCode : 'failed'}`)
   if (got?.exitCode === 0) return void toast($, openedText(target, use))
-  claimNow($, nativeNow($))
+  if (!(await claim(turn)) || !(await isNewest($, turn))) {
+    return void toast($, `Intelligent UI: could not open the ${target.kind === 'web' ? 'link' : 'file'}`)
+  }
   await copyTarget($, target, surface, true)
 }
 
