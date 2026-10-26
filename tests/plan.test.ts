@@ -541,9 +541,15 @@ test("the result's plan wins over the text read at the call (an edit in the engi
 
 test('the plan waits at most 5 s for a write that does not end', async ($, on) => {
   const w = world($, on, { answers: [PLAN_AUTO] })
-  on('tool.call', { tool: 'Write' }, async () => new Promise(() => undefined))
+  // The write ends with the test: a call left running is cut after 5 s of real time, and its rejection is unhandled.
+  let end!: () => void
+  const ends = new Promise<void>(r => (end = r))
+  on('tool.call', { tool: 'Write' }, async (_: any, e: any) => {
+    await ends
+    return { result: { type: 'update', filePath: e.file_path, content: e.content, structuredPatch: [], originalFile: PLAN } }
+  })
   await ready($)
-  void $.tool.call({ tool: 'Write', file_path: FILE, content: EDITED } as any)
+  const writing = $.tool.call({ tool: 'Write', file_path: FILE, content: EDITED } as any)
   await w.clock.settle()
   const call = exitPlan($)
   await w.clock.advance(4900)
@@ -552,6 +558,8 @@ test('the plan waits at most 5 s for a write that does not end', async ($, on) =
   const got: any = await call
   expect(w.asked.length).toBe(1)
   expect(got.result.plan).toBe(PLAN)
+  end()
+  await writing
 })
 
 test('an edit whose pictures fail is still asked, with a toast, and the approval sends the edited plan', async ($, on) => {
