@@ -2,16 +2,20 @@
 
 All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Code finds a new version by the `version` in `.claude-plugin/plugin.json`. To get it, refer to [Update](docs/install.md#update).
 
-## Unreleased
+## 0.3.4 (2026-10-25)
 
 ### New
 
-- **A click opens a link or a file.** With picture select, a plain click on a web link opens it in the browser (`open` on macOS, `xdg-open` on Linux). A plain click on a file path opens it in your editor, at the line and column of the path. Alt+click copies the link or path, as a click did before. A click on a command or a code block's copy button still copies, and a drag still selects text. If the open fails, the mod copies the target and the toast says so, but not over a newer copy that came while it tried to open. Over ssh, a click copies. In iTerm2, Option+click goes to the terminal's own selection, so alt+click may not reach the mod there. Refer to [Click a link, a file or a command](docs/usage.md#click-a-link-a-file-or-a-command).
+- **A click opens a link or a file.** With picture select, a plain click on a web link opens it in the browser (`open` on macOS, `xdg-open` on Linux). A plain click on a file path opens it in your editor, at the line and column of the path. With no editor (the system app), only pictures, PDFs and text or code files open (text and code with `open -t` on macOS). The mod copies the path of other files, such as a `.command`, `.app`, `.webloc` or `.desktop` file, because the system app can run them. A folder or a symbolic link is not a live path. Alt+click copies the link or path, as a click did before. A click on a command or a code block's copy button still copies, and a drag still selects text. If the open fails, the mod copies the target and the toast says so, but not over a newer copy that came while it tried to open. Over ssh, a click copies. In iTerm2, Option+click goes to the terminal's own selection, so alt+click may not reach the mod there. Refer to [Click a link, a file or a command](docs/usage.md#click-a-link-a-file-or-a-command).
 - **`/iui editor`.** Sets the editor for file paths. `auto` (the default) uses the first editor on the PATH: `code`, `code-insiders`, `codium`, `cursor`, `windsurf`, `zed`, `zeditor`, `subl`, `idea`, `webstorm`, `pycharm`, `goland`, `clion`, `rider`; with none, the system default app. `/iui editor <name>` picks one, `/iui editor default` uses the system default app, and `/iui editor <command with {path} {line} {column}>` runs your own command (split on spaces, no shell). The setting is kept across sessions.
 - **A preview of pasted image paths.** When you paste the path of an image file (path text that you copied), Claude Code shows `[Image #N]` but writes no file until you send the prompt. The mod now reads the clipboard one time to find the file, and shows its preview. Absolute paths, `~/` paths, paths from the session folder, `file://` URLs, quoted paths and paths with escaped spaces work. It shows PNG, JPEG and WebP files (JPEG and WebP need Typst).
 
 ### Fixed
 
+- **Copies from other apps are not overwritten.** A click or a drag that still reads the text of its page now waits for the clipboard read of a newer copy from another app, and then copies nothing. A second copy of the same text, a text that the mod copied before, and a password manager's copy on Wayland now count as a newer copy. `/iui off` and `/clear` stop a copy that is still pending.
+- **The plan question waits for the plan's pictures** (45 s at most). If they do not show (Typst fails, or over ssh a page is too large), Claude Code's own dialog asks, with the plan as text. After you edit the plan, the mod asks in all cases, and a toast tells you if its pictures did not show.
+- **Edit the plan on macOS without `code`.** The plan opens in your default text editor, and you choose "Done editing" when you saved it. Before, the mod waited until the editor app quit (10 minutes at most).
+- **Converted pictures.** Two sessions that convert the same JPEG, WebP, SVG or PDF at the same time no longer break each other's conversion.
 - **An empty row above the previews.** The previews of pasted images no longer touch the line above them (for example "Crunched for 7s").
 
 ## 0.3.3 (2026-10-23)

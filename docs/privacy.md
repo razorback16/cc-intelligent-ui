@@ -31,7 +31,7 @@ A password manager's copy is never read:
 
 - macOS: a copy with a concealed or transient type.
 - Linux: a copy that offers the `x-kde-passwordManagerHint` target.
-- Wayland: also a copy marked sensitive. (`wl-paste --watch` hands each new copy to `cat`, which drops it.)
+- Wayland: also a copy marked sensitive. The watcher notes only that the clipboard changed, and the read sees the mark and gets no text. (`wl-paste --watch` hands each new copy to `cat`, which drops it.)
 
 ### When the mod writes the clipboard
 
