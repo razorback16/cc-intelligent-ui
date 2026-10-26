@@ -6,7 +6,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { BLANK_AFTER_LIVE_MS, MAX_RUNNING, RESULTS_KEPT } from './settings'
-import { finalized, keep, keepIn, live, pending, queue, refresh, results, running, S, type Job } from './state'
+import { finalized, jobEnds, keep, keepIn, live, pending, queue, refresh, results, running, S, type Job } from './state'
 import { hashOf } from './draw'
 import { noteDesign, recordDesign } from './designs'
 import { compile, logDebug } from './typst'
@@ -55,6 +55,10 @@ export function pump($: EngineInterface) {
         }
         // A new run of the same key may have taken the entry.
         if (running.get(job.key) === entry) running.delete(job.key)
+        for (const end of [...jobEnds]) {
+          jobEnds.delete(end)
+          end()
+        }
         // A cancelled compile draws nothing new: no redraw.
         if (result !== 'cancelled') jobDone($)
         pump($)

@@ -364,6 +364,8 @@ function world(on: any, o: {
   failConvert?: boolean
   failConvertFrom?: number
   failMove?: boolean
+  // Runs just before a move (`mv -f part out`), with the files.
+  beforeMove?: (argv: string[], files: Record<string, string>) => void
   holdConvert?: number
   holdRun?: { at: number; until: Promise<void> }
   holdCompile?: Promise<void>
@@ -467,6 +469,7 @@ function world(on: any, o: {
     if (argv[0] === '/usr/bin/typst' && argv[1] === 'eval') return ok('{}')
     if (argv[0] === 'mv') {
       moves.push(argv)
+      o.beforeMove?.(argv, files)
       if (o.failMove || !(argv[2]! in files)) return ok('', 1)
       files[argv[3]!] = files[argv[2]!]!
       delete files[argv[2]!]
@@ -700,7 +703,7 @@ test('a JPEG, a WebP and an SVG Claude sends are made PNGs by Typst once, and dr
   expect(converts[0]).toContain('maxh=640')
   // Typst writes a part file; only a whole one is moved to image.png.
   const out = shown[0].props.source.file
-  expect(converts[0]!.at(-1)).toBe(out.replace(/image\.png$/, 'image.part.png'))
+  expect(converts[0]!.at(-1)).toMatch(new RegExp(`^${out.replace(/image\.png$/, '')}image-[0-9a-z]+\\.part\\.png$`))
   expect(moves[0]).toEqual(['mv', '-f', converts[0]!.at(-1), out])
   // A redraw converts nothing again, and the JPEG's own bytes are never read as a PNG.
   await ui.redraw(sent(output).props)
@@ -1127,6 +1130,26 @@ test('with no Typst, or a conversion that fails, a JPEG leaves the row as it is'
   // The failure is kept for this stamp: no second run.
   await ui.redraw(sent(attachAll('/t/photo.jpg')).props)
   expect(converts.length).toBe(1)
+})
+
+test('two sessions converting the same JPEG at once each move their own part file', async ($, on) => {
+  const out = convertedPath('/c', '/t/photo.jpg', '1:1000', BOX)
+  // The other session's run moves its part file (all runs once shared image.part.png) just before this one's move.
+  const theirs = out.replace(/image\.png$/, 'image.part.png')
+  const { converts, moves } = world(on, {
+    typst: true, files: { '/t/photo.jpg': JPEG },
+    beforeMove: (_, files) => {
+      if (!(theirs in files)) return
+      files[out] = files[theirs]!
+      delete files[theirs]
+    },
+  })
+  await ready($)
+  const ui = await $.ui.mount(sent(attachAll('/t/photo.jpg')))
+  expect(images(await ui.drawn())[0].props.source.file).toBe(out)
+  expect(converts.length).toBe(1)
+  expect(converts[0]!.at(-1)).not.toBe(theirs)
+  expect(moves).toEqual([['mv', '-f', converts[0]!.at(-1), out]])
 })
 
 test('a part file that can not be moved draws no picture; an image.png made before is used with no run', async ($, on) => {

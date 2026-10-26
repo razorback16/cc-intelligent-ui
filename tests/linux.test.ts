@@ -259,8 +259,8 @@ test('the plan editor on Linux: code, else a GUI editor that waits, never over s
   expect(editorArgv({ code: '', isMac: false, isRemote: false, gui }, '/h/p.md')).toEqual(['/usr/bin/kate', '--block', '/h/p.md'])
   expect(editorArgv({ code: '', isMac: false, isRemote: true, gui }, '/h/p.md')).toBe(null)
   expect(editorArgv({ code: '', isMac: false, isRemote: false, gui: [] }, '/h/p.md')).toBe(null)
-  // macOS does not change: TextEdit, never a GUI editor of the list.
-  expect(editorArgv({ code: '', isMac: true, isRemote: false, gui }, '/h/p.md')).toEqual(['open', '-W', '-t', '/h/p.md'])
+  // macOS does not change: the default text editor, never a GUI editor of the list.
+  expect(editorArgv({ code: '', isMac: true, isRemote: false, gui }, '/h/p.md')).toEqual(['open', '-t', '/h/p.md'])
 })
 
 // ---- A Linux session ---------------------------------------------------------------

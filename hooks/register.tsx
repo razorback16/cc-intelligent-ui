@@ -25,7 +25,7 @@ import {
   DEFAULT_THEME, gridText, heightText, IMAGE_MAX_COLUMNS, MARGIN_TOP, MAX_HEIGHT, MAX_WIDTH, MIN_HEIGHT, MIN_WIDTH, RESULTS_KEPT, TYPST_PROMPT,
   SELECT_SINCE, selectText, typstHintOf, widthText,
 } from './lib/settings'
-import { clip, DEFAULT_METRICS, drawnAnswers, editedPlans, keep, ownCopy, queue, refresh, running, S, settingsSet, subagentPlans, writesLive, type Env, type Job } from './lib/state'
+import { clip, DEFAULT_METRICS, drawnAnswers, editedPlans, jobEnds, keep, ownCopy, pending, queue, refresh, running, S, settingsSet, subagentPlans, writesLive, type Env, type Job } from './lib/state'
 import { beginEpoch } from './lib/epoch'
 import { escapeControls, luminanceOf, modeLine, modeOfLuminance, parseOsc11, settingOf } from './lib/mode'
 import { applyTheme, themeListing, userThemesOf } from './lib/themes'
@@ -54,11 +54,11 @@ import { onScreenOf, pastedNumbers, sentFiles } from './lib/images'
 import { drawPageField, pasteDir, pdfPagesOf, rowsAfter, sentOf, underRow, type Under } from './lib/pictures'
 import { drawPreviews, forgetPaths, keepPaths, pathPaste, pathsOf, previewRetry, previewsOf, previewsUnder, sameNumbers, type Preview } from './lib/composer'
 import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
-import { nowMs, write, surf, save, copy, uiSelection, toast, sid, exec } from './lib/api'
+import { nowMs, write, surf, save, copy, uiSelection, toast, sid, exec, delay } from './lib/api'
 import { detachedArgv, editorNow, OPEN_TIMEOUT_MS, openArgv, openedText, useName, type Use } from './lib/open'
 import {
   currentPlan, decidePlan, decisionOf, drawAskLine, drawPlanResult, drawPlanUse, isPlanQuestion, planFileOf, planInputOf, planOf,
-  planShownOf, scheduleClear, type PlanVerdict,
+  planShownOf, PLAN_DRAW_WAIT_MS, scheduleClear, type PlanVerdict,
 } from './lib/plan'
 
 // The names this module exported before the split (the tests import them).
@@ -107,9 +107,9 @@ export {
   UPDATE_URL, updateLine, updateNotice, updateToast, versionOf,
 } from './lib/updates'
 export {
-  choiceOf, decisionOf, editorArgv, feedbackOf, guiEditorOf, LINUX_EDITORS, isPlanQuestion, normalPath, PLAN_ASK_LINE, PLAN_AUTO, PLAN_CLEAR, PLAN_DRAWING, PLAN_EDIT,
-  PLAN_FEEDBACK, PLAN_HEADER, PLAN_IMPLEMENT, PLAN_MANUAL, PLAN_QUESTION, PLAN_QUESTION_EDITED, PLAN_REJECTED, planFileOf, planInputOf,
-  planOf, planOptions, planShownOf, shortPath, verdictOf, type PlanChoice, type PlanVerdict,
+  choiceOf, decisionOf, editorArgv, editorWaits, feedbackOf, guiEditorOf, LINUX_EDITORS, isPlanQuestion, normalPath, PLAN_ASK_LINE, PLAN_AUTO, PLAN_CLEAR, PLAN_DONE,
+  PLAN_DRAW_WAIT_MS, PLAN_DRAWING, PLAN_EDIT, PLAN_EDITED_UNDRAWN, PLAN_EDITING, PLAN_FEEDBACK, PLAN_HEADER, PLAN_IMPLEMENT, PLAN_MANUAL, PLAN_QUESTION, PLAN_QUESTION_EDITED,
+  PLAN_REJECTED, PLAN_REOPEN, planFileOf, planInputOf, planOf, planOptions, planShownOf, shortPath, verdictOf, type PlanChoice, type PlanVerdict,
 } from './lib/plan'
 
 // The atoms the hooks read and write (a copy of each in this file: see state.ts).
@@ -257,6 +257,40 @@ async function planDrawing(
   const drawn = { drawing, links: await linksFor($, plan, ready.env.cwd) }
   memoSet(plans, id, k, drawn)
   return drawn
+}
+
+// Whether a plan's pictures show (pages; over ssh each page can go): its
+// compile is waited for, at most PLAN_DRAW_WAIT_MS. False for a compile that
+// failed, a page too big for `{ png }`, or none in time: the engine's dialog
+// asks, as it shows the plan's text. The pages are the ToolUse row's (the
+// same text, id and Frame, at the last viewport noted: one compile).
+async function planShows($: EngineInterface, toolUseId: string, plan: string): Promise<boolean> {
+  const viewport = S.viewColumns === null ? undefined : { columns: S.viewColumns, rows: S.viewRows ?? 48 }
+  let isOver = false
+  let timer = { cancel: () => {} }
+  const late = new Promise<boolean>(resolve => {
+    timer = delay($, PLAN_DRAW_WAIT_MS, () => resolve(false))
+  })
+  const drawn = async (): Promise<boolean> => {
+    while (!isOver) {
+      // Set first: a compile that ends while this draws is not missed.
+      const ended = new Promise<void>(resolve => jobEnds.add(resolve))
+      const ready = await answerEnv($, {})
+      if (!ready) return false
+      const { drawing } = await planDrawing($, { ...(viewport ? { viewport } : {}), props: {} }, toolUseId, plan, ready)
+      if (drawing.kind === 'pages') return true
+      // Text with nothing pending is final (the compile failed); with it, the compile is slow.
+      if (drawing.kind === 'text' && !pending.has(`plan:${toolUseId}`)) return false
+      await ended
+    }
+    return false
+  }
+  try {
+    return await Promise.race([drawn(), late])
+  } finally {
+    isOver = true
+    timer.cancel()
+  }
 }
 
 // Intelligent UI's own plan question: only on the main loop of a session drawn
@@ -1463,11 +1497,12 @@ export const register: Register = on => {
   // dialog while PermissionRequest hooks run, so a question asked there waits
   // behind it). The person's words deny the call (Claude revises the plan);
   // a verdict waits for the PermissionRequest below, and is dropped once the
-  // call resolves, so it never reaches a later call. No env, no plan, or a
-  // failure: no verdict, and the engine's dialog asks. The engine may run
-  // two calls at once, and a PermissionRequest does not say which call it
-  // is for: a call that begins while another runs asks nothing (the
-  // engine's dialog asks), and no verdict is used while two run.
+  // call resolves, so it never reaches a later call. No env, no plan, no
+  // pictures of it (planShows), or a failure: no verdict, and the engine's
+  // dialog asks. The engine may run two calls at once, and a
+  // PermissionRequest does not say which call it is for: a call that begins
+  // while another runs asks nothing (the engine's dialog asks), and no
+  // verdict is used while two run.
   on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
     if (e.agentId) {
       subagentPlans.add(e.tool_use_id)
@@ -1494,9 +1529,10 @@ export const register: Register = on => {
               editedPlans.set(id, text)
               refresh($)
             },
+            isDrawn: text => planShows($, id, text),
           })
           if (outcome.kind === 'feedback') return { deny: outcome.message }
-          verdict = outcome.verdict
+          if (outcome.kind === 'verdict') verdict = outcome.verdict
         }
       } catch {
         verdict = null

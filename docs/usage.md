@@ -192,14 +192,14 @@ When Claude exits plan mode, the mod draws the plan in the transcript. Under it,
 | Yes, auto-accept edits | Approves. Claude Code then accepts file edits without asking (`acceptEdits` mode). |
 | Yes, manually approve edits | Approves. Claude Code asks before each file edit (`default` mode). |
 | Yes, clear context + auto-accept | Approves, stops the turn and runs `/clear`. Then sends "Implement this plan:" with the plan as a new prompt, in `acceptEdits` mode. |
-| Edit the plan | Opens the plan file in an editor and waits until you close it (10 minutes at most). Then asks "Approve the edited plan?". Claude gets the edited plan. |
+| Edit the plan | Opens the plan file in an editor and waits until you close it (10 minutes at most). On macOS without `code`, it waits until you choose "Done editing". Then asks "Approve the edited plan?". Claude gets the edited plan. |
 | Type something | Sends your text to Claude as changes. Claude stays in plan mode and writes a new plan. |
 | Esc | Rejects the plan and stops the turn. |
 
-**Editor.** VS Code (`code --wait`) when `code` is on your PATH. Else, on macOS, TextEdit (quit TextEdit when you are done). On Linux with a display, the first of VSCodium, Zed, Sublime Text, Kate, gedit and gvim on your PATH (close the file or window when you are done). Over ssh without `code`, or on Linux with none of these, "Edit the plan" does not show.
+**Editor.** VS Code (`code --wait`) when `code` is on your PATH. Else, on macOS, your default text editor (TextEdit if you did not change it). Save the file, then choose "Done editing". "Open the plan file again" opens it again if you closed it. On Linux with a display, the first of VSCodium, Zed, Sublime Text, Kate, gedit and gvim on your PATH (close the file or window when you are done). Over ssh without `code`, or on Linux with none of these, "Edit the plan" does not show.
 
 **The plan you see is the plan Claude gets.** If Claude writes the plan file and exits plan mode in the same message, the mod waits for the write (5 s at most) and reads the file again.
 
-**When it applies.** Only when the mod can draw the plan: the mod is on, Typst is installed, the terminal shows pictures, and the plan is from the main conversation (not a subagent). Otherwise, or if the flow fails, Claude Code shows its own dialog.
+**When it applies.** Only when the mod can draw the plan: the mod is on, Typst is installed, the terminal shows pictures, and the plan is from the main conversation (not a subagent). The question waits until the pictures of the plan show (45 s at most). Otherwise, Claude Code shows its own dialog with the plan as text. This also occurs if the pictures do not show (for example, Typst fails, or over ssh a page is too large) or if the flow fails. After you edit the plan, the mod asks "Approve the edited plan?" also when its pictures do not show, so that Claude gets your edit. A toast tells you.
 
 For the limits, see [Limitations](limitations.md).

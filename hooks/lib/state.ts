@@ -285,6 +285,8 @@ export const live = new Map<string, { job: Job; still: { cancel: () => void } }>
 export const finalized = new Set<string>()
 // A final block not drawn yet: blank until `showText` (its deadline passed).
 export const pending = new Map<string, { textHash: string; showText: boolean; timer: { cancel: () => void } }>()
+// Called once when the next compile ends, cancelled or not (the plan waits on it).
+export const jobEnds = new Set<() => void>()
 // The jobs waiting, and the jobs that compile now by key (with the cancel
 // of each: beginEpoch stops them; and its signal: an entry cancelled still
 // holds its slot until its compile ends, but its key may be enqueued again).

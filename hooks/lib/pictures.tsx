@@ -263,7 +263,8 @@ async function convertOnce($: EngineInterface, ready: Env, file: string, stamp: 
     await write($, `${dir}/source.txt`, `${file}\n`).catch(() => undefined)
     // Typst writes a part file, moved to image.png only once it is whole, so
     // a run that is killed or fails leaves no image.png for a later load.
-    const part = `${dir}/image.part.png`
+    // Its own name per run: another session or load may convert the same key at once.
+    const part = `${dir}/image-${Math.random().toString(36).slice(2, 10)}.part.png`
     const { argv, env } = convertCall({ typst: ready.typst!, root: ready.root, cache: ready.cache, file, box, out: part, page: pdf?.page })
     const failed = (err: unknown) => ({ exitCode: 1, stdout: '', stderr: `did not run: ${String(err)}` })
     const ran = await exec($, argv, { timeoutMs: COMPILE_TIMEOUT_MS, env }).catch(failed)

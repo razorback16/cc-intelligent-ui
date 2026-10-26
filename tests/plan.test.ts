@@ -1,8 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import {
-  choiceOf, decisionOf, editorArgv, feedbackOf, isPlanQuestion, normalPath, PLAN_ASK_LINE, PLAN_AUTO, PLAN_CLEAR, PLAN_DRAWING, PLAN_EDIT,
-  PLAN_FEEDBACK, PLAN_HEADER, PLAN_MANUAL, PLAN_QUESTION, PLAN_QUESTION_EDITED, PLAN_REJECTED, planFileOf, planInputOf, planOf, planOptions,
+  choiceOf, decisionOf, editorArgv, editorWaits, feedbackOf, isPlanQuestion, normalPath, PLAN_ASK_LINE, PLAN_AUTO, PLAN_CLEAR, PLAN_DONE,
+  PLAN_DRAW_WAIT_MS, PLAN_DRAWING, PLAN_EDIT, PLAN_EDITED_UNDRAWN, PLAN_EDITING, PLAN_FEEDBACK, PLAN_HEADER, PLAN_MANUAL, PLAN_QUESTION, PLAN_QUESTION_EDITED,
+  PLAN_REJECTED, PLAN_REOPEN, planFileOf, planInputOf, planOf, planOptions,
   planShownOf, shortPath, TYPST_PROMPT, verdictOf,
 } from '../hooks/register'
 // This file's own copy of the flow, driven with a fake `$`: the plugin's module is another one.
@@ -97,9 +98,13 @@ test('a verdict becomes the PermissionRequest decision', () => {
   expect(decisionOf({ kind: 'deny', message: PLAN_REJECTED }, input)).toEqual({ behavior: 'deny', message: 'The user rejected the plan.', interrupt: true })
 })
 
-test('the editor: VS Code when found, else TextEdit on a local Mac, else none', () => {
+test('the editor: VS Code when found, else the text editor on a local Mac, else none', () => {
   expect(editorArgv({ code: '/usr/local/bin/code', isMac: true, isRemote: false }, '/h/p.md')).toEqual(['/usr/local/bin/code', '--wait', '/h/p.md'])
-  expect(editorArgv({ code: '', isMac: true, isRemote: false }, '/h/p.md')).toEqual(['open', '-W', '-t', '/h/p.md'])
+  // Not `open -W`: it waits until the whole app quits, not until the window closes.
+  expect(editorArgv({ code: '', isMac: true, isRemote: false }, '/h/p.md')).toEqual(['open', '-t', '/h/p.md'])
+  expect(editorWaits(['open', '-t', '/h/p.md'])).toBe(false)
+  expect(editorWaits(['/usr/local/bin/code', '--wait', '/h/p.md'])).toBe(true)
+  expect(editorWaits(['/usr/bin/gedit', '--wait', '/h/p.md'])).toBe(true)
   expect(editorArgv({ code: '', isMac: true, isRemote: true }, '/h/p.md')).toBe(null)
   expect(editorArgv({ code: '', isMac: false, isRemote: false }, '/h/p.md')).toBe(null)
 })
@@ -110,7 +115,7 @@ test('the editor on Linux: a GUI editor that waits, never over ssh, VS Code firs
   expect(editorArgv({ code: '', isMac: false, isRemote: true, gui }, '/h/p.md')).toBe(null)
   expect(editorArgv({ code: '', isMac: false, isRemote: false, gui: [] }, '/h/p.md')).toBe(null)
   expect(editorArgv({ code: '/usr/bin/code', isMac: false, isRemote: false, gui }, '/h/p.md')).toEqual(['/usr/bin/code', '--wait', '/h/p.md'])
-  expect(editorArgv({ code: '', isMac: true, isRemote: false, gui }, '/h/p.md')).toEqual(['open', '-W', '-t', '/h/p.md'])
+  expect(editorArgv({ code: '', isMac: true, isRemote: false, gui }, '/h/p.md')).toEqual(['open', '-t', '/h/p.md'])
 })
 
 test('only the question Intelligent UI asks now is the plan question', () => {
@@ -133,6 +138,8 @@ test('Claude is told that a plan is drawn like an answer', () => {
 const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: exitCode ? 'error: boom' : '', isStdoutTruncated: false, isStderrTruncated: false } })
 // The first 24 bytes of a 1600 x 64 PNG, as `od -An -v -tx1` prints them.
 const HEAD = '89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52 00 00 06 40 00 00 00 40'
+// The same PNG's first bytes in base64, as a read of a page's bytes gives them (over ssh).
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAABkAAAABACAYAAAAAAAAA'
 const ENGINE = { type: 'Text', props: {}, children: ['engine drawing'] }
 const PLANS = '/h/.claude/plans'
 const FILE = `${PLANS}/p.md`
@@ -150,6 +157,10 @@ function world($: any, on: any, o: {
   surfaces?: string[]
   edit?: string
   failCompile?: boolean
+  // The text whose compile fails (the others draw).
+  failText?: string
+  // Over ssh, the bytes of a page can not be read (it can not go as `{ png }`).
+  noBytes?: boolean
   raise?: boolean
   onAsk?: () => Promise<void>
   hold?: Promise<void>
@@ -175,13 +186,14 @@ function world($: any, on: any, o: {
     const argv: string[] = e.argv
     if (argv[0] === 'sh' && argv[2] === 'echo $$; exec "$@"' && argv[4] === '/usr/bin/typst' && argv[5] === 'compile') {
       yield { stream: 'stdout', text: `${pids++}\n` }
-      if (o.failCompile) {
+      const doc = argv.find(a => a.startsWith('doc='))!.slice(4)
+      const text = JSON.parse(files.get(doc)!).segments.join('\n\n')
+      if (o.failCompile || text === o.failText) {
         yield { stream: 'stderr', text: 'error: boom' }
         return { value: { code: 1, signal: null } }
       }
-      const doc = argv.find(a => a.startsWith('doc='))!.slice(4)
       await o.hold
-      compiled.push(JSON.parse(files.get(doc)!).segments.join('\n\n'))
+      compiled.push(text)
       return { value: { code: 0, signal: null } }
     }
     return { value: { code: 1, signal: null } }
@@ -211,6 +223,7 @@ function world($: any, on: any, o: {
     return { value: undefined }
   })
   on('fs.read', async ($: any, e: any, next: any) => {
+    if (e.as === 'bytes' && e.path.startsWith('/c/')) return o.noBytes ? { deny: 'EACCES' } : { value: { base64: PNG } }
     if (files.has(e.path)) return { value: files.get(e.path) }
     return e.path.startsWith('/c/') || e.path.startsWith('/h/') || e.path.startsWith('/w/') ? { deny: 'ENOENT' } : next(e)
   })
@@ -218,7 +231,8 @@ function world($: any, on: any, o: {
     if (e.path.startsWith('/c/')) return { value: [{ name: 'a-1.png', kind: 'file', size: 1, mtimeMs: 1, isLink: false }] }
     return e.path.startsWith('/h/') || e.path.startsWith('/w/') ? { deny: 'ENOENT' } : next(e)
   })
-  on('ui.toast', async () => ({ value: undefined }))
+  const toasts: string[] = []
+  on('ui.toast', async ($: any, e: any) => (toasts.push(e.text), { value: undefined }))
   on('turn.abort', async ($: any, e: any) => (aborts.push(e.turnId), { value: undefined }))
   on('command.run', { command: 'clear' }, async ($: any, e: any) => (commands.push(e.command), { text: '' }))
   on('prompt.submit', async ($: any, e: any) => (submits.push(e), { text: e.text }))
@@ -249,7 +263,7 @@ function world($: any, on: any, o: {
   })
   // The dialog is the engine's own node (a dialog tree must hold it once).
   on('ui.render', ($: any, e: any) => (e.component === 'AskUserQuestion' ? { type: 'engine', ref: 0 } : ENGINE))
-  return { clock, compiled, asked, edits, decisions, aborts, commands, submits, files, engineAsks: () => engineAsks }
+  return { clock, compiled, asked, edits, decisions, aborts, commands, submits, files, toasts, engineAsks: () => engineAsks }
 }
 
 const use = (o: { id?: string; input?: unknown; output?: unknown; isRunning?: boolean; isErrored?: boolean } = {}) =>
@@ -377,7 +391,10 @@ test('an errored, empty or subagent result stays as the engine draws it', async 
 test('approve with auto-accept: the PermissionRequest allows with the input and acceptEdits, no engine dialog', async ($, on) => {
   const w = world($, on, { answers: [PLAN_AUTO], code: true })
   await ready($)
+  // The engine draws the row before the call: the question waits for its pictures, compiled once.
+  await $.ui.mount(use())
   const got: any = await exitPlan($)
+  expect(w.compiled).toEqual([PLAN])
   expect(w.asked).toMatchObject([{ question: PLAN_QUESTION, header: PLAN_HEADER }])
   expect(w.asked[0].options.map((x: any) => x.label)).toEqual([PLAN_AUTO, PLAN_MANUAL, PLAN_CLEAR, PLAN_EDIT])
   expect(w.decisions).toEqual([{ behavior: 'allow', updatedInput: { plan: PLAN, planFilePath: FILE }, updatedPermissions: setMode('acceptEdits') }])
@@ -413,6 +430,51 @@ test('Esc rejects the plan: the PermissionRequest denies and interrupts', async 
   expect(w.engineAsks()).toBe(0)
 })
 
+test('a plan whose pictures fail to compile is not asked about: the engine dialog shows its text', async ($, on) => {
+  const w = world($, on, { failCompile: true, answers: [PLAN_AUTO] })
+  await ready($)
+  const got: any = await exitPlan($)
+  expect(w.asked).toEqual([])
+  expect(w.engineAsks()).toBe(1)
+  expect(w.decisions).toEqual([undefined])
+  expect(got.result.plan).toBe(PLAN)
+})
+
+test('over ssh, a plan whose pages can not go as bytes is not asked about', async ($, on) => {
+  const w = world($, on, { answers: [PLAN_AUTO], noBytes: true, vars: { SSH_CONNECTION: '1 2 3 4' } })
+  await ready($)
+  await exitPlan($)
+  expect(w.asked).toEqual([])
+  expect(w.engineAsks()).toBe(1)
+})
+
+test("the question waits until the plan's pictures are drawn", async ($, on) => {
+  let release!: () => void
+  const w = world($, on, { answers: [PLAN_AUTO], hold: new Promise<void>(r => (release = r)) })
+  await ready($)
+  const call = exitPlan($)
+  await w.clock.advance(3000)
+  expect(w.asked).toEqual([])
+  release()
+  await call
+  expect(w.asked.map(q => q.question)).toEqual([PLAN_QUESTION])
+  expect(w.decisions).toMatchObject([{ behavior: 'allow' }])
+  expect(w.engineAsks()).toBe(0)
+})
+
+test('pictures that never come: no question, the engine dialog asks once the wait ends', async ($, on) => {
+  const w = world($, on, { answers: [PLAN_AUTO], hold: new Promise<void>(() => undefined) })
+  await ready($)
+  let isDone = false
+  const call = exitPlan($).then(() => (isDone = true))
+  await w.clock.advance(5000)
+  expect(isDone).toBe(false)
+  await w.clock.advance(PLAN_DRAW_WAIT_MS)
+  await call
+  expect(w.asked).toEqual([])
+  expect(w.engineAsks()).toBe(1)
+})
+
 test('a plan written in the same message waits for the write, then the new text is asked, sent and drawn', async ($, on) => {
   const w = world($, on, { answers: [PLAN_AUTO], code: true })
   // Claude's Write of the plan file, still running when ExitPlanMode starts.
@@ -436,7 +498,7 @@ test('a plan written in the same message waits for the write, then the new text 
   expect(got.result.plan).toBe(EDITED)
   await $.ui.mount(use())
   await w.clock.settle()
-  expect(w.compiled).toEqual([EDITED])
+  expect([...new Set(w.compiled)]).toEqual([EDITED])
 })
 
 test("an Edit in the same message: the row draws the file, not the message's older copy", async ($, on) => {
@@ -449,7 +511,7 @@ test("an Edit in the same message: the row draws the file, not the message's old
   expect(got.result.plan).toBe(EDITED)
   await $.ui.mount(use({ input: { plan: PLAN, planFilePath: FILE } }))
   await w.clock.settle()
-  expect(w.compiled).toEqual([EDITED])
+  expect([...new Set(w.compiled)]).toEqual([EDITED])
 })
 
 test("a teammate's or a subagent's result draws no plan, also after a call kept its text", async ($, on) => {
@@ -457,6 +519,8 @@ test("a teammate's or a subagent's result draws no plan, also after a call kept 
   await ready($)
   await exitPlan($, { tool_use_id: 'tu-a' })
   await exitPlan($, { tool_use_id: 'tu-b' })
+  // The calls' questions waited for the plan's pictures; the result rows compile nothing.
+  w.compiled.length = 0
   const rows = [
     use({ id: 'tu-a', output: { plan: PLAN, isAgent: false, awaitingLeaderApproval: true }, isRunning: false }),
     use({ id: 'tu-b', output: { plan: PLAN, isAgent: true }, isRunning: false }),
@@ -472,7 +536,7 @@ test("the result's plan wins over the text read at the call (an edit in the engi
   await exitPlan($)
   await $.ui.mount(use({ output: { plan: EDITED, isAgent: false, filePath: FILE }, isRunning: false }))
   await w.clock.settle()
-  expect(w.compiled).toEqual([EDITED])
+  expect(w.compiled).toEqual([PLAN, EDITED])
 })
 
 test('the plan waits at most 5 s for a write that does not end', async ($, on) => {
@@ -490,6 +554,17 @@ test('the plan waits at most 5 s for a write that does not end', async ($, on) =
   expect(got.result.plan).toBe(PLAN)
 })
 
+test('an edit whose pictures fail is still asked, with a toast, and the approval sends the edited plan', async ($, on) => {
+  const w = world($, on, { answers: [PLAN_EDIT, PLAN_AUTO], code: true, edit: EDITED, failText: EDITED })
+  await ready($)
+  const got: any = await exitPlan($)
+  expect(w.asked.map(q => q.question)).toEqual([PLAN_QUESTION, PLAN_QUESTION_EDITED])
+  expect(w.toasts).toContain(PLAN_EDITED_UNDRAWN)
+  expect(w.engineAsks()).toBe(0)
+  expect(w.decisions).toMatchObject([{ behavior: 'allow', updatedInput: { plan: EDITED, planFilePath: FILE } }])
+  expect(got.result.plan).toBe(EDITED)
+})
+
 test('edit: VS Code opens the file, the edited plan is asked again, sent and drawn', async ($, on) => {
   const w = world($, on, { answers: [PLAN_EDIT, PLAN_AUTO], code: true, edit: EDITED })
   await ready($)
@@ -498,20 +573,32 @@ test('edit: VS Code opens the file, the edited plan is asked again, sent and dra
   expect(w.asked.map(q => q.question)).toEqual([PLAN_QUESTION, PLAN_QUESTION_EDITED])
   expect(w.decisions).toMatchObject([{ behavior: 'allow', updatedInput: { plan: EDITED, planFilePath: FILE } }])
   expect(got.result.plan).toBe(EDITED)
-  // The row draws the edited text, the call's input notwithstanding.
+  // Each text is asked once its pictures are drawn; the row draws the edited text, the call's input notwithstanding.
   await $.ui.mount(use())
   await w.clock.settle()
-  expect(w.compiled).toEqual([EDITED])
+  expect([...new Set(w.compiled)]).toEqual([PLAN, EDITED])
 })
 
-test('edit with no VS Code on a Mac uses TextEdit', async ($, on) => {
-  const w = world($, on, { answers: [PLAN_EDIT, PLAN_MANUAL], edit: PLAN })
+test('edit with no VS Code on a Mac opens the text editor, and the file is read when the person is done', async ($, on) => {
+  const w = world($, on, { answers: [PLAN_EDIT, PLAN_DONE, PLAN_MANUAL], edit: PLAN })
   await ready($)
   await exitPlan($)
-  expect(w.edits).toEqual([['open', '-W', '-t', FILE]])
+  // `open` returns at once (no -W: it would wait until the app quits).
+  expect(w.edits).toEqual([['open', '-t', FILE]])
   // The file did not change: the same question, and the plan as it was.
-  expect(w.asked.map(q => q.question)).toEqual([PLAN_QUESTION, PLAN_QUESTION])
+  expect(w.asked.map(q => q.question)).toEqual([PLAN_QUESTION, PLAN_EDITING, PLAN_QUESTION])
+  expect(w.asked[1].options.map((x: any) => x.label)).toEqual([PLAN_DONE, PLAN_REOPEN])
   expect(w.decisions).toMatchObject([{ behavior: 'allow', updatedInput: { plan: PLAN } }])
+})
+
+test('on a Mac the file can be opened again; Esc is done, and the edited plan is asked', async ($, on) => {
+  const w = world($, on, { answers: [PLAN_EDIT, PLAN_REOPEN, null, PLAN_AUTO], edit: EDITED })
+  await ready($)
+  const got: any = await exitPlan($)
+  expect(w.edits).toEqual([['open', '-t', FILE], ['open', '-t', FILE]])
+  expect(w.asked.map(q => q.question)).toEqual([PLAN_QUESTION, PLAN_EDITING, PLAN_EDITING, PLAN_QUESTION_EDITED])
+  expect(w.decisions).toMatchObject([{ behavior: 'allow', updatedInput: { plan: EDITED } }])
+  expect(got.result.plan).toBe(EDITED)
 })
 
 test('clear context: once approved, the turn ends, /clear runs and the plan is sent', async ($, on) => {
@@ -593,7 +680,7 @@ test('two calls at once: the second asks nothing, and no verdict is used while b
   await ready($)
   // A is rejected (Esc), and waits for its PermissionRequest; B begins.
   const a = exitPlan($, { tool_use_id: 'A' })
-  await ticks()
+  await w.clock.settle()
   const b = exitPlan($, { tool_use_id: 'B' })
   await ticks()
   expect(w.asked.length).toBe(1)
@@ -757,7 +844,7 @@ function fake(o: {
 }
 const CODE = '/usr/bin/code'
 const hasCode = (argv: string[]) => (argv[0] === 'sh' && argv.at(-1) === 'code' ? { exitCode: 0, stdout: `code ${CODE}\n` } : undefined)
-const plain = (file = FILE) => ({ plan: PLAN, callPlan: PLAN, file, isMac: false, isRemote: false, onEdited: () => undefined })
+const plain = (file = FILE) => ({ plan: PLAN, callPlan: PLAN, file, isMac: false, isRemote: false, onEdited: () => undefined, isDrawn: async () => true })
 
 test('with no plan file there is no editor: the edit answer is feedback', async () => {
   const w = fake({ answers: [PLAN_EDIT] })
@@ -822,6 +909,19 @@ test('editing back to the original text is not an edit', async () => {
   expect(w.asked).toEqual([PLAN_QUESTION, PLAN_QUESTION_EDITED, PLAN_QUESTION])
   expect(edited).toEqual([EDITED, PLAN])
   expect(got).toMatchObject({ kind: 'verdict', verdict: { kind: 'allow', plan: PLAN, isEdited: false } })
+})
+
+test('an edited plan whose pictures do not draw is still asked (the engine dialog would drop the edit)', async () => {
+  const drawn: string[] = []
+  const w = fake({
+    answers: [PLAN_EDIT, PLAN_AUTO],
+    files: { [FILE]: PLAN },
+    run: (argv, files) => (argv[0] === CODE ? ((files[FILE] = EDITED), { exitCode: 0, stdout: '' }) : hasCode(argv)),
+  })
+  const got = await decidePlan(w.$, { ...plain(), isDrawn: async p => (drawn.push(p), p === PLAN) })
+  expect(drawn).toEqual([PLAN, EDITED])
+  expect(w.asked).toEqual([PLAN_QUESTION, PLAN_QUESTION_EDITED])
+  expect(got).toMatchObject({ kind: 'verdict', verdict: { kind: 'allow', plan: EDITED, isEdited: true } })
 })
 
 test('a plan that differs from the call plan gives an edited verdict', async () => {
