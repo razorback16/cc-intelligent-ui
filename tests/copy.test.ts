@@ -645,7 +645,10 @@ function world(
     holdOpens() {
       w.openGate = new Promise<void>(r => (w.releaseOpens = r))
     },
-    readGate: null as Promise<void> | null, releaseReads: () => {},
+    // `lateReads`: a held read gives the clipboard when it goes on, not when it began.
+    readGate: null as Promise<void> | null, releaseReads: () => {}, lateReads: false,
+    // `copyFails`: each $.ui.copy fails and changes nothing.
+    copyFails: false,
     holdReads() {
       w.readGate = new Promise<void>(r => (w.releaseReads = r))
     },
@@ -744,8 +747,9 @@ function world(
     }
     if (argv[0] === '/usr/bin/perl' && argv[2] === READ_PL) {
       w.pastes++
-      const { clipboard, secret } = w
+      let { clipboard, secret } = w
       if (w.readGate) await w.readGate
+      if (w.lateReads) ({ clipboard, secret } = w)
       // A read that failed (an error, the 2 s timeout).
       if (w.readFails) return { deny: 'timed out' }
       // A password manager's copy: exit 3, its text not read.
@@ -771,6 +775,7 @@ function world(
   })
   // The mod's write: its text on the clipboard, one change.
   on('ui.copy', async ($: any, e: any) => {
+    if (w.copyFails) return { value: { isCopied: false, reason: 'boom' } }
     w.copies.push(e.text)
     w.foreign(e.text)
     return { value: { isCopied: true } }
@@ -2561,4 +2566,143 @@ test('main screen with the watcher: a command button press is newer than a /iui 
   await settle(w)
   const said = await g
   expect([said, w.copies]).toEqual(['Intelligent UI: a newer copy came first; this one copied nothing.', [pressed]])
+})
+
+
+// The page ans-2 (one more line) whose words are held; a click on its link with alt (a copy).
+async function slowClick($: any, w: ReturnType<typeof world>, id = 'ans-2', text = `${TARGETS_MD}\n\nOne more line.`) {
+  w.hold()
+  const slow = await drawAnswer($, w, id, text)
+  await click(slow, 6, 3, { alt: true })
+  await settle(w)
+  return slow
+}
+
+test('a copy in another app made while a click reads its words is waited for when its read is slow: the click copies nothing', async ($, on) => {
+  const { w } = await drawTargets($, on)
+  await slowClick($, w)
+  w.holdReads()
+  w.foreign('copied in another app')
+  await settle(w)
+  // The words come first: the click waits for the read of the newer change.
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual([])
+  w.releaseReads()
+  await settle(w)
+  expect({ copies: w.copies, clip: w.clipboard }).toEqual({ copies: [], clip: 'copied in another app' })
+})
+
+test('a clipboard read that fails ends the wait: a click whose words are still read copies after it', async ($, on) => {
+  const { w } = await drawTargets($, on)
+  await slowClick($, w)
+  w.holdReads()
+  w.readFails = true
+  w.change()
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual([])
+  w.releaseReads()
+  await settle(w)
+  expect({ copies: w.copies, clip: w.clipboard }).toEqual({ copies: ['https://example.com'], clip: 'https://example.com' })
+})
+
+test('the same text copied again is a newer copy: a password manager\'s copy twice, or another app\'s, while a click reads its words', async ($, on) => {
+  const { w } = await drawTargets($, on)
+  w.concealed('pw1')
+  await settle(w)
+  await slowClick($, w)
+  w.concealed('pw2')
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect({ copies: w.copies, clip: w.clipboard }).toEqual({ copies: [], clip: 'pw2' })
+  w.foreign('X')
+  await settle(w)
+  await slowClick($, w, 'ans-3', `${TARGETS_MD}\n\nTwo more lines.\n\nHere.`)
+  w.foreign('X')
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect({ copies: w.copies, clip: w.clipboard }).toEqual({ copies: [], clip: 'X' })
+})
+
+test('two copies in another app, the second while the read of the first runs (it gives the second text): a click between them copies nothing', async ($, on) => {
+  const { w } = await drawTargets($, on)
+  w.holdReads()
+  w.lateReads = true
+  w.foreign('A')
+  await settle(w)
+  await slowClick($, w)
+  w.foreign('B')
+  await settle(w)
+  w.releaseReads()
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect({ copies: w.copies, clip: w.clipboard }).toEqual({ copies: [], clip: 'B' })
+})
+
+test('another app\'s copy of a text the mod copied before is a newer copy: a click whose words are still read copies nothing', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  await click(ui, 6, 3, { alt: true })
+  await settle(w)
+  expect(w.copies).toEqual(['https://example.com'])
+  await slowClick($, w)
+  w.foreign('https://example.com')
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect({ copies: w.copies, clip: w.clipboard }).toEqual({ copies: ['https://example.com'], clip: 'https://example.com' })
+})
+
+test('a write that fails is no copy of the mod: another app\'s copy of its text is a newer copy', async ($, on) => {
+  const { w, ui } = await drawTargets($, on)
+  w.copyFails = true
+  await click(ui, 6, 3, { alt: true })
+  await settle(w)
+  expect(w.toasts.at(-1)).toBe('Intelligent UI: the copy failed: boom')
+  w.copyFails = false
+  await slowClick($, w)
+  w.foreign('https://example.com')
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect({ copies: w.copies, clip: w.clipboard }).toEqual({ copies: [], clip: 'https://example.com' })
+})
+
+test('/iui off or a /clear while a click reads its words, or a link opens: neither copies, nor toasts a copy; a click after /iui on copies', async ($, on) => {
+  on('session.end', async ($: any, e: any) => ({ sessionId: e.sessionId }))
+  const { w, ui } = await drawTargets($, on)
+  await slowClick($, w)
+  // A link whose open fails late.
+  w.openFails = true
+  w.holdOpens()
+  await click(ui, 6, 3)
+  await settle(w)
+  await $.command.run({ command: 'iui', args: 'off' } as any)
+  await settle(w)
+  const toasts = w.toasts.length
+  w.release()
+  w.releaseOpens()
+  await settle(w)
+  // Off: no clipboard part, and a copy in another app is not overwritten.
+  w.foreign('copied in another app')
+  await settle(w)
+  expect({ copies: w.copies, clip: w.clipboard, toasts: w.toasts.slice(toasts) }).toEqual({
+    copies: [], clip: 'copied in another app', toasts: ['Intelligent UI: could not open the link'],
+  })
+  await $.command.run({ command: 'iui', args: 'on' } as any)
+  w.openFails = false
+  const slower = await slowClick($, w, 'ans-3', `${TARGETS_MD}\n\nTwo more lines.\n\nHere.`)
+  await $.session.end({ reason: 'clear', sessionId: 's1' } as any)
+  await settle(w)
+  w.release()
+  await settle(w)
+  expect(w.copies).toEqual([])
+  // Its words are there now: a new click copies.
+  await click(slower, 52, 4)
+  await settle(w)
+  expect({ copies: w.copies, clip: w.clipboard }).toEqual({ copies: ['ls -la'], clip: 'ls -la' })
 })

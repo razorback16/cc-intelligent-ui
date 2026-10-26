@@ -32,8 +32,8 @@ test('Wayland (not GNOME): wl-paste reads, and its --watch sees each change', ()
     name: 'wl-paste --watch (Wayland)', read: ['sh', '-c', WL_READ_SH, '/usr/bin/wl-paste'],
     watch: ['/usr/bin/wl-paste', '--watch', 'sh', '-c', WL_WATCH_SH], wayland: true,
   })
-  // The data goes to the end, and a sensitive copy gives no line.
-  expect(WL_WATCH_SH).toBe('cat >/dev/null; [ "$CLIPBOARD_STATE" = sensitive ] || echo')
+  // The data goes to the end, and each change gives a line (a sensitive copy too).
+  expect(WL_WATCH_SH).toBe('cat >/dev/null; echo')
 })
 
 test('GNOME on Wayland (no data-control): the X11 tools through Xwayland come first, wl-paste last', () => {
@@ -294,7 +294,7 @@ function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Rec
   const ran: string[][] = []
   const watchers: { argv: string[]; say: (line: string) => void; dead: boolean; n: number }[] = []
   const w = {
-    clock, files, ran, watchers, vars, envSets, clipboard: 'old', reads: 0, copies: [] as string[], toasts: [] as string[],
+    clock, files, ran, watchers, vars, envSets, clipboard: 'old', secret: false, reads: 0, copies: [] as string[], toasts: [] as string[],
     selection: undefined as { text: string } | undefined,
     copy(text: string) {
       // A mouse copy of picture cells in fullscreen is this session's selection.
@@ -303,7 +303,16 @@ function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Rec
     },
     foreign(text: string) {
       w.clipboard = text
+      w.secret = false
       for (const c of watchers) if (!c.dead && c.argv[3] === 'clip') c.say(`clip ${c.n++}`)
+    },
+    // A copy a password manager marks (its x-kde-passwordManagerHint target):
+    // wl-paste --watch runs the notifier with CLIPBOARD_STATE=sensitive.
+    sensitive(text: string) {
+      w.clipboard = text
+      w.secret = true
+      const says = (sh: string) => !sh.includes('"$CLIPBOARD_STATE" = sensitive ] ||')
+      for (const c of watchers) if (!c.dead && c.argv[3] === 'clip' && says(c.argv.at(-1)!)) c.say(`clip ${c.n++}`)
     },
   }
   let pids = 7000
@@ -353,7 +362,8 @@ function linuxWorld(on: any, o: { scheme?: number; noPortal?: boolean; env?: Rec
     if (argv[0] === 'fc-list' && argv[2] === 'JetBrains Mono') return ok('', o.jetbrains ? 0 : 1)
     if (argv[0] === 'sh' && argv[2] === WL_READ_SH && argv[3] === '/usr/bin/wl-paste') {
       w.reads++
-      return ok(w.clipboard)
+      // The guard sees the target first: exit 3, no text.
+      return w.secret ? ok('', 3) : ok(w.clipboard)
     }
     return ok('', 1)
   })
@@ -441,6 +451,20 @@ test('Linux on Wayland: the watcher runs wl-paste --watch after clip; picture ce
   await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1' } as any)
   await w.clock.settle()
   expect(w.watchers.map(c => c.dead)).toEqual([true, true])
+})
+
+test('Linux on Wayland: a password manager\'s copy (sensitive) gives a line, a newer copy; its read sees the mark and gets no text', async ($, on) => {
+  const w = linuxWorld(on)
+  await $.command.run({ command: 'iui', args: '' } as any)
+  await drawAnswer($, w)
+  w.sensitive(COPY)
+  await w.clock.settle()
+  expect(w.reads).toBe(1)
+  expect(w.toasts).not.toContain(GRAB_HINT)
+  // /iui grab reads it again: no text either.
+  expect((await $.command.run({ command: 'iui', args: 'grab' } as any)).text).toBe('Intelligent UI: no mouse selection, and the clipboard can not be read (see /iui details).')
+  expect(w.reads).toBe(2)
+  expect(w.copies).toEqual([])
 })
 
 test('Linux on Wayland, main screen: a copy of picture cells is not changed; /iui grab reads it with wl-paste and writes its text', async ($, on) => {

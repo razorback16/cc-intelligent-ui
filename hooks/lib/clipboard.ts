@@ -56,9 +56,10 @@ export const READ_PL = [
 
 // The Wayland notifier's command: wl-paste runs it at each change (and once
 // at its start) with the new data on stdin, which it reads to the end so the
-// app that copied does not get a broken pipe. A copy that a password manager
-// marks as sensitive gives no line, so it is never read.
-export const WL_WATCH_SH = 'cat >/dev/null; [ "$CLIPBOARD_STATE" = sensitive ] || echo'
+// app that copied does not get a broken pipe. Each change gives a line, a copy
+// that a password manager marks as sensitive too (a newer copy): its read
+// (WL_READ_SH) sees the mark and never reads its text.
+export const WL_WATCH_SH = 'cat >/dev/null; echo'
 // The X11 notifier: a line at its start, then one at each change of the
 // CLIPBOARD selection. clipnotify 1.0.3+ prints them itself (-l); an older
 // one does not know the flags, watches PRIMARY too, and exits at the first

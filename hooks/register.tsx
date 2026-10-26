@@ -374,8 +374,13 @@ function clipChanged($: EngineInterface, count: number | null, first: boolean) {
     return
   }
   clip.count = count
-  if (!first) changed = ++asked
-  if (!first) void readClipboard($).catch(() => undefined)
+  if (first) return
+  changed = ++asked
+  // Undecided until a read that began after it ends: a copy that claims waits for it.
+  let end = () => {}
+  undecided.set(changed, new Promise<void>(r => (end = r)))
+  unread.set(changed, end)
+  void readClipboard($).catch(() => undefined)
 }
 
 // Picture cells on the clipboard (a native copy: their session is not
@@ -390,10 +395,15 @@ function hintGrab($: EngineInterface, text: string) {
 }
 
 // The clipboard changed: one read (clipboardRead). A clipboard with no
-// placeholders, and our own write, are never touched. A new text that no
+// placeholders, and our own write, are never touched. A text that no
 // recent $.ui.copy wrote (another app's copy, Claude Code's copy on select, a
-// password manager's: null) is a newer copy; a failed read is none. A change
-// while a read runs reads once more after it.
+// password manager's: null), even the same text again, is a newer copy; a
+// failed read is none. A change while a read runs reads once more after it.
+// A read decides the changes before it began (`unread`), failed or not.
+const unread = new Map<number, () => void>()
+function readsEnded(upTo: number) {
+  for (const [n, end] of unread) if (n <= upTo) (unread.delete(n), undecided.delete(n), end())
+}
 async function readClipboard($: EngineInterface) {
   if (clip.busy) {
     clip.again = true
@@ -404,15 +414,21 @@ async function readClipboard($: EngineInterface) {
     do {
       clip.again = false
       const n = changed
-      const text = await clipboardRead($)
-      if (text === undefined || text === clip.seen) continue
-      clip.seen = text
-      if (text === null || !copiedTexts.includes(text)) copies = Math.max(copies, n)
-      if (text === null || text === clip.wrote || !hasPlaceholders(text)) continue
-      hintGrab($, text)
+      try {
+        const text = await clipboardRead($)
+        if (text === undefined) continue
+        if (text === null || !isOwnChange(text, n)) copies = Math.max(copies, n)
+        if (text === clip.seen) continue
+        clip.seen = text
+        if (text === null || text === clip.wrote || !hasPlaceholders(text)) continue
+        hintGrab($, text)
+      } finally {
+        readsEnded(n)
+      }
     } while (clip.again)
   } finally {
     clip.busy = false
+    readsEnded(Infinity)
   }
 }
 
@@ -430,8 +446,9 @@ function watchClipboard($: EngineInterface) {
 }
 
 // Intelligent UI off, or a /clear (the process goes on): the watcher again
-// with no clipboard part (no reads).
+// with no clipboard part (no reads), and no copy begun before it copies.
 function stopClipboard($: EngineInterface) {
+  copies = ++asked
   if (watchState()?.clip && !clip.none) watchFrame($, null)
 }
 
@@ -456,16 +473,26 @@ async function updateState($: EngineInterface): Promise<UpdateState> {
 // the clipboard once it has a text (`copies`: the newest claim). An older
 // one that still reads its text when a newer one claimed copies nothing; a
 // click or an up with nothing to copy claims nothing. `copiedTexts`: the texts of the
-// last 4 $.ui.copy calls (their changes, even read late, are no copy from outside).
+// last 4 $.ui.copy calls whose change the watcher has not read, each with `asked`
+// when it was made (its change, even read late, is no copy from outside).
 let asked = 0
 let copies = 0
 // The number of the last clipboard change the watcher saw (taken when its line came).
 let changed = 0
-const copiedTexts: string[] = []
+const copiedTexts: { text: string; at: number }[] = []
 function noteCopied(text: string) {
-  if (copiedTexts.at(-1) === text) return
-  copiedTexts.push(text)
+  const own = { text, at: asked }
+  copiedTexts.push(own)
   if (copiedTexts.length > 4) copiedTexts.shift()
+  return own
+}
+// Whether change n's text is an own write's: the change after the write takes it, once.
+function isOwnChange(text: string, n: number): boolean {
+  const i = copiedTexts.findIndex(own => own.text === text)
+  if (i < 0) return false
+  // A read of an older change that came late: the write's own change is still to come.
+  if (copiedTexts[i]!.at < n) copiedTexts.splice(i, 1)
+  return true
 }
 ownCopy.note = text => {
   noteCopied(text)
@@ -475,13 +502,25 @@ ownCopy.note = text => {
 // The mod's own write, noted here: a $.ui.copy made after an await does not
 // pass the mod's own ui.copy hook. While it runs (`writing`), the hook passes it with no new claim.
 const writing: string[] = []
+// Its change is not read again (clip.wrote, clip.seen); a write that fails leaves them as they were.
 async function copyOwn($: EngineInterface, args: UiCopyArgs) {
-  noteCopied(args.text)
+  const own = noteCopied(args.text)
+  const was = { wrote: clip.wrote, seen: clip.seen }
+  clip.wrote = args.text
+  clip.seen = args.text
   writing.push(args.text)
+  let isCopied = false
   try {
-    return await copy($, args)
+    const copied = await copy($, args)
+    isCopied = copied.isCopied
+    return copied
   } finally {
     writing.splice(writing.indexOf(args.text), 1)
+    if (!isCopied) {
+      if (copiedTexts.includes(own)) copiedTexts.splice(copiedTexts.indexOf(own), 1)
+      if (clip.wrote === args.text) clip.wrote = was.wrote
+      if (clip.seen === args.text) clip.seen = was.seen
+    }
   }
 }
 
@@ -563,8 +602,6 @@ async function grab($: EngineInterface): Promise<string> {
   } finally {
     turn.done()
   }
-  clip.wrote = read.text
-  clip.seen = read.text
   const copied = await copyOwn($, { text: read.text })
   return copied.isCopied
     ? `Intelligent UI: copied ${read.text.length} chars (${read.resolved} of ${read.runs} picture runs read${row ? `, row ${row}` : ''}).`
@@ -745,9 +782,6 @@ async function openTarget($: EngineInterface, target: Target, surface: RenderSur
 async function copyTarget($: EngineInterface, target: Target, surface: RenderSurface, notOpened = false) {
   const text = target.kind === 'web' ? target.href : target.kind === 'file' ? target.path : target.text
   const name = target.kind === 'web' ? 'link' : target.kind === 'file' ? 'path' : target.kind === 'code' ? 'code' : 'command'
-  // The clipboard change of this text is not read again.
-  clip.wrote = text
-  clip.seen = text
   const copied = await copyOwn($, { text, surface })
   const failed = notOpened ? `could not open the ${target.kind === 'web' ? 'link' : 'file'}` : ''
   const done = failed ? `${failed}, so copied ${target.kind === 'web' ? 'it' : 'its path'}` : `copied the ${name}`
@@ -793,9 +827,6 @@ async function copySelection($: EngineInterface, d: Drawn & { job?: Job }, sel: 
     turn.done()
   }
   const read = performance.now() - t
-  // The clipboard change of this text is not read again.
-  clip.wrote = text
-  clip.seen = text
   const copied = await copyOwn($, { text, surface })
   toast($, copied.isCopied ? `Intelligent UI: copied ${text.length} chars of text` : `Intelligent UI: the copy failed: ${copied.reason}`)
   if (S.debug) void traceCopy($, text, performance.now() - t, read, probed)
@@ -905,8 +936,9 @@ export const register: Register = on => {
   // one with placeholders whose words are read when a newer one came is refused.
   on('ui.copy', async ($, e, next) => {
     if (writing.includes(e.text)) return next(e)
-    noteCopied(e.text)
+    // The text that goes on the clipboard is noted (copiedTexts), only it.
     if (!hasPlaceholders(e.text) || !drawnAnswers.size) {
+      noteCopied(e.text)
       copies = ++asked
       return next(e)
     }
@@ -919,7 +951,10 @@ export const register: Register = on => {
     const read = await readCopy($, e.text, clip.rawRow)
     await newerDecided(turn)
     if (!(await isNewest($, turn))) return { value: { isCopied: false, reason: 'refused' } }
-    if (!read.resolved) return next(e)
+    if (!read.resolved) {
+      noteCopied(e.text)
+      return next(e)
+    }
     // The clipboard change of this write is not read again.
     clip.wrote = read.text
     clip.seen = read.text
