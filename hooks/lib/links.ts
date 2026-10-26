@@ -33,7 +33,7 @@ const PATH = String.raw`((?:~\/|\.{1,2}\/|\/)?(?:\.?[\w@+-][\w.@+-]*\/)*\.?[\w@+
 const FILE = new RegExp(`^${PATH}$`)
 const BARE_FILE = new RegExp(`(?<![\\w./~@+:-])${PATH}(?![\\w/])`, 'g')
 const HOST = /^[\w-]+(?:\.[\w-]+)+$/
-const EXTS = new Set(
+export const EXTS = new Set(
   ('ts tsx js jsx mjs cjs json jsonc md mdx markdown txt rst adoc py pyi rb go rs java kt kts swift c h cc cpp cxx hpp hh cs fs php ' +
     'sh bash zsh fish ps1 lua pl scala clj ex exs erl hs ml sql html htm css scss sass less vue svelte astro yml yaml toml ini cfg conf ' +
     'xml csv tsv lock log typ tex bib png jpg jpeg gif svg webp pdf ipynb gradle proto graphql dart zig nim tf hcl patch diff').split(' '),

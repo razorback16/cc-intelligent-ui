@@ -10,10 +10,11 @@ import { INLINE_KEPT, inlined, keep, linkFiles, ownCopy, S, type Cell, type Look
 import { DEFAULT_GRID, gridFirstRow, type GridMetrics } from './grid'
 import { FENCE, imagePathOf } from './markdown'
 import { linksOf, type LinkItem } from './links'
+import { opensPlain } from './open'
 import { fitBox, fitsInline, roomColumns } from './terminal'
 import { clickLinks, selectOn } from './select'
 import { noteSite } from './blit'
-import { exists, cat, copy, uiResolve, toast } from './api'
+import { stat, cat, copy, uiResolve, toast } from './api'
 
 // FNV-1a over the parts, twice with different offsets: 16 hex digits.
 export function hashOf(parts: readonly (string | number)[]): string {
@@ -291,7 +292,8 @@ export const fileHref = (path: string) => `file://${encodeURI(path).replace(/[?#
 
 // The items as link rows: each file path made absolute from `base` (the
 // folder relative paths start from; `~/` is the home folder) and kept only
-// when it is a file now (each path checked once: linkFiles).
+// when it is a regular file now: no folder (an .app), no symbolic link
+// (each path checked once: linkFiles).
 export async function resolveLinks($: EngineInterface, items: readonly LinkItem[], base: string, home = S.env?.home ?? ''): Promise<ShownLink[]> {
   const shown: ShownLink[] = []
   for (const item of items) {
@@ -302,7 +304,8 @@ export async function resolveLinks($: EngineInterface, items: readonly LinkItem[
     const path = home && item.path.startsWith('~/') ? `${home.replace(/\/+$/, '')}${item.path.slice(1)}` : imagePathOf(item.path, base)
     let isFile = linkFiles.get(path)
     if (isFile === undefined) {
-      isFile = await exists($, path).catch(() => false)
+      const st = await stat($, path).catch(() => null)
+      isFile = st?.kind === 'file' && !st.isLink
       keep(linkFiles, path, isFile, LINK_FILES_KEPT)
     }
     if (isFile) shown.push({ kind: 'file', label: item.label, path, href: fileHref(path) })
@@ -344,6 +347,8 @@ export function drawLinks($: EngineInterface, e: ResolveInput<RenderComponent, '
       )
     }
     const href = link.href
+    // A file a plain open could run (the terminal opens a file:// link so): its path, no link.
+    if (link.kind === 'file' && !opensPlain(link.path)) return <Text dimColor wrap="truncate-end">· {link.label}</Text>
     return (
       <Text dimColor wrap="truncate-end">
         ↗ <Link href={href}>{link.label}</Link>

@@ -1812,13 +1812,18 @@ test('picture select: with no perl the first frame write fails, is logged once a
 // src/a.ts a file in the session's folder /w. Its targets (targets.test.ts):
 // the link "the docs" row 3 columns 4 to 11, the bare URL row 3 16 to 45,
 // `! ls -la` row 4 50 to 58, src/a.ts row 6 5 to 13, the bash block's copy
-// button row 8 8 to 15 (its code rows 11 and 12: no target).
-async function drawTargets($: any, on: any, o: { env?: Record<string, string>; marks?: readonly object[]; noBridge?: boolean } = {}, isFullscreen: boolean | null = true) {
-  const w = world(on, { tty: TTY, marks: TARGETS_MARKS, ...o })
+// button row 8 8 to 15 (its code rows 11 and 12: no target). `file`: src/a.ts
+// named `name` instead (in the text and the probe), and its stat.
+async function drawTargets($: any, on: any, o: { env?: Record<string, string>; marks?: readonly object[]; noBridge?: boolean; file?: { name: string; kind?: string; isLink?: boolean } } = {}, isFullscreen: boolean | null = true) {
+  const name = o.file?.name ?? 'a.ts'
+  const marks = (o.marks ?? TARGETS_MARKS).map((m: any) => (m.code === 'src/a.ts' ? { ...m, code: `src/${name}`, ...(m.t === 'a.ts' ? { t: name } : {}) } : m))
+  const w = world(on, { tty: TTY, ...o, marks })
   on('session.cwd', async () => ({ value: '/w' }))
-  on('fs.exists', async ($: any, e: any) => ({ value: e.path === '/w/src/a.ts' }))
+  on('fs.exists', async ($: any, e: any) => ({ value: e.path === `/w/src/${name}` }))
+  on('fs.stat', async ($: any, e: any, next: any) =>
+    e.path === `/w/src/${name}` ? { value: { kind: o.file?.kind ?? 'file', size: 1, mtimeMs: 1, isLink: !!o.file?.isLink } } : next(e))
   await $.command.run({ command: 'iui', args: '' } as any)
-  const ui = await drawAnswer($, w, 'ans-1', TARGETS_MD, isFullscreen)
+  const ui = await drawAnswer($, w, 'ans-1', TARGETS_MD.replace('src/a.ts', `src/${name}`), isFullscreen)
   await settle(w)
   return { w, ui }
 }
@@ -1903,7 +1908,7 @@ test('picture select: a click opens a link or a file and copies a command; an al
   await settle(w)
   await click(ui, 52, 4)
   await settle(w)
-  expect(w.opens).toEqual([['open', 'https://example.com'], ['open', '/w/src/a.ts']])
+  expect(w.opens).toEqual([['open', 'https://example.com'], ['open', '-t', '/w/src/a.ts']])
   expect(w.copies).toEqual(['ls -la'])
   expect(w.toasts.filter(t => /^Intelligent UI: (opened|copied) /.test(t))).toEqual([
     'Intelligent UI: opened the link', 'Intelligent UI: opened a.ts in the default app', 'Intelligent UI: copied the command',
@@ -1939,6 +1944,46 @@ test('picture select: a link or a file that does not open is copied, and the toa
   expect(w.copies).toEqual(['https://example.com', '/w/src/a.ts'])
   expect(w.toasts).toContain('Intelligent UI: could not open the link, so copied it')
   expect(w.toasts).toContain('Intelligent UI: could not open the file, so copied its path')
+})
+
+test('picture select: with the system app, a file it could run (.command) is not opened: its path is copied, and the toast says why', async ($, on) => {
+  const { w, ui } = await drawTargets($, on, { file: { name: 'setup.command' } })
+  await click(ui, 8, 6)
+  await settle(w)
+  expect(w.opens).toEqual([])
+  expect(w.copies).toEqual(['/w/src/setup.command'])
+  expect(w.toasts).toContain('Intelligent UI: copied the path (this file type does not open on click)')
+})
+
+test('picture select: with the system app, a picture opens with a plain open', async ($, on) => {
+  const { w, ui } = await drawTargets($, on, { file: { name: 'shot.png' } })
+  await click(ui, 8, 6)
+  await settle(w)
+  expect(w.opens).toEqual([['open', '/w/src/shot.png']])
+  expect(w.copies).toEqual([])
+})
+
+test('picture select: a folder (an .app) is no file target: a click opens nothing and copies its code text', async ($, on) => {
+  const { w, ui } = await drawTargets($, on, { file: { name: 'Tool.app', kind: 'dir' } })
+  await click(ui, 8, 6)
+  await settle(w)
+  expect(w.opens).toEqual([])
+  expect(w.copies).toEqual(['src/Tool.app'])
+})
+
+test('picture select: a symbolic link is no file target, even to a picture: a click opens nothing', async ($, on) => {
+  const { w, ui } = await drawTargets($, on, { file: { name: 'link.png', isLink: true } })
+  await click(ui, 8, 6)
+  await settle(w)
+  expect(w.opens).toEqual([])
+  expect(w.copies).toEqual(['src/link.png'])
+})
+
+test('picture select: on the main screen a file a plain open could run is a row with no file:// link', async ($, on) => {
+  const { ui } = await drawTargets($, on, { file: { name: 'run.command' } }, false)
+  const drawn = tree(await ui.drawn())
+  expect(drawn.filter(n => n.type === 'Link').map(n => n.props.href)).toEqual(['https://example.com', 'https://typst.app/docs/reference'])
+  expect(drawn.some(n => n.type === 'Text' && JSON.stringify(n.children ?? []).includes('src/run.command'))).toBe(true)
 })
 
 test('picture select: a link whose open fails late is not copied over a newer copy', async ($, on) => {

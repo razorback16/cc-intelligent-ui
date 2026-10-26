@@ -1,11 +1,13 @@
 // A click's target opened (register.tsx clickAt): a web link in the
 // browser, a file in an editor at its line and column, or in the system's
-// app for it. The pure parts: the known editors, the `/iui editor` setting,
-// the program a click uses and its argv. And the PATH lookups, cached in S.
+// app for it when that runs nothing (appArgv). The pure parts: the known
+// editors, the `/iui editor` setting, the program a click uses and its argv.
+// And the PATH lookups, cached in S.
 // No argument goes through a shell.
 import type { EngineInterface } from 'claude-code'
 
 import { exec } from './api'
+import { EXTS } from './links'
 import { S } from './state'
 import type { Target } from './targets'
 
@@ -107,15 +109,44 @@ function commandArgv(words: readonly string[], bin: string, f: Place): string[] 
   })
 }
 
+// The file types the system app opens, by extension (lower case). A plain
+// `open` or `xdg-open` runs some files (on macOS a .command, .tool or
+// .terminal file, an .app, the URL of a .webloc or .fileloc, a .jar; on
+// Linux a .desktop file or a script), so only these open; another file
+// copies its path. Pictures and PDFs: a plain open, in their viewer.
+export const VIEW_EXTS: ReadonlySet<string> = new Set('png jpg jpeg gif webp svg pdf'.split(' '))
+// Text and code (links.ts EXTS less pictures): on macOS `open -t`, the text editor, which runs nothing.
+export const TEXT_EXTS: ReadonlySet<string> = new Set([...EXTS].filter(ext => !VIEW_EXTS.has(ext)))
+// Text that a default app may run or show as a web page (scripts, notebooks, HTML).
+const RUNS = new Set('sh bash zsh fish ps1 py pyi rb pl php lua js mjs cjs html htm xml ipynb'.split(' '))
+// The files a plain open does not run (Linux has no `-t`): pictures, PDFs, and text and code less RUNS.
+export const PLAIN_EXTS: ReadonlySet<string> = new Set([...VIEW_EXTS, ...[...TEXT_EXTS].filter(ext => !RUNS.has(ext))])
+
+// A path's extension in lower case ('' none).
+export const extOf = (path: string) => /\.([^./]+)$/.exec(path)?.[1]!.toLowerCase() ?? ''
+// Whether a plain open (`open`, `xdg-open`, a terminal's file:// link) of a file runs nothing.
+export const opensPlain = (path: string) => PLAIN_EXTS.has(extOf(path))
+
+// The system app's argv for a file: a picture or PDF in its viewer; text
+// or code in the text editor on macOS (`open -t`), with xdg-open on Linux
+// when it is in PLAIN_EXTS. Null for any other file (it copies).
+function appArgv(path: string, isMac: boolean): string[] | null {
+  const ext = extOf(path)
+  if (VIEW_EXTS.has(ext)) return [isMac ? 'open' : 'xdg-open', path]
+  if (isMac) return TEXT_EXTS.has(ext) ? ['open', '-t', path] : null
+  return PLAIN_EXTS.has(ext) ? ['xdg-open', path] : null
+}
+
 // The argv that opens a target: a web link with the system's opener (`open`
 // on macOS, `xdg-open` on Linux), a file with `use` (the system app: with no
-// line). Null for a command or code (those copy).
+// line, and only the types of appArgv). Null for a command, code or a file
+// the system app does not open (those copy).
 export function openArgv(target: Target, o: { isMac: boolean; use: Use }): string[] | null {
   const opener = o.isMac ? 'open' : 'xdg-open'
   if (target.kind === 'web') return [opener, target.href]
   if (target.kind !== 'file') return null
   const { use } = o
-  if (use.kind === 'app') return [opener, target.path]
+  if (use.kind === 'app') return appArgv(target.path, o.isMac)
   if (use.kind === 'command') return commandArgv(use.words, use.bin, target)
   const form = EDITORS.find(([name]) => name === use.name)?.[1] ?? 'suffix'
   return knownArgv(form, use.bin, target)

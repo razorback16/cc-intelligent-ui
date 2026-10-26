@@ -136,6 +136,13 @@ With picture select, the links, file paths, commands and code block copy buttons
 
 - **Drag** from a link, path or command to select text as usual.
 - If the open fails, the mod copies the target and the toast says so.
+- A path is live only when it is a regular file. A folder (for example an `.app`) or a symbolic link is not.
+- **System app.** With `/iui editor default`, or with `auto` and no editor on the PATH, only some file types open:
+  - Pictures and PDFs (`png`, `jpg`, `jpeg`, `gif`, `webp`, `svg`, `pdf`) open in their app (`open`, `xdg-open`).
+  - Text and code files (`md`, `txt`, `json`, `ts`, `py` and the other types that Intelligent UI finds as paths) open in the text editor on macOS (`open -t`). On Linux, they open with `xdg-open`, but scripts (`sh`, `py`, `rb`, `pl`, `js` and similar), `html`, `xml` and `ipynb` files do not.
+  - The mod does not open other files, because the system app can run some of them (for example `.command`, `.app`, `.webloc`, `.jar` or `.desktop`). It copies the path, and the toast says "copied the path (this file type does not open on click)".
+  - An editor (`auto`, a name or your command) opens all file types as text.
+- The rows under the pictures (on the main screen, or with picture select off) show a file as a `file://` link only if it is a picture, a PDF or a text file that `xdg-open` opens. The terminal opens a `file://` link with the system app. Other files show as plain text with `·` before them, so a click on the row does not run them.
 - Over ssh, a click copies, because a program would run on the remote computer.
 
 **Which editor.** `/iui editor` sets the editor for file paths. With `auto` (the default), the mod uses the first editor it finds on the PATH, in the order in [Commands](#commands). If it finds none, it uses the system default app. The setting is kept for later sessions.

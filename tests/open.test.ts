@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
-  autoOf, DETACH_SH, detachedArgv, editorNow, EDITOR_NAMES, findAuto, findOnPath, openArgv, openedText, parseEditor, pathsOf, useOf, type Use,
+  autoOf, DETACH_SH, detachedArgv, editorNow, EDITOR_NAMES, extOf, findAuto, findOnPath, openArgv, openedText, opensPlain, parseEditor, pathsOf, useOf, type Use,
 } from '../hooks/lib/open'
 import type { Target } from '../hooks/lib/targets'
 import { S } from '../hooks/lib/state'
@@ -48,9 +48,52 @@ test('JetBrains IDEs take --line and --column before the path', () => {
   expect(argv(BARE, known('idea'))).toEqual(['/bin/idea', '/w/README.md'])
 })
 
-test('the system app opens a file with no line: open on macOS, xdg-open on Linux', () => {
-  expect(argv(FILE, { kind: 'app' })).toEqual(['open', '/w/hooks/lib/copy.ts'])
-  expect(argv(FILE, { kind: 'app' }, false)).toEqual(['xdg-open', '/w/hooks/lib/copy.ts'])
+const at = (path: string): Target => ({ kind: 'file', path })
+const APP: Use = { kind: 'app' }
+// Files a plain `open` or `xdg-open` could run, follow or launch.
+const RUN = ['/w/scripts/setup.command', '/w/run.tool', '/w/Go.terminal', '/w/a.webloc', '/w/a.fileloc', '/w/a.inetloc', '/w/x.jar', '/w/Tool.app', '/w/a.desktop', '/w/a.exe', '/w/a.pkg', '/w/setup', '/w/.bashrc', '/w/a.unknownext']
+
+test('the system app opens code and text with no line: open -t (the text editor) on macOS, xdg-open on Linux', () => {
+  expect(argv(FILE, APP)).toEqual(['open', '-t', '/w/hooks/lib/copy.ts'])
+  expect(argv(FILE, APP, false)).toEqual(['xdg-open', '/w/hooks/lib/copy.ts'])
+  for (const path of ['/w/README.md', '/w/NOTES.MD', '/w/a.txt', '/w/a.json', '/w/c.yaml', '/w/c.toml', '/w/d.csv', '/w/x.log', '/w/m.rs']) {
+    expect(argv(at(path), APP)).toEqual(['open', '-t', path])
+    expect(argv(at(path), APP, false)).toEqual(['xdg-open', path])
+  }
+})
+
+test('the system app opens a picture or a PDF with a plain open (open, xdg-open)', () => {
+  for (const path of ['/w/shot.png', '/w/a.JPG', '/w/a.jpeg', '/w/a.gif', '/w/a.webp', '/w/a.svg', '/w/doc.pdf']) {
+    expect(argv(at(path), APP)).toEqual(['open', path])
+    expect(argv(at(path), APP, false)).toEqual(['xdg-open', path])
+  }
+})
+
+test('the system app does not open a file it could run (.command, .app, .fileloc, .desktop, no extension, unknown): null, so it copies', () => {
+  for (const path of RUN) {
+    expect(argv(at(path), APP)).toBe(null)
+    expect(argv(at(path), APP, false)).toBe(null)
+  }
+  // A missed editor setting that fell back to the system app: the same.
+  expect(argv(at('/w/scripts/setup.command'), { kind: 'app', missed: 'code' })).toBe(null)
+})
+
+test('on Linux xdg-open does not open scripts, notebooks or web pages (an app may run them); on macOS open -t does', () => {
+  for (const path of ['/w/a.sh', '/w/a.bash', '/w/a.zsh', '/w/a.fish', '/w/a.ps1', '/w/a.py', '/w/a.rb', '/w/a.pl', '/w/a.js', '/w/a.html', '/w/a.ipynb']) {
+    expect(argv(at(path), APP, false)).toBe(null)
+    expect(argv(at(path), APP)).toEqual(['open', '-t', path])
+  }
+})
+
+test('an editor takes any file as an argument: a .command opens in it as text', () => {
+  expect(argv(at('/w/scripts/setup.command'), known('code'))).toEqual(['/bin/code', '-g', '/w/scripts/setup.command'])
+  expect(argv(at('/w/setup'), { kind: 'command', words: ['hx', '{path}'], bin: '/bin/hx' }, false)).toEqual(['/bin/hx', '/w/setup'])
+})
+
+test('a plain open runs nothing only for pictures, PDFs and plain text or code', () => {
+  for (const path of ['/w/a.png', '/w/a.pdf', '/w/a.md', '/w/a.ts', '/w/a.json']) expect(opensPlain(path)).toBe(true)
+  for (const path of [...RUN, '/w/a.sh', '/w/a.py', '/w/a.html']) expect(opensPlain(path)).toBe(false)
+  expect([extOf('/w/a.B/C'), extOf('/w/x.tar.GZ'), extOf('/w/a.')]).toEqual(['', 'gz', ''])
 })
 
 test('a command puts in its placeholders; a word whose placeholder has no value is left out', () => {

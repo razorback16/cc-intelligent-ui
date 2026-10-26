@@ -771,18 +771,23 @@ async function openTarget($: EngineInterface, target: Target, surface: RenderSur
   const got = argv ? await exec($, detachedArgv(argv), { timeoutMs: OPEN_TIMEOUT_MS }).catch(() => null) : null
   if (S.debug) traceDebug($, `select: open ${argv?.join(' ') ?? 'none'} exit ${got ? got.exitCode : 'failed'}`)
   if (got?.exitCode === 0) return void toast($, openedText(target, use))
+  // No argv for a file: the system app could run it (openArgv), so it only copies.
+  const why = argv ? 'failed' : 'type'
   if (!(await claim(turn)) || !(await isNewest($, turn))) {
-    return void toast($, `Intelligent UI: could not open the ${target.kind === 'web' ? 'link' : 'file'}`)
+    return void toast($, `Intelligent UI: ${why === 'type' ? NO_OPEN : `could not open the ${target.kind === 'web' ? 'link' : 'file'}`}`)
   }
-  await copyTarget($, target, surface, true)
+  await copyTarget($, target, surface, why)
 }
 
+const NO_OPEN = 'this file type does not open on click'
+
 // A target's text on the clipboard (clickAt), with its toast; `notOpened`:
-// it is copied as an open of it failed.
-async function copyTarget($: EngineInterface, target: Target, surface: RenderSurface, notOpened = false) {
+// it is copied as an open of it failed, or as its file type does not open.
+async function copyTarget($: EngineInterface, target: Target, surface: RenderSurface, notOpened?: 'failed' | 'type') {
   const text = target.kind === 'web' ? target.href : target.kind === 'file' ? target.path : target.text
   const name = target.kind === 'web' ? 'link' : target.kind === 'file' ? 'path' : target.kind === 'code' ? 'code' : 'command'
   const copied = await copyOwn($, { text, surface })
+  if (notOpened === 'type') return void toast($, `Intelligent UI: ${copied.isCopied ? `copied the path (${NO_OPEN})` : `${NO_OPEN}, and the copy failed: ${copied.reason}`}`)
   const failed = notOpened ? `could not open the ${target.kind === 'web' ? 'link' : 'file'}` : ''
   const done = failed ? `${failed}, so copied ${target.kind === 'web' ? 'it' : 'its path'}` : `copied the ${name}`
   toast($, copied.isCopied ? `Intelligent UI: ${done}` : `Intelligent UI: ${failed ? `${failed}, and ` : ''}the copy failed: ${copied.reason}`)

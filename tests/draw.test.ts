@@ -6,7 +6,7 @@ import {
 } from '../hooks/register'
 import { TABLE_GRID } from './table-fixture'
 // This file's own copy of the drawing code, called with a fake `$`.
-import { drawPages, linksFor } from '../hooks/lib/draw'
+import { drawLinks, drawPages, linksFor } from '../hooks/lib/draw'
 
 // ---- Where pictures draw ----------------------------------------------------
 
@@ -267,6 +267,8 @@ function world(on: any, vars: Record<string, string>, head = HEAD, stored: Recor
   })
   on('fs.stat', async ($: any, e: any, next: any) => {
     calls.push('fs.stat')
+    // The project's files (the link rows' paths): the ones written.
+    if (e.path.startsWith('/w/app/')) return files.has(e.path) ? { value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } } : { deny: 'ENOENT' }
     return next(e)
   })
   const toasts: string[] = []
@@ -904,9 +906,20 @@ const all = (tree: any, type: string): any[] =>
   tree && typeof tree === 'object' ? [...(tree.type === type ? [tree] : []), ...(tree.children ?? []).flatMap((c: any) => all(c, type))] : []
 const textOf = (tree: any): string => (typeof tree === 'string' ? tree : (tree?.children ?? []).map(textOf).join(''))
 
+// A fake `$.fs.stat`: `kinds` the paths there (a kind, or 'link' a symbolic link to a file); others ENOENT.
+function statOf(kinds: Record<string, string>, asked: string[] = []) {
+  const stat = async (path: string) => {
+    asked.push(path)
+    const kind = kinds[path]
+    if (!kind) throw new Error('ENOENT')
+    return { kind: kind === 'link' ? 'file' : kind, size: 1, mtimeMs: 1, isLink: kind === 'link' }
+  }
+  return { fs: { stat } } as any
+}
+
 test('a file path is made absolute and kept only when it is a file; ~/ is the home folder; the href is encoded', async () => {
   const asked: string[] = []
-  const $ = { fs: { exists: async (path: string) => (asked.push(path), path !== '/w/app/gone.ts') } } as any
+  const $ = statOf({ '/w/app/src/a b.ts': 'file', '/h/x#1.md': 'file', '/abs/y.md': 'file' }, asked)
   const items = [
     { kind: 'web', label: 'Docs', href: 'https://typst.app/docs' },
     { kind: 'file', label: 'src/a b.ts:42', path: 'src/a b.ts' },
@@ -927,6 +940,23 @@ test('a file path is made absolute and kept only when it is a file; ~/ is the ho
   await resolveLinks($, items, '/w/app', '/h')
   expect(asked).toEqual(['/w/app/src/a b.ts', '/w/app/gone.ts', '/h/x#1.md', '/abs/y.md'])
   expect(fileHref('/a/b?c.md')).toBe('file:///a/b%3Fc.md')
+})
+
+test('a folder (an .app bundle, a folder named like a file) or a symbolic link is no file link', async () => {
+  const $ = statOf({ '/k/Tool.app': 'dir', '/k/docs.md': 'dir', '/k/pic.png': 'link', '/k/odd.png': 'other', '/k/ok.png': 'file' })
+  const items = ['Tool.app', 'docs.md', 'pic.png', 'odd.png', 'ok.png'].map(name => ({ kind: 'file', label: name, path: `/k/${name}` }) as const)
+  expect((await resolveLinks($, items, '/k', '/h')).map(l => l.label)).toEqual(['ok.png'])
+})
+
+test('a link row of a file a plain open could run has no file:// link; a picture or plain text has one', () => {
+  const $ = { ui: { resolve: () => ({ Box: 'Box', Text: 'Text', Link: 'Link', Button: 'Button' }) } } as any
+  const e = { viewport: { columns: 100, rows: 40 } } as any
+  const row = (name: string) => ({ kind: 'file', label: `[x](${name})`, path: `/k/${name}`, href: fileHref(`/k/${name}`) }) as const
+  const names = ['setup.command', 'run.tool', 'Go.terminal', 'a.webloc', 'a.fileloc', 'a.inetloc', 'x.jar', 'a.desktop', 'a.sh', 'a.py', 'a.html', 'shot.png', 'doc.pdf', 'notes.md', 'a.ts']
+  const rows: any[] = drawLinks($, e, names.map(row), '') as any
+  const hrefs = rows.flatMap(r => all(r, 'Link')).map(l => l.props.href)
+  expect(hrefs).toEqual(['file:///k/shot.png', 'file:///k/doc.pdf', 'file:///k/notes.md', 'file:///k/a.ts'])
+  expect(textOf(rows[0])).toBe('· [x](setup.command)')
 })
 
 const LINKED = [
@@ -997,7 +1027,7 @@ test('a press on a command row that cannot copy toasts the reason, or none', asy
 })
 
 test('the link rows of a text are none when a file check throws', async () => {
-  const $ = { fs: { exists: () => { throw new Error('gone') } } } as any
+  const $ = { fs: { stat: () => { throw new Error('gone') } } } as any
   expect(await linksFor($, 'See `src/never-checked.ts`.', '/w')).toEqual([])
 })
 
