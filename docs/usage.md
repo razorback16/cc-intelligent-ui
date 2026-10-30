@@ -20,6 +20,7 @@ Intelligent UI draws Claude's answers as rendered Markdown. Only the drawing cha
 
   A `theme` dictionary (`theme.fg`, `theme.muted`, `theme.blue`, `theme.palette`, `theme.width`, `theme.height`, …) lets a drawing use the terminal's colours and fit its space. A short part of the system prompt tells Claude about it. A drawing keeps the layout of its first draw, and scales when the terminal size changes.
 - **Files that Claude sends** (the SendUserFile tool): images, PDF pages and Markdown files. See [Files that Claude sends](#files-that-claude-sends).
+- **Images that Claude reads** (the Read tool): the image under its Read row when the row is expanded (ctrl+o, `--verbose`). See [Images that Claude reads](#images-that-claude-reads).
 - **Images you paste** (`[Image #N]`): a small preview above the prompt box, and the same small images under your prompt after you send it. See [Preview of pasted images](#preview-of-pasted-images).
 - **Plans** in plan mode, with the mod's own approval question. See [Plan approval](#plan-approval).
 
@@ -34,6 +35,10 @@ Each file draws under the row that lists the files, in the same order. Other fil
 JPEG, WebP, SVG, PDF and Markdown need Typst.
 
 **Size.** An image is never larger than its file or wider than the transcript. `/iui height` sets the most rows it can use (by default half the screen, 24 rows at most). The same limit applies to Typst drawings in answers.
+
+### Images that Claude reads
+
+When Claude opens an image with the Read tool, the image draws under the expanded Read row: in the ctrl+o transcript, with `--verbose`, or in a group that you unfold. The folded line (`Read 2 files`) shows no file, so it stays as it is. PNG, JPEG and WebP draw from the file on disk as a small preview, the size of a pasted image's preview (5 rows), with the file name as its alt text. GIF stays as the normal row. JPEG and WebP need Typst.
 
 ### PDF pages
 

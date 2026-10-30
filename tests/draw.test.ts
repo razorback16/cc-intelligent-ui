@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import {
   alignFirstLine, scaledBulletRow, base64Bytes, canDrawIn, COMMIT_MIN_MS, DEFAULT_CELL, fileHref, fitsInline, herdrBudget, HERDR_MAX_PAGE_BYTES, INLINE_MAX_BYTES,
-  INLINE_MAX_SIDE, inlineBudget, renderKey, RESIZE_QUIET_MS, resolveLinks, SEGMENT_ROWS, segmentBudget, sizing, WATCH_PL,
+  INLINE_MAX_SIDE, inlineBudget, inlineOf, renderKey, RESIZE_QUIET_MS, resolveLinks, SEGMENT_ROWS, segmentBudget, sizing, WATCH_PL,
 } from '../hooks/register'
 import { TABLE_GRID } from './table-fixture'
 // This file's own copy of the drawing code, called with a fake `$`.
@@ -19,9 +19,20 @@ test('tmux and screen draw no pictures, even with the engine forced; only IUI_FO
   expect(canDrawIn({ ...base, tmux: true, modForced: true })).toBe(true)
 })
 
-test('a background session never draws pictures, not even with IUI_FORCE', () => {
+test('a background session draws pictures only with IUI_FORCE, also with tmux in its TERM', () => {
   expect(canDrawIn({ ...base, program: 'ghostty', background: true })).toBe(false)
-  expect(canDrawIn({ ...base, term: 'xterm-kitty', background: true, engineForced: true, modForced: true })).toBe(false)
+  expect(canDrawIn({ ...base, term: 'xterm-kitty', background: true, engineForced: true })).toBe(false)
+  expect(canDrawIn({ ...base, term: 'xterm-kitty', background: true, modForced: true })).toBe(true)
+  expect(canDrawIn({ ...base, term: 'tmux-256color', tmux: true, background: true, modForced: true })).toBe(true)
+})
+
+test('pictures go as bytes over ssh, or as IUI_INLINE says when it is set', () => {
+  expect(inlineOf(false, undefined)).toBe(false)
+  expect(inlineOf(true, undefined)).toBe(true)
+  expect(inlineOf(true, '')).toBe(true)
+  expect(inlineOf(false, '1')).toBe(true)
+  expect(inlineOf(true, '0')).toBe(false)
+  expect(inlineOf(true, 'off')).toBe(false)
 })
 
 test('over ssh, TERM tells: kitty or Ghostty draws, an unknown terminal only when forced', () => {
@@ -286,6 +297,16 @@ const message = (requestId: string, text: string) =>
 const props = (text: string) => ({ text, isFirstOfReply: true }) as any
 const images = (tree: any): any[] =>
   tree && typeof tree === 'object' ? [...(tree.type === 'Image' ? [tree] : []), ...(tree.children ?? []).flatMap(images)] : []
+
+test('in a background session with IUI_FORCE and IUI_INLINE, a page goes as PNG bytes', async ($, on) => {
+  const { clock } = world(on, { CLAUDE_CODE_SESSION_KIND: 'bg', TERM: 'tmux-256color', IUI_FORCE: '1', IUI_INLINE: '1' })
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(ran.text).toContain('sent as bytes: IUI_INLINE')
+  const ui = await $.ui.mount(message('bg-1', 'Some **bold** text.'))
+  await clock.settle()
+  await ui.redraw(props('Some **bold** text.'))
+  expect(images(await ui.drawn())[0].props.source).toEqual({ png: PNG })
+})
 
 test('over ssh in kitty, a page goes as PNG bytes, read once', async ($, on) => {
   const { clock, reads } = world(on, { SSH_CONNECTION: '10.0.0.2 50000 10.0.0.1 22', TERM: 'xterm-kitty' })

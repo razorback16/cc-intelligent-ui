@@ -23,10 +23,10 @@ import { isFlipHere } from './terminal'
 import { delay, stat, write, exec, sid, uiResolve } from './api'
 
 export type BandInput = RenderInput<'AbovePrompt', 'terminal'>
-export type RowInput = RenderInput<'UserMessage', 'terminal'>
-// One preview: the image's number, its source (the filled copy once made)
-// and its picture's cells.
-export type Preview = { n: number; source: ImageSource; columns: number; rows: number }
+export type RowInput = RenderInput<'UserMessage' | 'ToolUse', 'terminal'>
+// One preview: the image's number, its source (the filled copy once made),
+// its picture's cells and its alt (by default the number's).
+export type Preview = { n: number; source: ImageSource; columns: number; rows: number; alt?: string }
 type Slot = { columns: number; rows: number }
 type Size = { width: number; height: number }
 
@@ -118,23 +118,47 @@ export async function previewsOf(
 ): Promise<{ lines: Preview[][]; isWhole: boolean; isFinal: boolean }> {
   const dir = await pasteDir($, ready)
   if (!dir && !o.paths?.size) return { lines: [], isWhole: false, isFinal: true }
-  const flip = isFlipHere(ready)
   const cell = shownFor(view).cell
-  const found: { n: number; plain: ImageSource | null; p: Picture }[] = []
+  const pictures: { n: number; p: Picture | null }[] = []
   for (const n of numbers) {
     const path = o.paths?.get(n)
     const p = (dir ? await pictureOf($, pastedImagePath(dir, n)) : null) ?? (path ? await pathPicture($, ready, path, convertBox(o.columns, PREVIEW_ROWS, cell)) : null)
-    const plain = p && !flip ? await sourceOf($, ready, p) : null
-    if (p && (flip || plain)) found.push({ n, plain, p })
+    pictures.push({ n, p })
   }
-  const isWhole = found.length === numbers.length
+  return layPreviews($, view, ready, pictures, o)
+}
+
+// The images Claude reads (`files`, absolute paths), as previews under its
+// row (after the gutter), each with its file's name as its alt.
+export async function filePreviews(
+  $: EngineInterface, view: RenderViewport | undefined, ready: Env, files: readonly string[], o: { columns: number; redraw: () => void },
+): Promise<{ lines: Preview[][]; isWhole: boolean; isFinal: boolean }> {
+  const box = convertBox(o.columns, PREVIEW_ROWS, shownFor(view).cell)
+  const pictures: { n: number; p: Picture | null; alt: string }[] = []
+  for (const [i, file] of files.entries()) pictures.push({ n: i + 1, p: await pathPicture($, ready, file, box), alt: file.split('/').pop() || 'image' })
+  return layPreviews($, view, ready, pictures, { ...o, maxRows: Number.POSITIVE_INFINITY, labelled: false })
+}
+
+// The previews of `pictures` (null: not found), as previewsOf says.
+async function layPreviews(
+  $: EngineInterface, view: RenderViewport | undefined, ready: Env, pictures: readonly { n: number; p: Picture | null; alt?: string }[],
+  o: { columns: number; maxRows: number; labelled: boolean; redraw: () => void },
+): Promise<{ lines: Preview[][]; isWhole: boolean; isFinal: boolean }> {
+  const flip = isFlipHere(ready)
+  const cell = shownFor(view).cell
+  const found: { n: number; plain: ImageSource | null; p: Picture; alt?: string }[] = []
+  for (const { n, p, alt } of pictures) {
+    const plain = p && !flip ? await sourceOf($, ready, p) : null
+    if (p && (flip || plain)) found.push({ n, plain, p, alt })
+  }
+  const isWhole = found.length === pictures.length
   const laid = o.labelled
     ? previewLayout(found.map(f => f.p), cell, o.columns, o.maxRows, found.map(f => labelColumns(f.n)))
     : previewLayout(found.map(f => f.p), cell, o.columns - GUTTER, o.maxRows)
   if (!laid) return { lines: [], isWhole, isFinal: true }
   let isFinal = true
   const previews = new Map<number, Preview>()
-  for (const [i, { n, plain, p }] of found.entries()) {
+  for (const [i, { n, plain, p, alt }] of found.entries()) {
     const box = laid.boxes[i]!
     const made = filledOf($, ready, p, cellPixels(box, cell), cell, o.redraw)
     if (made === undefined) isFinal = false
@@ -142,7 +166,7 @@ export async function previewsOf(
     // Flip mode with no copy (no Typst, or it failed): the image stored for its rows.
     const bare = flip && made === null ? await sourceOf($, ready, p, box.rows) : plain
     const source = (q ? await sourceOf($, ready, q, box.rows) : null) ?? bare
-    if (source) previews.set(i, { n, source, ...box })
+    if (source) previews.set(i, { n, source, ...box, ...(alt ? { alt } : {}) })
   }
   const lines = laid.lines.map(line => line.flatMap(i => previews.get(i) ?? [])).filter(line => line.length)
   return { lines, isWhole, isFinal }
@@ -310,7 +334,7 @@ export function previewRetry($: EngineInterface, key: string, redraw: () => void
 // (the first one's in the gutter), else after the gutter (as underRow).
 function previewLines($: EngineInterface, e: BandInput | RowInput, lines: readonly Preview[][], labelled: boolean) {
   const { Box, Text, Image } = uiResolve($, e)
-  const image = (p: Preview) => <Image key={`preview-${p.n}`} source={p.source} columns={p.columns} rows={p.rows} alt={altOf(p.n)} />
+  const image = (p: Preview) => <Image key={`preview-${p.n}`} source={p.source} columns={p.columns} rows={p.rows} alt={p.alt ?? altOf(p.n)} />
   return (
     <Box flexDirection="column" marginLeft={labelled ? 0 : GUTTER}>
       {lines.map((line, i) => (

@@ -2,6 +2,17 @@
 
 All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Code finds a new version by the `version` in `.claude-plugin/plugin.json`. To get it, refer to [Update](docs/install.md#update).
 
+## Unreleased
+
+### New
+
+- **Images that Claude reads.** When Claude opens a PNG, JPEG or WebP image with the Read tool, the image draws under the expanded Read row (ctrl+o, `--verbose`, or an unfolded group) as a small preview, as a pasted image does. The folded line (`Read 2 files`) stays as it is. Refer to [Images that Claude reads](docs/usage.md#images-that-claude-reads). ([#2](https://github.com/razorback16/cc-intelligent-ui/issues/2))
+- **`IUI_INLINE`.** `IUI_INLINE=1` sends pictures as data, as over ssh. `IUI_INLINE=0` makes the terminal read the files, also over ssh. Use it where the mod cannot see ssh, such as in a background session.
+
+### Fixed
+
+- **Background sessions with `IUI_FORCE=1`.** A background session (`claude --bg`, `claude attach`) now tries to show pictures when `IUI_FORCE=1` is set, also when the daemon started in tmux. Before, it never showed pictures. ([#2](https://github.com/razorback16/cc-intelligent-ui/issues/2))
+
 ## 0.3.4 (2026-10-25)
 
 ### New

@@ -50,9 +50,9 @@ import { clipboardNow, clipboardRead, clipWatchArgs, clipWayReady, hintText } fr
 import { setUp } from './lib/env'
 import { frameFor, noteView, stopWatch, watchFrame, watchState } from './lib/frame'
 import { herdrText, isFlipHere, roomColumns } from './lib/terminal'
-import { onScreenOf, pastedNumbers, sentFiles } from './lib/images'
+import { onScreenOf, pastedNumbers, readFiles, sentFiles } from './lib/images'
 import { drawPageField, pasteDir, pdfPagesOf, rowsAfter, sentOf, underRow, type Under } from './lib/pictures'
-import { drawPreviews, forgetPaths, keepPaths, pathPaste, pathsOf, previewRetry, previewsOf, previewsUnder, sameNumbers, type Preview } from './lib/composer'
+import { drawPreviews, filePreviews, forgetPaths, keepPaths, pathPaste, pathsOf, previewRetry, previewsOf, previewsUnder, sameNumbers, type Preview } from './lib/composer'
 import { checkUpdates, loadUpdates, updateLine, updateNotice, type UpdateState } from './lib/updates'
 import { nowMs, write, surf, save, copy, uiSelection, toast, sid, exec, delay } from './lib/api'
 import { detachedArgv, editorNow, OPEN_TIMEOUT_MS, openArgv, openedText, useName, type Use } from './lib/open'
@@ -216,6 +216,7 @@ const answers = new Map<string, Memo<AnswerMemo>>()
 const plans = new Map<string, Memo<{ drawing: Drawing; links: ShownLink[] }>>()
 const unders = new Map<string, Memo<Under[]>>()
 const pasted = new Map<string, Memo<Preview[][]>>()
+const readPreviews = new Map<string, Memo<Preview[][]>>()
 const drafts = new Map<string, Memo<Preview[][]>>()
 
 // The kept value when the inputs and the stamp are the same. A new onScreen
@@ -1158,10 +1159,10 @@ export const register: Register = on => {
       const terminal = S.cacheProblem
         ? `Intelligent UI draws no pictures: ${S.cacheProblem} (it never uses a shared folder instead)`
         : ready.canDraw
-        ? `this terminal draws pictures${ready.inline ? ' (over ssh, sent as bytes)' : ''}`
+        ? `this terminal draws pictures${ready.inline ? (S.isRemote ? ' (over ssh, sent as bytes)' : ' (sent as bytes: IUI_INLINE)') : ''}`
         : S.isHerdr && S.setupNeeded
         ? 'Claude Code draws no pictures in herdr until CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 is set when it starts (run /iui setup), so answers stay text'
-        : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+, Rio 0.5.27+ and herdr with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; never in tmux, screen or a background session; not in WezTerm, Warp, Konsole or others), so answers stay text'
+        : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+, Rio 0.5.27+ and herdr with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; in tmux, screen or a background session only with IUI_FORCE=1; not in WezTerm, Warp, Konsole or others), so answers stay text'
       // In herdr: its version, the terminal it runs in and where that came from (and flip mode).
       const herdr = S.isHerdr ? `terminal ${herdrText(S.herdrVersion, S.herdrHost, S.herdrClient ? (S.herdrBy === 'front' ? 'front' : 'client') : 'server', isFlipHere(ready))}: ` : ''
       await clipWayReady()
@@ -1352,6 +1353,40 @@ export const register: Register = on => {
     if (!under.length) return row
     try {
       return underRow($, e, row, under)
+    } catch {
+      return row
+    }
+  })
+
+  // The image Claude opens with Read, as a small preview (as a pasted
+  // image's) under its expanded row (ctrl+o, --verbose, an unfolded group);
+  // the folded line shows no file, so none there.
+  on('ui.render', { component: 'ToolUse', props: { tool: 'Read' } }, async ($, e, next) => {
+    if (e.surface !== 'terminal' || e.props.isErrored) return next(e)
+    const files = readFiles(e.props.input, e.props.output).map(f => f.path)
+    if (!files.length) return next(e)
+    let lines: Preview[][] = []
+    try {
+      const ready = await pictureEnv($, e)
+      const mine = memberOf(filled, e)
+      if (ready) await read($, mine)
+      const k = { text: files.join('\n'), extra: '', stamp: ready ? stampOf(ready, e.viewport) : '', onScreen: undefined }
+      const kept = ready ? memoOf(readPreviews, e.requestId, k, () => false) : undefined
+      if (kept) lines = kept
+      else if (ready) {
+        const redraw = () => void update($, mine, n => n + 1).catch(() => undefined)
+        const made = await filePreviews($, e.viewport, ready.env, files, { columns: roomColumns(e.viewport), redraw })
+        lines = made.lines
+        if (lines.length && made.isFinal) memoSet(readPreviews, e.requestId, k, lines)
+        else readPreviews.delete(e.requestId)
+      }
+    } catch {
+      lines = []
+    }
+    const row = await next(e)
+    if (!lines.length) return row
+    try {
+      return previewsUnder($, e, row, lines)
     } catch {
       return row
     }

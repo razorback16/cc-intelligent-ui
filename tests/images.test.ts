@@ -8,7 +8,7 @@ import { FILL_SH } from '../hooks/lib/typst'
 import {
   claudeTmpOf, convertBox, convertCall, convertedPath, DEFAULT_CELL, factsAfter, folderOf, imageKindOf, isMarkdownPath, isNoPageError, isPdfPath, lastKnownPage,
   NO_FACTS, pageControls, pageCountOf, pageOf, parsePage, pasteDirOf, pastedImagePath, pastedNumbers, COMMIT_MIN_MS, DEFAULT_HEIGHT, RESIZE_QUIET_MS, PICTURE_MAX_ROWS, PICTURE_ROOM_ROWS, pictureCells,
-  pictureRowsFor, projectSlug, renderKey, rowsAfter, sentFiles, sentImages, shortError, type Under, altOf, cellPixels, fillCall, filledPath, labelColumns, labelOf, linesOf, previewLayout, PREVIEW_RETRY_MS, sameNumbers,
+  pictureRowsFor, projectSlug, readFiles, renderKey, rowsAfter, sentFiles, sentImages, shortError, type Under, altOf, cellPixels, fillCall, filledPath, labelColumns, labelOf, linesOf, previewLayout, PREVIEW_RETRY_MS, sameNumbers,
   clipImagePaths, PATH_RECHECK_MS, READ_PL,
 } from '../hooks/register'
 
@@ -1333,6 +1333,65 @@ test('an errored SendUserFile call leaves the row as it is', async ($, on) => {
   await ready($)
   const ui = await $.ui.mount(sent(attach('/t/icon.png'), true))
   expect(await ui.drawn()).toMatchObject(ENGINE)
+})
+
+// A Read call's row: its input and output (an image's bytes, as Claude Code keeps them).
+const READ_IMAGE = { type: 'image', file: { base64: PNG, type: 'image/png', originalSize: 1000 } }
+const readRow = (file_path: string, output: unknown = READ_IMAGE, isErrored = false, id = 'tr-1') =>
+  ({
+    plugin: 'cc-intelligent-ui', surface: 'terminal', component: 'ToolUse', requestId: id,
+    props: { tool_use_id: id, tool: 'Read', input: { file_path }, output, isRunning: false, isErrored, isInterrupted: false, isExpanded: true }, viewport: { columns: 100, rows: 40 },
+  }) as any
+
+test('a Read of an image gives its file, by its name; not a GIF, text or another result', () => {
+  const image = { type: 'image', file: { base64: '', type: 'image/jpeg', originalSize: 1 } }
+  expect(readFiles({ file_path: '/t/a.png' }, image)).toEqual([{ path: '/t/a.png', kind: 'png' }])
+  expect(readFiles({ file_path: '/t/a.JPG' }, image)).toEqual([{ path: '/t/a.JPG', kind: 'jpeg' }])
+  expect(readFiles({ file_path: '/t/a.webp' }, image)).toEqual([{ path: '/t/a.webp', kind: 'webp' }])
+  expect(readFiles({ file_path: '/t/a.gif' }, image)).toEqual([])
+  expect(readFiles({ file_path: '/t/a.md' }, { type: 'text', file: { filePath: '/t/a.md', content: '' } })).toEqual([])
+  expect(readFiles({ file_path: '/t/a.pdf' }, { type: 'pdf', file: { filePath: '/t/a.pdf', base64: '', originalSize: 1 } })).toEqual([])
+  expect(readFiles({}, image)).toEqual([])
+  expect(readFiles({ file_path: '/t/a.png' }, undefined)).toEqual([])
+})
+
+test('an image Claude reads draws under its expanded Read row as a small preview, as a pasted image', async ($, on) => {
+  world(on, { files: { '/t/shot.png': HEAD } })
+  await ready($)
+  const ui = await $.ui.mount(readRow('/t/shot.png'))
+  const tree: any = await ui.drawn()
+  expect(tree.children[0]).toMatchObject(ENGINE)
+  expect(tree.children[1]).toMatchObject(PREVIEWS)
+  const [image] = images(tree)
+  // 640 x 320 px in PREVIEW_ROWS (5) rows of 32 px: 20 x 5 cells.
+  expect(image.props).toMatchObject({ columns: 20, rows: 5, alt: 'shot.png' })
+  expect(image.props.source).toMatchObject({ file: '/t/shot.png', format: 'png' })
+})
+
+test('with Typst, a read PNG draws as the copy that fills its cells; a JPEG as the PNG Typst makes of it first', async ($, on) => {
+  const { converts, fills } = world(on, { typst: true, files: { '/t/shot.png': HEAD, '/t/photo.jpg': HEAD } })
+  await ready($)
+  const ui = await $.ui.mount(readRow('/t/shot.png'))
+  await ui.drawn()
+  await ui.redraw(readRow('/t/shot.png').props)
+  const [image] = images(await ui.drawn())
+  expect(fills.length).toBe(1)
+  expect(image.props.source.file).toMatch(/^\/c\/[0-9a-f]{16}\/image\.png$/)
+  expect(image.props).toMatchObject({ columns: 20, rows: 5, alt: 'shot.png' })
+  const jpeg = await $.ui.mount(readRow('/t/photo.jpg', READ_IMAGE, false, 'tr-2'))
+  const [photo] = images(await jpeg.drawn())
+  expect(converts.map(argv => argv.find(a => a.startsWith('f='))?.slice(2))).toEqual(['/t/photo.jpg'])
+  expect(photo.props).toMatchObject({ rows: 5, alt: 'photo.jpg' })
+})
+
+test('a Read row of text, still running, or errored stays as it is', async ($, on) => {
+  world(on, { files: { '/t/shot.png': HEAD } })
+  await ready($)
+  expect(await (await $.ui.mount(readRow('/t/a.md', { type: 'text', file: { filePath: '/t/a.md', content: 'x', numLines: 1, startLine: 1, totalLines: 1 } }))).drawn()).toMatchObject(ENGINE)
+  const running = readRow('/t/shot.png', READ_IMAGE, false, 'tr-2')
+  delete running.props.output
+  expect(await (await $.ui.mount(running)).drawn()).toMatchObject(ENGINE)
+  expect(await (await $.ui.mount(readRow('/t/shot.png', 'File does not exist.', true, 'tr-3'))).drawn()).toMatchObject(ENGINE)
 })
 
 // The previews as the row draws them: after the gutter, a line of pictures

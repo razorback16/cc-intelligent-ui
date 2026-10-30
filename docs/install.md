@@ -17,9 +17,10 @@
 - **Rio 0.5.27+ (not tested):** set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` before you start Claude Code. Runs on macOS and Linux.
 - **ssh:** works when your local terminal is kitty or Ghostty (`TERM` must come through ssh), or when you set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` on the remote computer. Pictures go as data, so a page over 4096 pixels on a side or over 2 MiB shows as text, and an image that large does not show.
 - **tmux and screen:** no pictures. Claude Code does not send pictures through them, even with the variable set. Set `IUI_FORCE=1` to try anyway.
+- **`IUI_INLINE`:** `IUI_INLINE=1` sends pictures as data, as over ssh; `IUI_INLINE=0` makes the terminal read the files, also over ssh. With no value, the mod sends data only over ssh (`SSH_CONNECTION` or `SSH_TTY`).
 - **Warp and WezTerm (not yet):** they do not draw kitty pictures with Unicode placeholders. Support comes when [warpdotdev/warp#16312](https://github.com/warpdotdev/warp/pull/16312) and [wezterm/wezterm#7924](https://github.com/wezterm/wezterm/pull/7924) are merged.
 - **Not supported:** Konsole (no Unicode placeholders), Alacritty, Terminal.app, Windows Terminal, GNOME Terminal and other VTE terminals, foot, VS Code, Tabby, Hyper and JetBrains terminals (no kitty pictures).
-- **Background sessions** (agent view, forks, `claude attach`) cannot show pictures.
+- **Background sessions** (agent view, forks, `claude attach`): no pictures by default. A background session has the variables of the daemon, not of your terminal. Set `IUI_FORCE=1` in the session's environment to try. When the terminal is on another computer, also set `IUI_INLINE=1` (the daemon has no `SSH_CONNECTION`).
 
 Where pictures cannot show, you see the normal text. `/iui details` tells you why.
 

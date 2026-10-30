@@ -9,7 +9,7 @@ import {
 import { DEFAULT_METRICS, refresh, S, settingsSet, type Env } from './state'
 import { OSC11_TRIES, resolveMode, settingOf } from './mode'
 import { isItermIn } from './terminals'
-import { canDrawIn, isHerdrIn, isSet, needsSetup } from './terminal'
+import { canDrawIn, inlineOf, isHerdrIn, isSet, needsSetup } from './terminal'
 import { claudeTmpOf } from './images'
 import { applyTheme } from './themes'
 import { parseEditor } from './open'
@@ -165,7 +165,7 @@ export function setUp($: EngineInterface): Promise<Env> {
     S.env = {
       typst,
       canDraw,
-      inline: ssh && canDraw,
+      inline: inlineOf(ssh, await getenv($, 'IUI_INLINE')) && canDraw,
       herdr: S.isHerdr,
       cache,
       cwd: await cwd($).catch(() => '/'),

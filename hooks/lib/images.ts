@@ -85,6 +85,16 @@ export function sentFiles(output: unknown): SentFile[] {
   return found
 }
 
+// The image a Read call opened: its file, the kind by its name (the
+// result's bytes can be a smaller JPEG of it); none for a GIF or no image.
+export function readFiles(input: unknown, output: unknown): SentFile[] {
+  const type = output && typeof output === 'object' ? (output as { type?: unknown }).type : undefined
+  const path = input && typeof input === 'object' ? (input as { file_path?: unknown }).file_path : undefined
+  if (type !== 'image' || typeof path !== 'string' || !path || /\.gif$/i.test(path)) return []
+  const kind = imageKindOf({ path })
+  return kind ? [{ path, kind }] : []
+}
+
 // The paths of a SendUserFile result that draw as a picture (PNG, JPEG,
 // WebP, SVG, and a page of a PDF).
 export const sentImages = (output: unknown) => sentFiles(output).filter(f => f.kind !== 'markdown').map(f => f.path)
