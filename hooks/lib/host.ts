@@ -7,7 +7,7 @@ import type { IuiTheme } from '../../types'
 import { CLIP_WAKE_MS, HERDR_POLL_MS, HERDR_SCAN_MS, HOST_CHECK_MS, HOST_POLL_MS, MODES, OSC11_QUIET_MS } from './settings'
 import { S } from './state'
 import { beginEpoch } from './epoch'
-import { keptOsc11, luminanceOf, OSC11_TRIES, modeOfColorFgBg, modeOfLuminance, modeOfMacAppearance, parseOsc11, resolveMode, schemeOfPortal, type HostMode } from './mode'
+import { keptOsc11, luminanceOf, OSC11_TRIES, modeOfColorFgBg, modeOfVar, modeOfLuminance, modeOfMacAppearance, parseOsc11, resolveMode, schemeOfPortal, type HostMode } from './mode'
 import {
   cmuxAppearanceOf, cmuxConfigOf, cmuxGhosttyConfigPath, cmuxSettingsOf, familyOfFc, GHOSTTY_DEFAULT_FONT, ghosttyBackgroundOf, ghosttyFontsOf, ghosttyHasColors,
   ghosttyThemePaths, ghosttyThemesOf,
@@ -279,14 +279,17 @@ exit 0`
 // The terminal's font family: iTerm2's profile font, Ghostty's font-family,
 // kitty's font_family, Rio's [fonts] family; '' elsewhere or when it can't
 // be read. A family that the terminal does not find is the one it draws in
-// its place (its own font, Menlo, or fontconfig's nearest). On Linux, when
-// the terminal's config names none: fontconfig's monospace font (fc-match),
-// which kitty and most terminals use.
+// its place (its own font, Menlo, or fontconfig's nearest). When none is
+// read (always over ssh): IUI_FONT, as installed here (as set when it is
+// not). Then on Linux: fontconfig's monospace font (fc-match), which kitty
+// and most terminals use.
 export async function termFontOf($: EngineInterface, isMac: boolean): Promise<string> {
   // Over ssh, a config here is not the one of the user's terminal.
-  if (S.isRemote) return ''
-  const font = await configFontOf($, isMac)
-  if (font || isMac) return font
+  const font = S.isRemote ? '' : await configFontOf($, isMac)
+  const named = font ? '' : ((await getenv($, 'IUI_FONT')) ?? '').trim()
+  S.fontByVar = !!named
+  if (font || named) return font || (await installedFamily($, isMac, named)) || named
+  if (isMac || S.isRemote) return ''
   return fcFamily($, 'monospace')
 }
 
@@ -529,10 +532,10 @@ async function configFontOf($: EngineInterface, isMac: boolean): Promise<string>
 // and kept while the sources below do not change (keptOsc11); 1. the
 // terminal's OSC 11 answer (off, see USE_OSC11); 2. the terminal's own
 // settings (iTerm2's profile, Ghostty's, kitty's or Rio's config); 3.
-// COLORFGBG at start; 4. the OS appearance; 5. dark (resolveMode). The
-// terminal comes before the OS: a dark terminal on a light Mac is dark.
-// Over ssh, only COLORFGBG (when ssh sends it): the configs and the OS
-// here are the remote computer's.
+// IUI_MODE; 4. COLORFGBG at start; 5. the OS appearance; 6. dark
+// (resolveMode). The terminal comes before the OS: a dark terminal on a
+// light Mac is dark. Over ssh, only IUI_MODE and COLORFGBG (when ssh sends
+// it): the configs and the OS here are the remote computer's.
 export async function readHostMode($: EngineInterface, ask = false): Promise<HostMode | null> {
   if (!S.isHerdr) return readOwnMode($)
   let answer: HostMode | null | undefined
@@ -555,23 +558,24 @@ export async function osc11Due($: EngineInterface, off = S.isOff): Promise<boole
   return (await nowMs($).catch(() => Date.now())) - S.keyAt >= OSC11_QUIET_MS
 }
 
-// Sources 1 to 5 of readHostMode.
+// Sources 1 to 6 of readHostMode.
 async function readOwnMode($: EngineInterface): Promise<HostMode | null> {
   if (USE_OSC11) {
     const bg = parseOsc11((await probeOsc11($))?.reply ?? '')
     if (bg) return { mode: modeOfLuminance(luminanceOf(bg)), source: 'terminal', detail: 'OSC 11 background' }
   }
-  if (S.isRemote) {
-    const mode = modeOfColorFgBg(S.colorFgBg)
-    return mode ? { mode, source: 'COLORFGBG' } : null
-  }
-  const term =
-    (await readItermMode($).catch(() => null)) ??
+  // Over ssh, a config here is not the one of the user's terminal.
+  const term = S.isRemote
+    ? null
+    : (await readItermMode($).catch(() => null)) ??
     (await readGhosttyMode($).catch(() => null)) ??
     (await readKittyMode($).catch(() => null)) ??
     (await readRioMode($).catch(() => null))
   if (term) return term
+  const set = modeOfVar(await getenv($, 'IUI_MODE'))
+  if (set) return { mode: set, source: 'IUI_MODE' }
   const mode = modeOfColorFgBg(S.colorFgBg)
+  if (S.isRemote) return mode ? { mode, source: 'COLORFGBG' } : null
   if (mode) return { mode, source: 'COLORFGBG' }
   return readOsMode($).catch(() => null)
 }

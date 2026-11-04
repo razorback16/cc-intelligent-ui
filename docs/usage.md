@@ -7,7 +7,7 @@ Intelligent UI draws Claude's answers as rendered Markdown. Only the drawing cha
 ## What it draws
 
 - **Markdown:** headings, lists, task lists, tables, block quotes, links, footnotes and horizontal rules.
-- **Code blocks** with syntax colours, in your terminal's font. The mod reads the font from iTerm2, Ghostty, kitty and Rio. Else it uses fontconfig's `monospace` on Linux, then Menlo, SF Mono or DejaVu Sans Mono.
+- **Code blocks** with syntax colours, in your terminal's font. The mod reads the font from iTerm2, Ghostty, kitty and Rio. Else it uses `IUI_FONT` when you set it (over ssh, the only way to name it; refer to [Terminals](install.md#terminals)), then fontconfig's `monospace` on Linux, then Menlo, SF Mono or DejaVu Sans Mono.
 - **Math:** `$…$` and `$$…$$`, in LaTeX syntax.
 - **Images** from `![alt](path)`. A relative path starts from the session's folder. Remote images show as a box with the alt text.
 - **Live Typst:** a code block with the language `typst` (or `typ`) is drawn, not shown as code. These packages come with the mod and work offline:

@@ -8,6 +8,7 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 - **Images that Claude reads.** When Claude opens a PNG, JPEG or WebP image with the Read tool, the image draws under the expanded Read row (ctrl+o, `--verbose`, or an unfolded group) as a small preview, as a pasted image does. The folded line (`Read 2 files`) stays as it is. Refer to [Images that Claude reads](docs/usage.md#images-that-claude-reads). ([#2](https://github.com/razorback16/cc-intelligent-ui/issues/2))
 - **`IUI_INLINE`.** `IUI_INLINE=1` sends pictures as data, as over ssh. `IUI_INLINE=0` makes the terminal read the files, also over ssh. Use it where the mod cannot see ssh, such as in a background session.
+- **`IUI_FONT` and `IUI_MODE`.** Over ssh, and with `herdr --remote`, the mod cannot read your terminal's font or background. Set `IUI_FONT` (the font family) and `IUI_MODE` (`light` or `dark`, for the `auto` theme) in the remote computer's shell start file to name them. The mod uses them only where it cannot read the terminal, and `/iui details` names them. Refer to [Terminals](docs/install.md#terminals).
 
 ### Fixed
 

@@ -444,10 +444,53 @@ for (const colorFgBg of [undefined, '0;15']) {
     on('fs.read', async ($: any, e: any, next: any) => (e.path.includes('kitty') ? (asked.push(e.path), { deny: 'no such file' } as any) : next(e)))
     const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
     expect(ran.text).toContain(colorFgBg ? 'mode light (auto, from COLORFGBG)' : 'mode dark (auto, OS appearance not known, dark assumed)')
-    expect(ran.text).toContain('terminal font not known (Menlo assumed)')
+    expect(ran.text).toContain('terminal font not known (Menlo assumed; set IUI_FONT to name it)')
     expect(asked).toEqual([])
   })
 }
+
+// Over ssh, IUI_FONT and IUI_MODE (from the remote shell's start file) name
+// what the mod can't read: IUI_MODE before COLORFGBG, the font as installed here.
+test('over ssh, IUI_FONT names the terminal font and IUI_MODE the mode for auto', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  mock.env(on, { HOME: '/h', TERM: 'xterm-ghostty', SSH_CONNECTION: '10.0.0.2 50000 10.0.0.1 22', COLORFGBG: '15;0', IUI_FONT: ' JetBrains Mono ', IUI_MODE: 'Light' })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
+  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const families: string[] = []
+  on('process.run', async ($: any, e: any, next: any) => {
+    const argv: string[] = e.argv
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'osascript' && argv.includes('JetBrains Mono')) return (families.push(argv.at(-1)!), ok('yes\n'))
+    return next(e)
+  })
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(ran.text).toContain('mode light (auto, from IUI_MODE)')
+  expect(ran.text).toContain('terminal font JetBrains Mono (IUI_FONT)')
+  expect(families).toEqual(['JetBrains Mono'])
+})
+
+// Where the mod reads the terminal (here kitty's config), the variables wait.
+test("on this computer, the terminal's own font and mode win over IUI_FONT and IUI_MODE", async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  mock.env(on, { HOME: '/h', TERM: 'xterm-kitty', KITTY_WINDOW_ID: '1', IUI_FONT: 'Courier', IUI_MODE: 'light' })
+  on('config.list', async () => ({ value: [{ key: 'theme', value: 'auto' }] as any }))
+  const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', async ($: any, e: any, next: any) => {
+    const argv: string[] = e.argv
+    if (argv[0] === 'sh' && /cc-intelligent-ui-/.test(argv.join(' '))) return ok('/tmp/mdp\nDarwin\n')
+    if (argv[0] === 'osascript') return ok('yes\n')
+    return next(e)
+  })
+  const files: Record<string, string> = { '/h/.config/kitty/kitty.conf': 'font_family Iosevka\nbackground #101010\n' }
+  on('fs.exists', async ($: any, e: any, next: any) => (e.path.includes('kitty') ? { value: e.path in files } : next(e)))
+  on('fs.read', async ($: any, e: any, next: any) => (e.path in files ? { value: files[e.path] } : e.path.includes('kitty') ? ({ deny: 'no such file' } as any) : next(e)))
+  const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
+  expect(ran.text).toContain('mode dark (auto, from kitty')
+  expect(ran.text).toContain('terminal font Iosevka')
+  expect(ran.text).not.toContain('IUI_')
+})
 
 // cmux (Ghostty inside) with no colours in the Ghostty config: its adaptive
 // default theme follows cmux's appearance; turned off, Ghostty's dark default.

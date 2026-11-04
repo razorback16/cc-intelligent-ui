@@ -1153,8 +1153,8 @@ export const register: Register = on => {
       // A measure with no term metrics: Typst does not have the font (it would fall back).
       const missing = !!ready.typst && ready.metrics !== DEFAULT_METRICS && !ready.metrics.term
       const font = !ready.termFont
-        ? `terminal font not known (${ready.isMac ? 'Menlo' : "the theme's code font"} assumed)`
-        : `terminal font ${ready.termFont}${missing ? " (Typst does not have this font, so the pictures use the theme's fonts)" : ''}`
+        ? `terminal font not known (${ready.isMac ? 'Menlo' : "the theme's code font"} assumed${S.isRemote ? '; set IUI_FONT to name it' : ''})`
+        : `terminal font ${ready.termFont}${S.fontByVar ? ' (IUI_FONT)' : ''}${missing ? " (Typst does not have this font, so the pictures use the theme's fonts)" : ''}`
       const typst = ready.typst ? `Typst: ${ready.typst}` : `Typst: not found (${typstHintOf(ready.isMac)})`
       const terminal = S.cacheProblem
         ? `Intelligent UI draws no pictures: ${S.cacheProblem} (it never uses a shared folder instead)`

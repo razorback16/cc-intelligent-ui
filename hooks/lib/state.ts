@@ -214,6 +214,8 @@ export const S = {
   // Over ssh (set in setUp): the terminal's config and the OS appearance here
   // are the remote computer's, not those of the user's screen.
   isRemote: false,
+  // The terminal font came from IUI_FONT (termFontOf).
+  fontByVar: false,
   // IUI_DEBUG is set (setUp): trace lines go to the debug log.
   debug: false,
   // iTerm2 or herdr with the engine's pictures off at start: /iui setup can help

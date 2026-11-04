@@ -17,7 +17,7 @@
 ## Text size and fonts
 
 - **Matched size.** The mod finds the terminal font and the cell size in pixels, and Typst measures both fonts, so 100% looks as large as the terminal text. Body text and code use the terminal font.
-- **Font source.** The iTerm2 profile, or the Ghostty, kitty or Rio config. On Linux, else fontconfig's `monospace`. Else the theme's code font (Menlo on macOS).
+- **Font source.** The iTerm2 profile, or the Ghostty, kitty or Rio config. Else `IUI_FONT` (the only source over ssh). On Linux, else fontconfig's `monospace`. Else the theme's code font (Menlo on macOS).
 - **The font the terminal really draws.** If the configured font is not installed, the mod follows the terminal's own fallback (for example Menlo for kitty on macOS, your fixed-pitch font for iTerm2).
 - **Built-in fonts.** With no font configured, Ghostty and cmux draw their own JetBrains Mono, and Rio its own Cascadia Code NF. These live inside the terminal program, so the mod copies them once per terminal version to `~/.cache/cc-intelligent-ui/fonts/`.
 - **Fake bold.** If the terminal font has no bold face (for example Monaco), bold text gets a thin outline, as a terminal draws it.
@@ -94,9 +94,12 @@ Claude Code finds light or dark for `auto` by asking the terminal for its backgr
    - **cmux** also reads its own `config.ghostty`, where the cmux themes picker writes, and that theme wins. With no theme or colours set, cmux uses its adaptive default theme, and the mod follows cmux's appearance setting (`app.appearance` in `~/.config/cmux/cmux.json`).
 3. **The kitty config:** the `background` in `kitty.conf` and its `include` files. With `dark-theme.auto.conf`, `light-theme.auto.conf` or `no-preference-theme.auto.conf` (kitty 0.38 and later), the file for the OS appearance. With no `background`, kitty's default (dark).
 4. **The Rio config:** `config.toml`. With `[adaptive-theme]`, the theme for `force-theme` or the OS appearance. Else the `theme` file, else `[colors] background`, else Rio's default (dark).
-5. **`COLORFGBG`**, as it was when Claude Code started.
-6. **The OS appearance:** macOS Dark or Light. On Linux, the freedesktop portal's `color-scheme`, else GNOME's `color-scheme`.
-7. **Dark.**
+5. **`IUI_MODE`:** `light` or `dark`, when you set it.
+6. **`COLORFGBG`**, as it was when Claude Code started.
+7. **The OS appearance:** macOS Dark or Light. On Linux, the freedesktop portal's `color-scheme`, else GNOME's `color-scheme`.
+8. **Dark.**
+
+Over ssh, only `IUI_MODE`, `COLORFGBG` and dark: the configs and the OS appearance there are the remote computer's.
 
 The terminal comes before the OS: a dark terminal on a light Mac is dark. The mod checks every 3 s, and after a change each mode's pictures compile once. `/iui probe` sends OSC 11 and shows the raw answers, to test whether they can reach the mod.
 

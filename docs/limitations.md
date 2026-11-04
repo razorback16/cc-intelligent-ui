@@ -59,7 +59,7 @@
 
 ## Terminals
 
-- **Over ssh,** the mod cannot read your local terminal's config. It sizes text by the theme's code font, and `auto` uses `COLORFGBG` if ssh sends it, else dark. Pages are at most 4096 px tall. With tmux or screen on the remote computer, no pictures show.
+- **Over ssh,** the mod cannot read your local terminal's config. It sizes text by `IUI_FONT`, else the theme's code font, and `auto` uses `IUI_MODE`, else `COLORFGBG` if ssh sends it, else dark (refer to [`IUI_FONT` and `IUI_MODE`](install.md#terminals)). Pages are at most 4096 px tall. With tmux or screen on the remote computer, no pictures show.
 - **The `auto` theme** reads the settings of iTerm2, Ghostty, kitty, Rio and cmux directly (in herdr, those of the terminal around herdr). It does not read kitty's `globinclude`, `envinclude` and `geninclude` lines, or colours set while kitty runs. In other terminals it uses `COLORFGBG` (set only when the terminal starts), then the OS appearance (on Linux, the desktop portal or the GNOME setting). A theme change in such a terminal that does not change the OS appearance is not seen. Changes show within 3 s.
 
 ### herdr
@@ -68,7 +68,7 @@
 - **Background with `auto`.** The mod asks herdr for the background (OSC 11) only at the start and when you change to a different herdr client (with `herdr --remote`, only at the start). Between those times, a background change shows only if the terminal's config or the OS appearance changes too.
 - **The background question can take a key.** It reads the tty for up to 0.3 s, and Claude Code reads the same tty. A key, a dialog answer, Esc or a mouse report in that moment can go to the mod and be lost. The mod does not ask within 2 s of a key in the prompt, but it cannot see dialog keys or mouse reports. A theme other than `auto` stops the question.
 - **Which terminal gives the font.** On macOS, the herdr client in the terminal app in front (if that app has several, the one you typed in last). If the app in front is not a terminal with a client, the mod keeps the one it used before. On Linux, the client where you typed last, which is not always the one you look at. A change shows within 1 s (on Linux up to about 9 s; a newly attached client up to 10 s).
-- **When the client is not found.** With `herdr --remote`, the client is on another computer, so there is no terminal font, as over ssh. If the mod cannot read the processes (`ps`), it uses the variables of the terminal that started the herdr server. On Linux with several named herdr sessions, `lsof` cannot tell them apart, so the mod can pick a client of a different session.
+- **When the client is not found.** With `herdr --remote`, the client is on another computer, so there is no terminal font, as over ssh (set `IUI_FONT`). If the mod cannot read the processes (`ps`), it uses the variables of the terminal that started the herdr server. On Linux with several named herdr sessions, `lsof` cannot tell them apart, so the mod can pick a client of a different session.
 - **Variables on macOS** come from `ps eww`, which does not mark where a value ends. A value of a different variable that contains text such as ` TERM=` can leak part of itself into a terminal variable. Linux reads `/proc/<pid>/environ` and does not have this problem.
 
 ### herdr in iTerm2

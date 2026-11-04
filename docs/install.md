@@ -18,6 +18,10 @@
 - **ssh:** works when your local terminal is kitty or Ghostty (`TERM` must come through ssh), or when you set `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` on the remote computer. Pictures go as data, so a page over 4096 pixels on a side or over 2 MiB shows as text, and an image that large does not show.
 - **tmux and screen:** no pictures. Claude Code does not send pictures through them, even with the variable set. Set `IUI_FORCE=1` to try anyway.
 - **`IUI_INLINE`:** `IUI_INLINE=1` sends pictures as data, as over ssh; `IUI_INLINE=0` makes the terminal read the files, also over ssh. With no value, the mod sends data only over ssh (`SSH_CONNECTION` or `SSH_TTY`).
+- **`IUI_FONT` and `IUI_MODE`:** over ssh, and with `herdr --remote`, the mod cannot read your terminal's font or its background. Name them in the shell start file of the remote computer (for example `~/.bashrc`):
+  - `export IUI_FONT="JetBrains Mono"`: the terminal font. It must be installed on the remote computer, because Typst draws there.
+  - `export IUI_MODE=dark`: `light` or `dark`, for Claude Code's `auto` theme.
+  - The mod uses them only where it cannot read the terminal. On your own computer, the terminal's settings win. `/iui details` shows `terminal font JetBrains Mono (IUI_FONT)` and `mode dark (auto, from IUI_MODE)`.
 - **Warp and WezTerm (not yet):** they do not draw kitty pictures with Unicode placeholders. Support comes when [warpdotdev/warp#16312](https://github.com/warpdotdev/warp/pull/16312) and [wezterm/wezterm#7924](https://github.com/wezterm/wezterm/pull/7924) are merged.
 - **Not supported:** Konsole (no Unicode placeholders), Alacritty, Terminal.app, Windows Terminal, GNOME Terminal and other VTE terminals, foot, VS Code, Tabby, Hyper and JetBrains terminals (no kitty pictures).
 - **Background sessions** (agent view, forks, `claude attach`): no pictures by default. A background session has the variables of the daemon, not of your terminal. Set `IUI_FORCE=1` in the session's environment to try. When the terminal is on another computer, also set `IUI_INLINE=1` (the daemon has no `SSH_CONNECTION`).

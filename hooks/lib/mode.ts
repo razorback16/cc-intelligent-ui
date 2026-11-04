@@ -21,7 +21,7 @@ export function settingOf(value: unknown): ThemeSetting {
 // The OS appearance, and where it was read.
 export type HostMode = {
   mode: IuiTheme
-  source: 'terminal' | 'herdr' | 'iTerm2' | 'Ghostty' | 'cmux' | 'kitty' | 'Rio' | 'macOS' | 'GNOME' | 'desktop portal' | 'COLORFGBG'
+  source: 'terminal' | 'herdr' | 'iTerm2' | 'Ghostty' | 'cmux' | 'kitty' | 'Rio' | 'macOS' | 'GNOME' | 'desktop portal' | 'COLORFGBG' | 'IUI_MODE'
   detail?: string
 }
 
@@ -58,6 +58,12 @@ export function modeOfColorFgBg(value: string | undefined): IuiTheme | null {
   if ((bg >= 0 && bg <= 6) || bg === 8) return 'dark'
   if (bg === 7 || bg === 15) return 'light'
   return null
+}
+
+// IUI_MODE: light or dark; null for anything else.
+export const modeOfVar = (value: string | undefined): IuiTheme | null => {
+  const v = (value ?? '').trim().toLowerCase()
+  return v === 'light' || v === 'dark' ? v : null
 }
 
 // The mode to draw: a fixed setting as set; auto as the OS is, dark when it
