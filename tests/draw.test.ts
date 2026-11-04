@@ -19,11 +19,12 @@ test('tmux and screen draw no pictures, even with the engine forced; only IUI_FO
   expect(canDrawIn({ ...base, tmux: true, modForced: true })).toBe(true)
 })
 
-test('a background session draws pictures only with IUI_FORCE, also with tmux in its TERM', () => {
+test('a background session draws pictures only with IUI_FORCE and CLAUDE_CODE_FORCE_TERMINAL_IMAGES, also with tmux in its TERM', () => {
   expect(canDrawIn({ ...base, program: 'ghostty', background: true })).toBe(false)
   expect(canDrawIn({ ...base, term: 'xterm-kitty', background: true, engineForced: true })).toBe(false)
-  expect(canDrawIn({ ...base, term: 'xterm-kitty', background: true, modForced: true })).toBe(true)
-  expect(canDrawIn({ ...base, term: 'tmux-256color', tmux: true, background: true, modForced: true })).toBe(true)
+  expect(canDrawIn({ ...base, term: 'xterm-kitty', kitty: true, background: true, modForced: true })).toBe(false)
+  expect(canDrawIn({ ...base, background: true, modForced: true, engineForced: true })).toBe(true)
+  expect(canDrawIn({ ...base, term: 'tmux-256color', tmux: true, background: true, modForced: true, engineForced: true })).toBe(true)
 })
 
 test('pictures go as bytes over ssh, or as IUI_INLINE says when it is set', () => {
@@ -298,8 +299,8 @@ const props = (text: string) => ({ text, isFirstOfReply: true }) as any
 const images = (tree: any): any[] =>
   tree && typeof tree === 'object' ? [...(tree.type === 'Image' ? [tree] : []), ...(tree.children ?? []).flatMap(images)] : []
 
-test('in a background session with IUI_FORCE and IUI_INLINE, a page goes as PNG bytes', async ($, on) => {
-  const { clock } = world(on, { CLAUDE_CODE_SESSION_KIND: 'bg', TERM: 'tmux-256color', IUI_FORCE: '1', IUI_INLINE: '1' })
+test('in a background session with IUI_FORCE, CLAUDE_CODE_FORCE_TERMINAL_IMAGES and IUI_INLINE, a page goes as PNG bytes', async ($, on) => {
+  const { clock } = world(on, { CLAUDE_CODE_SESSION_KIND: 'bg', TERM: 'tmux-256color', IUI_FORCE: '1', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1', IUI_INLINE: '1' })
   const ran = await $.command.run({ command: 'iui', args: 'details' } as any)
   expect(ran.text).toContain('sent as bytes: IUI_INLINE')
   const ui = await $.ui.mount(message('bg-1', 'Some **bold** text.'))

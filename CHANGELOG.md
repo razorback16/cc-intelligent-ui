@@ -12,7 +12,7 @@ All releases of Intelligent UI for Claude Code (`cc-intelligent-ui`). Claude Cod
 
 ### Fixed
 
-- **Background sessions with `IUI_FORCE=1`.** A background session (`claude --bg`, `claude attach`) now tries to show pictures when `IUI_FORCE=1` is set, also when the daemon started in tmux. Before, it never showed pictures. ([#2](https://github.com/razorback16/cc-intelligent-ui/issues/2))
+- **Background sessions with `IUI_FORCE=1`.** A background session (`claude --bg`, `claude attach`) now shows pictures when `IUI_FORCE=1` and `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` are set, also when the daemon started in tmux. Without both, answers stay text, because Claude Code draws no pictures there. Before, it never showed pictures. ([#2](https://github.com/razorback16/cc-intelligent-ui/issues/2))
 
 ## 0.3.4 (2026-10-25)
 

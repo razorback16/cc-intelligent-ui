@@ -1162,7 +1162,7 @@ export const register: Register = on => {
         ? `this terminal draws pictures${ready.inline ? (S.isRemote ? ' (over ssh, sent as bytes)' : ' (sent as bytes: IUI_INLINE)') : ''}`
         : S.isHerdr && S.setupNeeded
         ? 'Claude Code draws no pictures in herdr until CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 is set when it starts (run /iui setup), so answers stay text'
-        : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+, Rio 0.5.27+ and herdr with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; in tmux, screen or a background session only with IUI_FORCE=1; not in WezTerm, Warp, Konsole or others), so answers stay text'
+        : 'Claude Code draws no pictures here (it does in kitty and Ghostty, in iTerm2 3.6+, Rio 0.5.27+ and herdr with CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1, over ssh when TERM names kitty or Ghostty or with that variable; in tmux or screen only with IUI_FORCE=1, in a background session only with IUI_FORCE=1 and CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1; not in WezTerm, Warp, Konsole or others), so answers stay text'
       // In herdr: its version, the terminal it runs in and where that came from (and flip mode).
       const herdr = S.isHerdr ? `terminal ${herdrText(S.herdrVersion, S.herdrHost, S.herdrClient ? (S.herdrBy === 'front' ? 'front' : 'client') : 'server', isFlipHere(ready))}: ` : ''
       await clipWayReady()

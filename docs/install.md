@@ -24,7 +24,7 @@
   - The mod uses them only where it cannot read the terminal. On your own computer, the terminal's settings win. `/iui details` shows `terminal font JetBrains Mono (IUI_FONT)` and `mode dark (auto, from IUI_MODE)`.
 - **Warp and WezTerm (not yet):** they do not draw kitty pictures with Unicode placeholders. Support comes when [warpdotdev/warp#16312](https://github.com/warpdotdev/warp/pull/16312) and [wezterm/wezterm#7924](https://github.com/wezterm/wezterm/pull/7924) are merged.
 - **Not supported:** Konsole (no Unicode placeholders), Alacritty, Terminal.app, Windows Terminal, GNOME Terminal and other VTE terminals, foot, VS Code, Tabby, Hyper and JetBrains terminals (no kitty pictures).
-- **Background sessions** (agent view, forks, `claude attach`): no pictures by default. A background session has the variables of the daemon, not of your terminal. Set `IUI_FORCE=1` in the session's environment to try. When the terminal is on another computer, also set `IUI_INLINE=1` (the daemon has no `SSH_CONNECTION`).
+- **Background sessions** (agent view, forks, `claude attach`): no pictures by default. A background session has the variables of the daemon, not of your terminal. A background session runs with `TERM=xterm-256color`, so Claude Code draws pictures there only with `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1`. Set it and `IUI_FORCE=1` where the daemon starts (the first `claude --bg` or `claude agents` starts it, and a running daemon keeps its variables: `claude daemon stop --any` stops it). When the terminal is on another computer, also set `IUI_INLINE=1` (the daemon has no `SSH_CONNECTION`).
 
 Where pictures cannot show, you see the normal text. `/iui details` tells you why.
 

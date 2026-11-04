@@ -282,13 +282,16 @@ export function needsSetup(o: { iterm: boolean; herdr: boolean; draws: boolean; 
 // Whether the engine draws pictures here; elsewhere an Image shows only its
 // alt, so the text is better. Claude Code turns kitty graphics on by itself
 // only for kitty and Ghostty; any other terminal draws only when
-// CLAUDE_CODE_FORCE_TERMINAL_IMAGES is set. In a background session (its
-// variables are the daemon's), tmux or screen (the engine does not wrap them
-// for passthrough) only IUI_FORCE tries. Over ssh
+// CLAUDE_CODE_FORCE_TERMINAL_IMAGES is set. A background session runs with
+// TERM=xterm-256color (its other variables are the daemon's), so the engine
+// draws there only with that variable, and the mod only with IUI_FORCE too.
+// In tmux or screen (the engine does not wrap them for passthrough) only
+// IUI_FORCE tries. Over ssh
 // TERM_PROGRAM and KITTY_WINDOW_ID do not come through, so TERM tells; the
 // pictures then go as bytes (Env.inline), as the terminal can't read our files.
 export function canDrawIn(env: { program: string; term: string; kitty: boolean; tmux: boolean; ssh: boolean; background: boolean; engineForced: boolean; modForced: boolean }): boolean {
-  if (env.background || env.tmux) return env.modForced
+  if (env.background) return env.modForced && env.engineForced
+  if (env.tmux) return env.modForced
   if (env.engineForced || env.modForced) return true
   if (env.ssh) return /ghostty|kitty/i.test(env.term)
   return /ghostty/i.test(env.program + env.term) || /kitty/i.test(env.term) || env.kitty
